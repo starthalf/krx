@@ -550,6 +550,32 @@ export default function Wizard() {
             <h2 className="text-xl font-bold text-slate-900">세부 설정</h2>
             <p className="text-slate-600">Cascading 및 공통 KPI를 설정합니다</p>
 
+            {/* Cascading 시각화 섹션 추가 */}
+            <div className="bg-white border border-slate-200 rounded-lg p-6 mb-6">
+              <h3 className="font-semibold text-slate-900 mb-4">Cascading 확인 (Alignment)</h3>
+              <div className="flex items-center justify-between bg-slate-50 rounded-lg p-4">
+                <div className="flex items-center gap-4 flex-1">
+                  <div className="bg-white border border-slate-200 rounded p-3 shadow-sm">
+                    <div className="text-xs text-slate-500 mb-1">상위 조직 (전사)</div>
+                    <div className="font-medium text-slate-900">지속적 규모성장</div>
+                  </div>
+                  <div className="flex flex-col items-center">
+                    <span className="text-xs text-blue-600 font-medium mb-1">Full (전체계승)</span>
+                    <div className="w-16 h-px bg-blue-300 relative">
+                      <div className="absolute right-0 top-1/2 -translate-y-1/2 w-2 h-2 border-t border-r border-blue-300 rotate-45"></div>
+                    </div>
+                  </div>
+                  <div className="bg-blue-50 border border-blue-200 rounded p-3 shadow-sm">
+                    <div className="text-xs text-blue-600 mb-1">우리 조직 (마케팅본부)</div>
+                    <div className="font-medium text-slate-900">매출 목표달성도</div>
+                  </div>
+                </div>
+                <button className="px-3 py-1.5 border border-slate-300 bg-white text-slate-700 rounded text-sm hover:bg-slate-50">
+                  🔄 연결 수정
+                </button>
+              </div>
+            </div>
+
             <div className="bg-slate-50 border border-slate-200 rounded-lg p-6">
               <h3 className="font-semibold text-slate-900 mb-4">공통 KPI (감점형)</h3>
               <div className="space-y-2">
