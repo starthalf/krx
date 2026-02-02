@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { ChevronLeft, ChevronRight, Bot, Target, RefreshCw } from 'lucide-react';
-import { getBIIColor } from '../utils/helpers';
+import { ChevronLeft, ChevronRight, Bot, Target, RefreshCw, Pencil, Trash2, ChevronDown, BookOpen, Plus } from 'lucide-react';
+import { getBIIColor, getKPICategoryColor } from '../utils/helpers';
 import type { BIIType } from '../types';
 
 interface ObjectiveCandidate {
@@ -11,11 +11,33 @@ interface ObjectiveCandidate {
   selected: boolean;
 }
 
+interface KRCandidate {
+  id: string;
+  objectiveId: string;
+  name: string;
+  definition: string;
+  formula: string;
+  unit: string;
+  weight: number;
+  targetValue: number;
+  biiType: BIIType;
+  kpiCategory: '전략' | '고유업무' | '공통';
+  perspective: '재무' | '고객' | '프로세스' | '학습성장';
+  indicatorType: '투입' | '과정' | '산출' | '결과';
+  measurementCycle: '월' | '분기' | '반기' | '연';
+  previousYear: number;
+  poolMatch: number;
+  gradeCriteria: { S: number; A: number; B: number; C: number; D: number };
+  quarterlyTargets: { Q1: number; Q2: number; Q3: number; Q4: number };
+}
+
 export default function Wizard() {
   const [currentStep, setCurrentStep] = useState(0);
   const [showOneClickModal, setShowOneClickModal] = useState(true);
   const [isAIGenerating, setIsAIGenerating] = useState(false);
   const [mission, setMission] = useState('고객 중심의 마케팅 전략을 통한 시장 점유율 확대');
+  const [selectedObjectiveTab, setSelectedObjectiveTab] = useState('1');
+  const [expandedKR, setExpandedKR] = useState<string | null>(null);
 
   const [objectives, setObjectives] = useState<ObjectiveCandidate[]>([
     { id: '1', name: '시장 선도형 신제품 수주 확대를 통한 매출 성장 달성', biiType: 'Improve', perspective: '재무', selected: true },
@@ -24,6 +46,69 @@ export default function Wizard() {
     { id: '4', name: '디지털 마케팅 채널 다각화', biiType: 'Build', perspective: '고객', selected: false },
     { id: '5', name: '브랜드 인지도 제고를 통한 시장 확대', biiType: 'Improve', perspective: '고객', selected: false },
   ]);
+
+  const [krs, setKrs] = useState<KRCandidate[]>([
+    {
+      id: 'kr-1', objectiveId: '1', name: '매출 목표달성도', definition: '사업계획 대비 실제 매출 달성 정도',
+      formula: '당해년도 매출액 / 계획상 매출액 × 100', unit: '억원', weight: 25, targetValue: 3528,
+      biiType: 'Improve', kpiCategory: '전략', perspective: '재무', indicatorType: '결과', measurementCycle: '월',
+      previousYear: 3200, poolMatch: 96,
+      gradeCriteria: { S: 4234, A: 3881, B: 3528, C: 3175, D: 0 },
+      quarterlyTargets: { Q1: 843, Q2: 953, Q3: 868, Q4: 864 }
+    },
+    {
+      id: 'kr-2', objectiveId: '1', name: '영업이익액', definition: '매출에서 영업비용을 제외한 순이익',
+      formula: '영업이익액 실적', unit: '억원', weight: 20, targetValue: 287,
+      biiType: 'Improve', kpiCategory: '전략', perspective: '재무', indicatorType: '결과', measurementCycle: '월',
+      previousYear: 260, poolMatch: 92,
+      gradeCriteria: { S: 344, A: 316, B: 287, C: 258, D: 0 },
+      quarterlyTargets: { Q1: 68, Q2: 75, Q3: 72, Q4: 72 }
+    },
+    {
+      id: 'kr-3', objectiveId: '1', name: '수주금액', definition: '신규 계약 체결 금액의 합계',
+      formula: '신규 계약 금액의 총합', unit: '억원', weight: 15, targetValue: 3555,
+      biiType: 'Improve', kpiCategory: '전략', perspective: '고객', indicatorType: '결과', measurementCycle: '월',
+      previousYear: 3230, poolMatch: 88,
+      gradeCriteria: { S: 4266, A: 3911, B: 3555, C: 3200, D: 0 },
+      quarterlyTargets: { Q1: 850, Q2: 960, Q3: 875, Q4: 870 }
+    },
+    {
+      id: 'kr-4', objectiveId: '2', name: '매출채권회전일', definition: '매출채권이 현금으로 회수되는데 걸리는 평균 일수',
+      formula: '(평균 매출채권 / 매출액) × 365', unit: '일', weight: 15, targetValue: 46,
+      biiType: 'Innovate', kpiCategory: '고유업무', perspective: '프로세스', indicatorType: '결과', measurementCycle: '월',
+      previousYear: 52, poolMatch: 94,
+      gradeCriteria: { S: 37, A: 41, B: 46, C: 51, D: 999 },
+      quarterlyTargets: { Q1: 46, Q2: 46, Q3: 46, Q4: 46 }
+    },
+    {
+      id: 'kr-5', objectiveId: '2', name: '중점거래처 품목증가율', definition: '주요 거래처 대상 신규 품목 계약 확대',
+      formula: '정성 마일스톤 기반 평가', unit: '%', weight: 10, targetValue: 100,
+      biiType: 'Innovate', kpiCategory: '전략', perspective: '고객', indicatorType: '과정', measurementCycle: '분기',
+      previousYear: 0, poolMatch: 0,
+      gradeCriteria: { S: 120, A: 110, B: 100, C: 80, D: 0 },
+      quarterlyTargets: { Q1: 25, Q2: 50, Q3: 75, Q4: 100 }
+    },
+    {
+      id: 'kr-6', objectiveId: '3', name: '인재유지율', definition: '핵심 인재의 조직 잔류율',
+      formula: '(기말 인원 / 기초 인원) × 100', unit: '%', weight: 5, targetValue: 95,
+      biiType: 'Build', kpiCategory: '공통', perspective: '학습성장', indicatorType: '결과', measurementCycle: '월',
+      previousYear: 93, poolMatch: 98,
+      gradeCriteria: { S: 98, A: 96, B: 95, C: 93, D: 0 },
+      quarterlyTargets: { Q1: 95, Q2: 95, Q3: 95, Q4: 95 }
+    },
+    {
+      id: 'kr-7', objectiveId: '3', name: '교육이수율', definition: '필수 교육과정 이수 완료율',
+      formula: '(교육 이수 인원 / 전체 인원) × 100', unit: '%', weight: 5, targetValue: 100,
+      biiType: 'Build', kpiCategory: '공통', perspective: '학습성장', indicatorType: '결과', measurementCycle: '월',
+      previousYear: 88, poolMatch: 95,
+      gradeCriteria: { S: 110, A: 105, B: 100, C: 90, D: 0 },
+      quarterlyTargets: { Q1: 25, Q2: 50, Q3: 75, Q4: 100 }
+    },
+  ]);
+
+  const updateKRWeight = (krId: string, newWeight: number) => {
+    setKrs(krs.map(kr => kr.id === krId ? { ...kr, weight: newWeight } : kr));
+  };
 
   const steps = [
     { id: 0, name: '전략방향', description: '전사 전략 및 조직 미션 확인' },
@@ -259,13 +344,202 @@ export default function Wizard() {
         {currentStep === 2 && (
           <div className="space-y-6">
             <h2 className="text-xl font-bold text-slate-900">KR(핵심결과) 설정</h2>
-            <p className="text-slate-600">목표별 핵심 결과 지표를 정의합니다</p>
 
-            <div className="bg-gradient-to-br from-blue-50 to-violet-50 border border-blue-200 rounded-xl p-6 text-center">
-              <Bot className="w-12 h-12 text-blue-600 mx-auto mb-3" />
-              <p className="text-slate-700">AI가 선택된 목표를 기반으로 최적의 KR을 생성합니다</p>
-              <button className="mt-4 px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium">
-                KR 자동 생성
+            <div className="flex gap-2 border-b border-slate-200">
+              {objectives.filter(o => o.selected).map((obj, idx) => (
+                <button
+                  key={obj.id}
+                  onClick={() => setSelectedObjectiveTab(obj.id)}
+                  className={`px-4 py-3 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                    selectedObjectiveTab === obj.id
+                      ? 'border-blue-600 text-blue-600'
+                      : 'border-transparent text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  목표{idx + 1} {selectedObjectiveTab === obj.id ? '●' : '○'}
+                </button>
+              ))}
+            </div>
+
+            <div className="space-y-4">
+              {krs.filter(kr => kr.objectiveId === selectedObjectiveTab).map((kr) => {
+                const biiColor = getBIIColor(kr.biiType);
+                const categoryColor = getKPICategoryColor(kr.kpiCategory);
+                const isExpanded = expandedKR === kr.id;
+
+                return (
+                  <div key={kr.id} className="border border-slate-200 rounded-xl p-5 bg-white">
+                    <div className="flex items-start justify-between mb-4">
+                      <div className="flex items-center gap-3">
+                        <input type="checkbox" defaultChecked className="w-4 h-4 rounded border-slate-300 text-blue-600" />
+                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${biiColor.bg} ${biiColor.text}`}>
+                          {kr.biiType}
+                        </span>
+                        <h3 className="font-semibold text-slate-900">{kr.name}</h3>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-slate-600">가중치 {kr.weight}%</span>
+                        <span className={`px-2 py-1 rounded text-xs font-medium border ${categoryColor}`}>
+                          {kr.kpiCategory}
+                        </span>
+                        <button className="p-1 hover:bg-slate-100 rounded"><Pencil className="w-4 h-4 text-slate-500" /></button>
+                        <button className="p-1 hover:bg-slate-100 rounded"><Trash2 className="w-4 h-4 text-slate-500" /></button>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4 mb-4 text-sm">
+                      <div>
+                        <span className="text-slate-500">정의:</span>
+                        <span className="ml-2 text-slate-700">{kr.definition}</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-500">산식:</span>
+                        <span className="ml-2 text-slate-700">{kr.formula}</span>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-4 gap-4 mb-4">
+                      <div>
+                        <label className="block text-xs text-slate-500 mb-1">목표값</label>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="number"
+                            value={kr.targetValue}
+                            className="w-24 border border-slate-300 rounded px-2 py-1 text-sm"
+                            readOnly
+                          />
+                          <span className="text-sm text-slate-600">{kr.unit}</span>
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-xs text-slate-500 mb-1">유형</label>
+                        <select className="w-full border border-slate-300 rounded px-2 py-1 text-sm" value={kr.indicatorType}>
+                          <option>투입</option><option>과정</option><option>산출</option><option>결과</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs text-slate-500 mb-1">측정주기</label>
+                        <select className="w-full border border-slate-300 rounded px-2 py-1 text-sm" value={kr.measurementCycle}>
+                          <option>월</option><option>분기</option><option>반기</option><option>연</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs text-slate-500 mb-1">관점</label>
+                        <select className="w-full border border-slate-300 rounded px-2 py-1 text-sm" value={kr.perspective}>
+                          <option>재무</option><option>고객</option><option>프로세스</option><option>학습성장</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="mb-4">
+                      <label className="block text-xs text-slate-500 mb-2">가중치</label>
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="range"
+                          min="0"
+                          max="50"
+                          value={kr.weight}
+                          onChange={(e) => updateKRWeight(kr.id, parseInt(e.target.value))}
+                          className="flex-1 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                        />
+                        <span className="text-sm font-medium text-slate-900 w-12">{kr.weight}%</span>
+                      </div>
+                    </div>
+
+                    <div className="flex gap-2 mb-4">
+                      <button
+                        onClick={() => setExpandedKR(isExpanded ? null : kr.id)}
+                        className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors flex items-center gap-1"
+                      >
+                        🎯 원클릭 목표설정
+                        <ChevronDown className={`w-4 h-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                      </button>
+                      <button className="px-3 py-1.5 border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors">
+                        📊 전년실적
+                      </button>
+                      <button className="px-3 py-1.5 border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors flex items-center gap-1">
+                        <Bot className="w-4 h-4" />
+                        AI가 완성해줘
+                      </button>
+                    </div>
+
+                    {isExpanded && (
+                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+                        <h4 className="font-semibold text-slate-900 mb-3">목표 자동 설정 결과</h4>
+                        <div className="grid grid-cols-2 gap-4 text-sm mb-3">
+                          <div>
+                            <span className="text-slate-600">📊 전년 실적:</span>
+                            <span className="ml-2 font-medium">{kr.previousYear.toLocaleString()}{kr.unit}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-600">📈 전사 성장 방침:</span>
+                            <span className="ml-2 font-medium text-green-600">+10%</span>
+                          </div>
+                        </div>
+                        <div className="space-y-2 text-sm mb-4">
+                          <div className="font-medium">목표(B등급): {kr.gradeCriteria.B.toLocaleString()}{kr.unit} (+{((kr.gradeCriteria.B / kr.previousYear - 1) * 100).toFixed(1)}%)</div>
+                          <div className="grid grid-cols-2 gap-2 text-xs text-slate-600">
+                            <div>S등급: {kr.gradeCriteria.S.toLocaleString()}{kr.unit}↑</div>
+                            <div>A등급: {kr.gradeCriteria.A.toLocaleString()}~{kr.gradeCriteria.S.toLocaleString()}{kr.unit}</div>
+                            <div>B등급: {kr.gradeCriteria.B.toLocaleString()}~{kr.gradeCriteria.A.toLocaleString()}{kr.unit}</div>
+                            <div>C등급: {kr.gradeCriteria.C.toLocaleString()}~{kr.gradeCriteria.B.toLocaleString()}{kr.unit}</div>
+                          </div>
+                        </div>
+                        <div className="text-sm mb-4">
+                          <span className="text-slate-600">분기 배분:</span>
+                          <span className="ml-2">
+                            Q1: {kr.quarterlyTargets.Q1}{kr.unit} | Q2: {kr.quarterlyTargets.Q2}{kr.unit} | Q3: {kr.quarterlyTargets.Q3}{kr.unit} | Q4: {kr.quarterlyTargets.Q4}{kr.unit}
+                          </span>
+                        </div>
+                        <div className="flex gap-2">
+                          <button className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">
+                            ✅ 적용하기
+                          </button>
+                          <button className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">
+                            수정하기
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {kr.poolMatch > 0 && (
+                      <div className="text-xs text-slate-500">
+                        출처: KPI Pool 매칭 (적합도 {kr.poolMatch}%)
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
+              <div className="flex items-center justify-between">
+                <div className="text-sm">
+                  <span className="text-purple-700 font-medium">전략 {krs.filter(k => k.kpiCategory === '전략').reduce((s, k) => s + k.weight, 0)}%</span>
+                  <span className="mx-2 text-slate-400">+</span>
+                  <span className="text-blue-700 font-medium">고유업무 {krs.filter(k => k.kpiCategory === '고유업무').reduce((s, k) => s + k.weight, 0)}%</span>
+                  <span className="mx-2 text-slate-400">+</span>
+                  <span className="text-slate-700 font-medium">공통 {krs.filter(k => k.kpiCategory === '공통').reduce((s, k) => s + k.weight, 0)}%</span>
+                  <span className="mx-2">=</span>
+                  <span className={`font-bold ${krs.reduce((s, k) => s + k.weight, 0) === 100 ? 'text-green-600' : 'text-red-600'}`}>
+                    {krs.reduce((s, k) => s + k.weight, 0)}% {krs.reduce((s, k) => s + k.weight, 0) === 100 ? '✅' : '❌'}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-2">
+              <button className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors text-sm font-medium flex items-center gap-2">
+                <Plus className="w-4 h-4" />
+                KR 추가
+              </button>
+              <button className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors text-sm font-medium flex items-center gap-2">
+                <RefreshCw className="w-4 h-4" />
+                AI 재추천
+              </button>
+              <button className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors text-sm font-medium flex items-center gap-2">
+                <BookOpen className="w-4 h-4" />
+                Pool에서 선택
               </button>
             </div>
           </div>
@@ -303,11 +577,13 @@ export default function Wizard() {
             <div className="grid grid-cols-4 gap-4">
               <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-center">
                 <div className="text-sm text-green-600 mb-1">BII 밸런스</div>
-                <div className="text-xs text-green-700">B:1 I:1 Im:3</div>
+                <div className="text-xs text-green-700">
+                  B:{krs.filter(k => k.biiType === 'Build').length} I:{krs.filter(k => k.biiType === 'Innovate').length} Im:{krs.filter(k => k.biiType === 'Improve').length}
+                </div>
               </div>
               <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-center">
                 <div className="text-sm text-green-600 mb-1">가중치 합계</div>
-                <div className="text-lg font-bold text-green-700">100%</div>
+                <div className="text-lg font-bold text-green-700">{krs.reduce((s, k) => s + k.weight, 0)}% ✅</div>
               </div>
               <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-center">
                 <div className="text-sm text-green-600 mb-1">Alignment</div>
@@ -315,8 +591,81 @@ export default function Wizard() {
               </div>
               <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-center">
                 <div className="text-sm text-green-600 mb-1">BII 체크리스트</div>
-                <div className="text-xs text-green-700">평균 10.2/12</div>
+                <div className="text-xs text-green-700">평균 10.2/12 ✅</div>
               </div>
+            </div>
+
+            <div className="border border-slate-200 rounded-xl overflow-hidden">
+              <table className="w-full">
+                <thead className="bg-slate-50 border-b border-slate-200">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-600 uppercase">목표</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-600 uppercase">KR</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-slate-600 uppercase">가중치</th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-slate-600 uppercase">목표값</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-slate-600 uppercase">등급구간</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-slate-600 uppercase">BII</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-slate-600 uppercase">유형</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200">
+                  {objectives.filter(o => o.selected).map((obj) => {
+                    const objKrs = krs.filter(kr => kr.objectiveId === obj.id);
+                    return objKrs.map((kr, idx) => {
+                      const biiColor = getBIIColor(kr.biiType);
+                      const categoryColor = getKPICategoryColor(kr.kpiCategory);
+                      return (
+                        <tr key={kr.id} className="hover:bg-slate-50">
+                          <td className="px-4 py-3 text-sm text-slate-700">
+                            {idx === 0 ? obj.name.substring(0, 20) + '...' : ''}
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="text-sm font-medium text-slate-900">{kr.name}</div>
+                            <div className="text-xs text-slate-500">{kr.definition.substring(0, 30)}...</div>
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <span className="text-sm font-semibold text-slate-900">{kr.weight}%</span>
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <span className="text-sm font-medium text-slate-900">{kr.targetValue.toLocaleString()}</span>
+                            <span className="text-xs text-slate-500 ml-1">{kr.unit}</span>
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <div className="text-xs text-slate-600">
+                              <span className="text-blue-600">S:{kr.gradeCriteria.S}</span>
+                              <span className="mx-1">/</span>
+                              <span className="text-green-600">A:{kr.gradeCriteria.A}</span>
+                              <span className="mx-1">/</span>
+                              <span className="text-lime-600">B:{kr.gradeCriteria.B}</span>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${biiColor.bg} ${biiColor.text}`}>
+                              {kr.biiType}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <span className={`px-2 py-1 rounded text-xs font-medium border ${categoryColor}`}>
+                              {kr.kpiCategory}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    });
+                  })}
+                </tbody>
+                <tfoot className="bg-slate-50 border-t border-slate-200">
+                  <tr>
+                    <td colSpan={2} className="px-4 py-3 text-sm font-medium text-slate-700">합계</td>
+                    <td className="px-4 py-3 text-center">
+                      <span className="text-sm font-bold text-green-600">{krs.reduce((s, k) => s + k.weight, 0)}%</span>
+                    </td>
+                    <td colSpan={4} className="px-4 py-3 text-right text-sm text-slate-600">
+                      총 {krs.length}개 KR
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
             </div>
 
             <div className="flex gap-3">
@@ -324,10 +673,13 @@ export default function Wizard() {
                 ✅ KR 세트 확정
               </button>
               <button className="px-6 border border-slate-300 text-slate-700 rounded-lg py-3 font-medium hover:bg-slate-50 transition-colors">
-                📨 리뷰 요청
+                📨 리뷰 요청 발송
               </button>
               <button className="px-6 border border-slate-300 text-slate-700 rounded-lg py-3 font-medium hover:bg-slate-50 transition-colors">
                 📥 엑셀 다운로드
+              </button>
+              <button className="px-6 border border-slate-300 text-slate-700 rounded-lg py-3 font-medium hover:bg-slate-50 transition-colors">
+                🔄 하위조직 Cascading
               </button>
             </div>
           </div>
