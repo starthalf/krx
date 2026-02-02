@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { ChevronLeft, ChevronRight, Bot, Target, RefreshCw, Pencil, Trash2, ChevronDown, BookOpen, Plus } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { ChevronLeft, ChevronRight, Bot, Target, RefreshCw, Pencil, Trash2, ChevronDown, BookOpen, Plus, X, ArrowLeft } from 'lucide-react';
 import { getBIIColor, getKPICategoryColor } from '../utils/helpers';
 import type { BIIType } from '../types';
 
@@ -32,6 +33,7 @@ interface KRCandidate {
 }
 
 export default function Wizard() {
+  const navigate = useNavigate();
   const [currentStep, setCurrentStep] = useState(0);
   const [showOneClickModal, setShowOneClickModal] = useState(true);
   const [isAIGenerating, setIsAIGenerating] = useState(false);
@@ -146,9 +148,32 @@ export default function Wizard() {
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
+      {/* 뒤로가기 헤더 추가 */}
+      {!showOneClickModal && (
+        <div className="flex items-center gap-4 mb-6">
+          <button 
+            onClick={() => navigate(-1)}
+            className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-600"
+            title="뒤로 가기"
+          >
+            <ArrowLeft className="w-6 h-6" />
+          </button>
+          <h1 className="text-2xl font-bold text-slate-900">목표 수립</h1>
+        </div>
+      )}
+
       {showOneClickModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-2xl p-8 max-w-3xl w-full mx-4">
+          <div className="bg-white rounded-2xl p-8 max-w-3xl w-full mx-4 relative">
+            {/* 모달 닫기 버튼 추가 */}
+            <button 
+              onClick={() => navigate(-1)}
+              className="absolute top-6 right-6 text-slate-400 hover:text-slate-600 transition-colors"
+              title="닫기"
+            >
+              <X className="w-6 h-6" />
+            </button>
+
             <h2 className="text-2xl font-bold text-slate-900 mb-6">마케팅본부 목표 수립</h2>
             <p className="text-slate-600 mb-6">어떤 방법으로 수립하시겠습니까?</p>
 
