@@ -1,0 +1,723 @@
+import type { Company, Organization, Objective, DynamicKR, CFRThread, ActivityFeedItem, PoolKPI } from '../types';
+
+export const mockCompany: Company = {
+  id: 'company-1',
+  name: '테크스타트업 주식회사',
+  industry: 'IT서비스',
+  size: 150,
+  fiscalYear: '2025',
+  vision: '글로벌 IT 서비스 선도 기업',
+  strategy: '디지털 혁신을 통한 지속 가능한 성장과 고객 가치 창출'
+};
+
+export const mockOrganizations: Organization[] = [
+  {
+    id: 'org-ceo',
+    companyId: 'company-1',
+    name: '전사',
+    level: '전사',
+    parentOrgId: null,
+    orgType: 'Middle',
+    mission: '지속적인 혁신과 성장을 통한 시장 리더십 확보',
+    functionTags: ['경영전략', '전사관리'],
+    headcount: 150
+  },
+  {
+    id: 'org-marketing',
+    companyId: 'company-1',
+    name: '마케팅본부',
+    level: '본부',
+    parentOrgId: 'org-ceo',
+    orgType: 'Front',
+    mission: '고객 중심의 마케팅 전략을 통한 시장 점유율 확대',
+    functionTags: ['마케팅', '브랜딩', '고객관리'],
+    headcount: 30
+  },
+  {
+    id: 'org-marketing-plan',
+    companyId: 'company-1',
+    name: '마케팅기획팀',
+    level: '팀',
+    parentOrgId: 'org-marketing',
+    orgType: 'Front',
+    mission: '데이터 기반 마케팅 전략 수립 및 실행',
+    functionTags: ['마케팅기획', '시장조사'],
+    headcount: 10
+  },
+  {
+    id: 'org-marketing-digital',
+    companyId: 'company-1',
+    name: '디지털마케팅팀',
+    level: '팀',
+    parentOrgId: 'org-marketing',
+    orgType: 'Front',
+    mission: '디지털 채널을 통한 고객 확보 및 브랜드 인지도 제고',
+    functionTags: ['디지털마케팅', 'SNS', '콘텐츠'],
+    headcount: 8
+  },
+  {
+    id: 'org-sales',
+    companyId: 'company-1',
+    name: '영업본부',
+    level: '본부',
+    parentOrgId: 'org-ceo',
+    orgType: 'Front',
+    mission: '고객 가치 기반 영업 활동을 통한 매출 성장',
+    functionTags: ['영업', '수주', '고객관리'],
+    headcount: 40
+  },
+  {
+    id: 'org-sales-1',
+    companyId: 'company-1',
+    name: '영업1팀',
+    level: '팀',
+    parentOrgId: 'org-sales',
+    orgType: 'Front',
+    mission: '주요 고객사 대상 맞춤형 솔루션 영업',
+    functionTags: ['영업', 'B2B'],
+    headcount: 15
+  },
+  {
+    id: 'org-sales-2',
+    companyId: 'company-1',
+    name: '영업2팀',
+    level: '팀',
+    parentOrgId: 'org-sales',
+    orgType: 'Front',
+    mission: '신규 시장 개척 및 고객 발굴',
+    functionTags: ['영업', '신규고객'],
+    headcount: 12
+  },
+  {
+    id: 'org-sales-plan',
+    companyId: 'company-1',
+    name: '영업기획팀',
+    level: '팀',
+    parentOrgId: 'org-sales',
+    orgType: 'Middle',
+    mission: '영업 전략 수립 및 성과 관리',
+    functionTags: ['영업기획', '성과관리'],
+    headcount: 5
+  },
+  {
+    id: 'org-rnd',
+    companyId: 'company-1',
+    name: 'R&D본부',
+    level: '본부',
+    parentOrgId: 'org-ceo',
+    orgType: 'Middle',
+    mission: '혁신적인 기술 개발을 통한 경쟁력 강화',
+    functionTags: ['연구개발', '기술혁신'],
+    headcount: 35
+  },
+  {
+    id: 'org-rnd-1',
+    companyId: 'company-1',
+    name: '개발1팀',
+    level: '팀',
+    parentOrgId: 'org-rnd',
+    orgType: 'Middle',
+    mission: '핵심 플랫폼 개발 및 고도화',
+    functionTags: ['소프트웨어개발', '플랫폼'],
+    headcount: 15
+  },
+  {
+    id: 'org-rnd-2',
+    companyId: 'company-1',
+    name: '개발2팀',
+    level: '팀',
+    parentOrgId: 'org-rnd',
+    orgType: 'Middle',
+    mission: '신규 서비스 개발 및 기술 검증',
+    functionTags: ['소프트웨어개발', '신규서비스'],
+    headcount: 12
+  },
+  {
+    id: 'org-production',
+    companyId: 'company-1',
+    name: '생산본부',
+    level: '본부',
+    parentOrgId: 'org-ceo',
+    orgType: 'Back',
+    mission: '안정적인 서비스 운영 및 품질 관리',
+    functionTags: ['운영', '품질관리'],
+    headcount: 25
+  },
+  {
+    id: 'org-production-1',
+    companyId: 'company-1',
+    name: '생산1팀',
+    level: '팀',
+    parentOrgId: 'org-production',
+    orgType: 'Back',
+    mission: '서비스 안정성 확보 및 효율적 운영',
+    functionTags: ['서비스운영', '인프라'],
+    headcount: 12
+  },
+  {
+    id: 'org-production-quality',
+    companyId: 'company-1',
+    name: '품질관리팀',
+    level: '팀',
+    parentOrgId: 'org-production',
+    orgType: 'Back',
+    mission: '서비스 품질 향상 및 고객 만족도 제고',
+    functionTags: ['품질관리', 'QA'],
+    headcount: 8
+  },
+  {
+    id: 'org-support',
+    companyId: 'company-1',
+    name: '경영지원실',
+    level: '실',
+    parentOrgId: 'org-ceo',
+    orgType: 'Back',
+    mission: '효율적인 경영 지원을 통한 조직 역량 강화',
+    functionTags: ['경영지원', '인사', '재경', 'IT'],
+    headcount: 20
+  },
+  {
+    id: 'org-support-hr',
+    companyId: 'company-1',
+    name: '인사팀',
+    level: '팀',
+    parentOrgId: 'org-support',
+    orgType: 'Back',
+    mission: '우수 인재 확보 및 조직 문화 혁신',
+    functionTags: ['인사', '채용', '교육'],
+    headcount: 6
+  },
+  {
+    id: 'org-support-finance',
+    companyId: 'company-1',
+    name: '재경팀',
+    level: '팀',
+    parentOrgId: 'org-support',
+    orgType: 'Back',
+    mission: '건전한 재무 구조 확립 및 효율적 자원 배분',
+    functionTags: ['재무', '회계', '예산'],
+    headcount: 8
+  },
+  {
+    id: 'org-support-it',
+    companyId: 'company-1',
+    name: 'IT팀',
+    level: '팀',
+    parentOrgId: 'org-support',
+    orgType: 'Back',
+    mission: 'IT 인프라 안정화 및 디지털 혁신 지원',
+    functionTags: ['IT', '인프라', '보안'],
+    headcount: 6
+  }
+];
+
+export const mockObjectives: Objective[] = [
+  {
+    id: 'obj-marketing-1',
+    orgId: 'org-marketing',
+    name: '시장 선도형 신제품 수주 확대를 통한 매출 성장 달성',
+    biiType: 'Improve',
+    period: '2025-H1',
+    status: 'active',
+    parentObjId: null,
+    order: 1
+  },
+  {
+    id: 'obj-marketing-2',
+    orgId: 'org-marketing',
+    name: '고객 중심 영업 프로세스 혁신',
+    biiType: 'Innovate',
+    period: '2025-H1',
+    status: 'active',
+    parentObjId: null,
+    order: 2
+  },
+  {
+    id: 'obj-marketing-3',
+    orgId: 'org-marketing',
+    name: '조직 역량 강화 기반 구축',
+    biiType: 'Build',
+    period: '2025-H1',
+    status: 'active',
+    parentObjId: null,
+    order: 3
+  }
+];
+
+export const mockKRs: DynamicKR[] = [
+  {
+    id: 'kr-1',
+    objectiveId: 'obj-marketing-1',
+    orgId: 'org-marketing',
+    name: '매출 목표달성도',
+    definition: '사업계획 대비 실제 매출 달성 정도',
+    formula: '당해년도 매출액 / 계획상 매출액 × 100',
+    unit: '억원',
+    weight: 25,
+    targetValue: 3528,
+    currentValue: 2896,
+    progressPct: 82,
+    biiType: 'Improve',
+    biiScore: 10,
+    kpiCategory: '전략',
+    perspective: '재무',
+    indicatorType: '결과',
+    measurementCycle: '월',
+    gradeCriteria: {
+      S: 4234,
+      A: 3881,
+      B: 3528,
+      C: 3175,
+      D: 0
+    },
+    quarterlyTargets: { Q1: 843, Q2: 953, Q3: 868, Q4: 864 },
+    quarterlyActuals: { Q1: 843, Q2: 953, Q3: null, Q4: null },
+    cascadingType: 'Full',
+    parentKrId: null,
+    poolKpiId: 'pool-1',
+    status: 'active',
+    dataSource: 'auto',
+    dataSourceDetail: '구글시트 연동'
+  },
+  {
+    id: 'kr-2',
+    objectiveId: 'obj-marketing-1',
+    orgId: 'org-marketing',
+    name: '영업이익액',
+    definition: '매출에서 영업비용을 제외한 순이익',
+    formula: '영업이익액 실적',
+    unit: '억원',
+    weight: 20,
+    targetValue: 287,
+    currentValue: 198,
+    progressPct: 69,
+    biiType: 'Improve',
+    biiScore: 9,
+    kpiCategory: '전략',
+    perspective: '재무',
+    indicatorType: '결과',
+    measurementCycle: '월',
+    gradeCriteria: {
+      S: 344,
+      A: 316,
+      B: 287,
+      C: 258,
+      D: 0
+    },
+    quarterlyTargets: { Q1: 68, Q2: 75, Q3: 72, Q4: 72 },
+    quarterlyActuals: { Q1: 65, Q2: 70, Q3: null, Q4: null },
+    cascadingType: null,
+    parentKrId: null,
+    poolKpiId: 'pool-2',
+    status: 'active',
+    dataSource: 'auto',
+    dataSourceDetail: 'ERP 연동'
+  },
+  {
+    id: 'kr-3',
+    objectiveId: 'obj-marketing-1',
+    orgId: 'org-marketing',
+    name: '수주금액',
+    definition: '신규 계약 체결 금액의 합계',
+    formula: '신규 계약 금액의 총합',
+    unit: '억원',
+    weight: 15,
+    targetValue: 3555,
+    currentValue: 3200,
+    progressPct: 90,
+    biiType: 'Improve',
+    biiScore: 11,
+    kpiCategory: '전략',
+    perspective: '고객',
+    indicatorType: '결과',
+    measurementCycle: '월',
+    gradeCriteria: {
+      S: 4266,
+      A: 3911,
+      B: 3555,
+      C: 3200,
+      D: 0
+    },
+    quarterlyTargets: { Q1: 850, Q2: 960, Q3: 875, Q4: 870 },
+    quarterlyActuals: { Q1: 850, Q2: 960, Q3: null, Q4: null },
+    cascadingType: null,
+    parentKrId: null,
+    poolKpiId: 'pool-3',
+    status: 'active',
+    dataSource: 'manual'
+  },
+  {
+    id: 'kr-4',
+    objectiveId: 'obj-marketing-2',
+    orgId: 'org-marketing',
+    name: '매출채권회전일',
+    definition: '매출채권이 현금으로 회수되는데 걸리는 평균 일수',
+    formula: '(평균 매출채권 / 매출액) × 365',
+    unit: '일',
+    weight: 15,
+    targetValue: 46,
+    currentValue: 46,
+    progressPct: 100,
+    biiType: 'Improve',
+    biiScore: 10,
+    kpiCategory: '고유업무',
+    perspective: '프로세스',
+    indicatorType: '결과',
+    measurementCycle: '월',
+    gradeCriteria: {
+      S: 37,
+      A: 41,
+      B: 46,
+      C: 51,
+      D: 999
+    },
+    quarterlyTargets: { Q1: 46, Q2: 46, Q3: 46, Q4: 46 },
+    quarterlyActuals: { Q1: 47, Q2: 45, Q3: null, Q4: null },
+    cascadingType: null,
+    parentKrId: null,
+    poolKpiId: 'pool-4',
+    status: 'active',
+    dataSource: 'auto',
+    dataSourceDetail: 'ERP 연동'
+  },
+  {
+    id: 'kr-5',
+    objectiveId: 'obj-marketing-2',
+    orgId: 'org-marketing',
+    name: '중점거래처 품목증가율',
+    definition: '주요 거래처 대상 신규 품목 계약 확대',
+    formula: '정성 마일스톤 기반 평가',
+    unit: '%',
+    weight: 10,
+    targetValue: 100,
+    currentValue: 40,
+    progressPct: 40,
+    biiType: 'Innovate',
+    biiScore: 8,
+    kpiCategory: '전략',
+    perspective: '고객',
+    indicatorType: '과정',
+    measurementCycle: '분기',
+    gradeCriteria: {
+      S: 120,
+      A: 110,
+      B: 100,
+      C: 80,
+      D: 0
+    },
+    quarterlyTargets: { Q1: 25, Q2: 50, Q3: 75, Q4: 100 },
+    quarterlyActuals: { Q1: 25, Q2: 40, Q3: null, Q4: null },
+    cascadingType: null,
+    parentKrId: null,
+    poolKpiId: null,
+    status: 'active',
+    dataSource: 'manual',
+    milestones: [
+      { id: 'm1', text: '핵심 거래처 10사 선정', quarter: 'Q1', completed: true },
+      { id: 'm2', text: '품목 분석 완료', quarter: 'Q1', completed: true },
+      { id: 'm3', text: '맞춤 제안서 작성', quarter: 'Q2', completed: false },
+      { id: 'm4', text: '신규 품목 계약', quarter: 'Q3', completed: false },
+      { id: 'm5', text: '성과 모니터링', quarter: 'Q4', completed: false }
+    ]
+  },
+  {
+    id: 'kr-6',
+    objectiveId: 'obj-marketing-3',
+    orgId: 'org-marketing',
+    name: '인재유지율',
+    definition: '핵심 인재의 조직 잔류율',
+    formula: '(기말 인원 / 기초 인원) × 100',
+    unit: '%',
+    weight: 5,
+    targetValue: 95,
+    currentValue: 96,
+    progressPct: 101,
+    biiType: 'Build',
+    biiScore: 11,
+    kpiCategory: '공통',
+    perspective: '학습성장',
+    indicatorType: '결과',
+    measurementCycle: '월',
+    gradeCriteria: {
+      S: 98,
+      A: 96,
+      B: 95,
+      C: 93,
+      D: 0
+    },
+    quarterlyTargets: { Q1: 95, Q2: 95, Q3: 95, Q4: 95 },
+    quarterlyActuals: { Q1: 96, Q2: 96, Q3: null, Q4: null },
+    cascadingType: null,
+    parentKrId: null,
+    poolKpiId: 'pool-5',
+    status: 'active',
+    dataSource: 'auto',
+    dataSourceDetail: '인사시스템 연동'
+  },
+  {
+    id: 'kr-7',
+    objectiveId: 'obj-marketing-3',
+    orgId: 'org-marketing',
+    name: '교육이수율',
+    definition: '필수 교육과정 이수 완료율',
+    formula: '(교육 이수 인원 / 전체 인원) × 100',
+    unit: '%',
+    weight: 5,
+    targetValue: 100,
+    currentValue: 85,
+    progressPct: 85,
+    biiType: 'Build',
+    biiScore: 9,
+    kpiCategory: '공통',
+    perspective: '학습성장',
+    indicatorType: '결과',
+    measurementCycle: '월',
+    gradeCriteria: {
+      S: 110,
+      A: 105,
+      B: 100,
+      C: 90,
+      D: 0
+    },
+    quarterlyTargets: { Q1: 25, Q2: 50, Q3: 75, Q4: 100 },
+    quarterlyActuals: { Q1: 20, Q2: 42, Q3: null, Q4: null },
+    cascadingType: null,
+    parentKrId: null,
+    poolKpiId: 'pool-6',
+    status: 'active',
+    dataSource: 'auto',
+    dataSourceDetail: 'LMS 연동'
+  }
+];
+
+export const mockCFRThreads: CFRThread[] = [
+  {
+    id: 'cfr-1',
+    krId: 'kr-1',
+    type: 'Feedback',
+    content: 'Q2 매출 호조 추세입니다. 하반기 전략고객 확대가 핵심입니다.',
+    author: '김팀장',
+    createdAt: '2025-03-10T14:30:00'
+  },
+  {
+    id: 'cfr-2',
+    krId: 'kr-1',
+    type: 'Recognition',
+    content: '분기 목표 조기 달성 축하합니다!',
+    author: '박본부장',
+    createdAt: '2025-03-05T09:15:00'
+  },
+  {
+    id: 'cfr-3',
+    krId: 'kr-2',
+    type: 'Feedback',
+    content: '영업이익률 개선을 위해 원가 구조 점검이 필요합니다.',
+    author: '최이사',
+    createdAt: '2025-03-12T16:20:00'
+  },
+  {
+    id: 'cfr-4',
+    krId: 'kr-2',
+    type: 'Conversation',
+    content: '고마진 제품 비중 확대 전략을 추진 중입니다.',
+    author: '이과장',
+    createdAt: '2025-03-13T10:45:00'
+  }
+];
+
+export const mockActivityFeed: ActivityFeedItem[] = [
+  {
+    id: 'act-1',
+    type: 'checkin',
+    user: '홍길동',
+    message: '매출 목표달성도 체크인을 완료했습니다',
+    timestamp: '2시간 전'
+  },
+  {
+    id: 'act-2',
+    type: 'feedback',
+    user: '김팀장',
+    message: '영업이익액에 피드백을 남겼습니다',
+    timestamp: '5시간 전'
+  },
+  {
+    id: 'act-3',
+    type: 'checkin',
+    user: '이영희',
+    message: '교육이수율 체크인을 완료했습니다',
+    timestamp: '1일 전'
+  },
+  {
+    id: 'act-4',
+    type: 'status_change',
+    user: '박본부장',
+    message: 'Q2 OKR을 확정했습니다',
+    timestamp: '2일 전'
+  },
+  {
+    id: 'act-5',
+    type: 'feedback',
+    user: '최이사',
+    message: '매출채권회전일에 피드백을 남겼습니다',
+    timestamp: '3일 전'
+  }
+];
+
+export const mockPoolKPIs: PoolKPI[] = [
+  {
+    id: 'pool-1',
+    name: '매출 목표달성도',
+    definition: '사업계획 대비 실제 매출 달성 정도',
+    formula: '당해년도 매출액 / 계획상 매출액 × 100',
+    functionTags: ['영업', '마케팅'],
+    industryTags: ['IT서비스', '제조업'],
+    orgLevelTags: ['본부', '팀'],
+    perspective: '재무',
+    indicatorType: '결과',
+    unit: '%',
+    usageCount: 24
+  },
+  {
+    id: 'pool-2',
+    name: '영업이익률',
+    definition: '매출액 대비 영업이익의 비율',
+    formula: '(영업이익 / 매출액) × 100',
+    functionTags: ['재경', '기획'],
+    industryTags: ['IT서비스', '제조업'],
+    orgLevelTags: ['전사', '본부'],
+    perspective: '재무',
+    indicatorType: '결과',
+    unit: '%',
+    usageCount: 32
+  },
+  {
+    id: 'pool-3',
+    name: '수주금액',
+    definition: '신규 계약 체결 금액의 합계',
+    formula: '신규 계약 금액의 총합',
+    functionTags: ['영업'],
+    industryTags: ['IT서비스', '제조업', '건설'],
+    orgLevelTags: ['본부', '팀'],
+    perspective: '고객',
+    indicatorType: '결과',
+    unit: '억원',
+    usageCount: 28
+  },
+  {
+    id: 'pool-4',
+    name: '매출채권회전일',
+    definition: '매출채권이 현금으로 회수되는데 걸리는 평균 일수',
+    formula: '(평균 매출채권 / 매출액) × 365',
+    functionTags: ['재경', '영업'],
+    industryTags: ['IT서비스', '제조업'],
+    orgLevelTags: ['전사', '본부'],
+    perspective: '재무',
+    indicatorType: '결과',
+    unit: '일',
+    usageCount: 18
+  },
+  {
+    id: 'pool-5',
+    name: '인재유지율',
+    definition: '핵심 인재의 조직 잔류율',
+    formula: '(기말 인원 / 기초 인원) × 100',
+    functionTags: ['인사'],
+    industryTags: ['전산업'],
+    orgLevelTags: ['전사', '본부', '팀'],
+    perspective: '학습성장',
+    indicatorType: '결과',
+    unit: '%',
+    usageCount: 45
+  },
+  {
+    id: 'pool-6',
+    name: '교육이수율',
+    definition: '필수 교육과정 이수 완료율',
+    formula: '(교육 이수 인원 / 전체 인원) × 100',
+    functionTags: ['인사'],
+    industryTags: ['전산업'],
+    orgLevelTags: ['전사', '본부', '팀'],
+    perspective: '학습성장',
+    indicatorType: '결과',
+    unit: '%',
+    usageCount: 52
+  },
+  {
+    id: 'pool-7',
+    name: '납기 준수율',
+    definition: '고객 요청 납기 대비 실제 납기 준수 비율',
+    formula: '(납품 준수 건수 / 총 납품 건수) × 100',
+    functionTags: ['구매', '생산'],
+    industryTags: ['제조업'],
+    orgLevelTags: ['본부', '팀'],
+    perspective: '고객',
+    indicatorType: '결과',
+    unit: '%',
+    usageCount: 24
+  },
+  {
+    id: 'pool-8',
+    name: '생산성',
+    definition: '투입 대비 산출의 효율성',
+    formula: '산출량 / 투입량',
+    functionTags: ['생산'],
+    industryTags: ['제조업'],
+    orgLevelTags: ['본부', '팀'],
+    perspective: '프로세스',
+    indicatorType: '결과',
+    unit: '개/시간',
+    usageCount: 31
+  },
+  {
+    id: 'pool-9',
+    name: '고객 클레임 건수',
+    definition: '고객으로부터 접수된 품질 불만 건수',
+    formula: '클레임 접수 건수',
+    functionTags: ['품질', '고객서비스'],
+    industryTags: ['제조업', 'IT서비스'],
+    orgLevelTags: ['본부', '팀'],
+    perspective: '고객',
+    indicatorType: '결과',
+    unit: '건',
+    usageCount: 27
+  },
+  {
+    id: 'pool-10',
+    name: '신제품 매출 비율',
+    definition: '전체 매출 중 신제품 매출이 차지하는 비율',
+    formula: '(신제품 매출 / 전체 매출) × 100',
+    functionTags: ['R&D', '마케팅'],
+    industryTags: ['IT서비스', '제조업'],
+    orgLevelTags: ['전사', '본부'],
+    perspective: '학습성장',
+    indicatorType: '결과',
+    unit: '%',
+    usageCount: 19
+  },
+  {
+    id: 'pool-11',
+    name: '브랜드 인지도',
+    definition: '목표 고객층의 브랜드 인지 수준',
+    formula: '인지도 조사 점수',
+    functionTags: ['마케팅'],
+    industryTags: ['IT서비스', '제조업', '유통'],
+    orgLevelTags: ['전사', '본부'],
+    perspective: '고객',
+    indicatorType: '결과',
+    unit: '점',
+    usageCount: 15
+  },
+  {
+    id: 'pool-12',
+    name: '고객 만족도',
+    definition: '고객 만족도 조사 결과',
+    formula: 'NPS 또는 CSAT 점수',
+    functionTags: ['마케팅', '고객서비스'],
+    industryTags: ['전산업'],
+    orgLevelTags: ['전사', '본부'],
+    perspective: '고객',
+    indicatorType: '결과',
+    unit: '점',
+    usageCount: 38
+  }
+];
