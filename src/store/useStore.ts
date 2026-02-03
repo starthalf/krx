@@ -1,90 +1,87 @@
+// src/store/useStore.ts
 import { create } from 'zustand';
+import { supabase } from '../lib/supabase';
 import type { Company, Organization, Objective, DynamicKR, CFRThread, ActivityFeedItem, PoolKPI } from '../types';
-import { mockCompany, mockOrganizations, mockObjectives, mockKRs, mockCFRThreads, mockActivityFeed, mockPoolKPIs } from '../data/mockData';
 
 interface AppState {
-  company: Company;
+  // State
   organizations: Organization[];
   objectives: Objective[];
   krs: DynamicKR[];
-  cfrThreads: CFRThread[];
-  activityFeed: ActivityFeedItem[];
-  poolKPIs: PoolKPI[];
-  currentPeriod: string;
-  selectedOrgId: string | null;
+  loading: boolean;
 
-  setCurrentPeriod: (period: string) => void;
-  setSelectedOrgId: (orgId: string | null) => void;
-
+  // Actions
+  fetchOrganizations: (companyId: string) => Promise<void>;
+  updateOrganization: (orgId: string, updates: Partial<Organization>) => Promise<void>;
+  
+  // 기타 필요한 상태들 (일단 빈 배열/함수로 초기화)
+  company: Company | null;
   getOrgById: (orgId: string) => Organization | undefined;
-  getObjectivesByOrgId: (orgId: string) => Objective[];
-  getKRsByOrgId: (orgId: string) => DynamicKR[];
-  getKRsByObjectiveId: (objectiveId: string) => DynamicKR[];
-  getCFRsByKRId: (krId: string) => CFRThread[];
-
-  updateKR: (krId: string, updates: Partial<DynamicKR>) => void;
-  addCFRThread: (thread: CFRThread) => void;
-  updateOrganization: (orgId: string, updates: Partial<Organization>) => void;
-  addObjective: (objective: Objective) => void;
-  addKR: (kr: DynamicKR) => void;
 }
 
 export const useStore = create<AppState>((set, get) => ({
-  company: mockCompany,
-  organizations: mockOrganizations,
-  objectives: mockObjectives,
-  krs: mockKRs,
-  cfrThreads: mockCFRThreads,
-  activityFeed: mockActivityFeed,
-  poolKPIs: mockPoolKPIs,
-  currentPeriod: '2025-H1',
-  selectedOrgId: 'org-marketing',
+  // 1. 초기값: 빈 배열로 시작
+  organizations: [],
+  objectives: [],
+  krs: [],
+  loading: false,
+  company: null,
 
-  setCurrentPeriod: (period) => set({ currentPeriod: period }),
-  setSelectedOrgId: (orgId) => set({ selectedOrgId: orgId }),
+  // 2. 조직 목록 조회 (Supabase)
+  fetchOrganizations: async (companyId: string) => {
+    set({ loading: true });
+    
+    const { data, error } = await supabase
+      .from('organizations')
+      .select('*')
+      .eq('company_id', companyId)
+      .order('sort_order', { ascending: true });
 
-  getOrgById: (orgId) => {
-    return get().organizations.find(org => org.id === orgId);
+    if (error) {
+      console.error('조직 목록 조회 실패:', error);
+    } else if (data) {
+      // DB(snake_case) -> App(camelCase) 매핑
+      const mappedOrgs: Organization[] = data.map(org => ({
+        id: org.id,
+        companyId: org.company_id,
+        name: org.name,
+        level: org.level,
+        parentOrgId: org.parent_org_id,
+        orgType: org.org_type,
+        mission: org.mission || '',
+        functionTags: org.function_tags || [],
+        headcount: org.headcount || 0,
+        // children은 UI에서 계산하므로 빈 배열
+      }));
+      set({ organizations: mappedOrgs });
+    }
+    set({ loading: false });
   },
 
-  getObjectivesByOrgId: (orgId) => {
-    return get().objectives.filter(obj => obj.orgId === orgId);
-  },
+  // 3. 조직 정보 수정 (Supabase + Optimistic Update)
+  updateOrganization: async (orgId, updates) => {
+    // DB 업데이트용 객체 변환 (camelCase -> snake_case)
+    const dbUpdates: any = { updated_at: new Date().toISOString() };
+    if (updates.name) dbUpdates.name = updates.name;
+    if (updates.level) dbUpdates.level = updates.level;
+    if (updates.orgType) dbUpdates.org_type = updates.orgType;
+    if (updates.mission) dbUpdates.mission = updates.mission;
+    if (updates.functionTags) dbUpdates.function_tags = updates.functionTags;
+    if (updates.headcount) dbUpdates.headcount = updates.headcount;
 
-  getKRsByOrgId: (orgId) => {
-    return get().krs.filter(kr => kr.orgId === orgId);
-  },
+    // 1) Supabase 업데이트
+    const { error } = await supabase
+      .from('organizations')
+      .update(dbUpdates)
+      .eq('id', orgId);
 
-  getKRsByObjectiveId: (objectiveId) => {
-    return get().krs.filter(kr => kr.objectiveId === objectiveId);
-  },
+    if (error) {
+      console.error('조직 수정 실패:', error);
+      alert('저장 중 오류가 발생했습니다.');
+      return; 
+    }
 
-  getCFRsByKRId: (krId) => {
-    return get().cfrThreads.filter(cfr => cfr.krId === krId);
-  },
-
-  updateKR: (krId, updates) => {
-    set(state => ({
-      krs: state.krs.map(kr =>
-        kr.id === krId ? { ...kr, ...updates } : kr
-      )
-    }));
-  },
-
-  addCFRThread: (thread) => {
-    set(state => ({
-      cfrThreads: [...state.cfrThreads, thread],
-      activityFeed: [{
-        id: `act-${Date.now()}`,
-        type: 'feedback',
-        user: thread.author,
-        message: `${thread.type === 'Feedback' ? '피드백을' : '메시지를'} 남겼습니다`,
-        timestamp: '방금 전'
-      }, ...state.activityFeed]
-    }));
-  },
-
-  updateOrganization: (orgId, updates) => {
+    // 2) 성공 시 로컬 상태 업데이트
     set(state => ({
       organizations: state.organizations.map(org =>
         org.id === orgId ? { ...org, ...updates } : org
@@ -92,15 +89,5 @@ export const useStore = create<AppState>((set, get) => ({
     }));
   },
 
-  addObjective: (objective) => {
-    set(state => ({
-      objectives: [...state.objectives, objective]
-    }));
-  },
-
-  addKR: (kr) => {
-    set(state => ({
-      krs: [...state.krs, kr]
-    }));
-  }
+  getOrgById: (orgId) => get().organizations.find(org => org.id === orgId),
 }));
