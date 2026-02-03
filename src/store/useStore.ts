@@ -1,267 +1,515 @@
 // src/store/useStore.ts
 import { create } from 'zustand';
 import { supabase } from '../lib/supabase';
-import type { Company, Organization, Objective, DynamicKR, CFRThread, ActivityFeedItem, PoolKPI } from '../types';
+import type { 
+  Company, 
+  Organization, 
+  Objective, 
+  DynamicKR, 
+  CFRThread 
+} from '../types';
 
 interface AppState {
-  // State
+  // ==================== State ====================
+  company: Company | null;
   organizations: Organization[];
   objectives: Objective[];
   krs: DynamicKR[];
   loading: boolean;
-  company: Company | null;
+  error: string | null;
 
-  // Actions
+  // ==================== Company ====================
+  setCompany: (company: Company) => void;
+
+  // ==================== Organizations ====================
   fetchOrganizations: (companyId: string) => Promise<void>;
+  addOrganization: (org: Omit<Organization, 'id' | 'children'>) => Promise<void>;
   updateOrganization: (orgId: string, updates: Partial<Organization>) => Promise<void>;
+  deleteOrganization: (orgId: string) => Promise<void>;
   
+  // ==================== Objectives ====================
   fetchObjectives: (orgId: string) => Promise<void>;
   addObjective: (objective: Omit<Objective, 'id'>) => Promise<void>;
   updateObjective: (objId: string, updates: Partial<Objective>) => Promise<void>;
   deleteObjective: (objId: string) => Promise<void>;
 
-  fetchKRs: (orgId: string) => Promise<void>; // 조직 단위 조회로 변경 (효율성 위함)
-  addKR: (kr: Omit<DynamicKR, 'id'>) => Promise<void>;
+  // ==================== Key Results ====================
+  fetchKRs: (orgId: string) => Promise<void>;
+  addKR: (kr: Omit<DynamicKR, 'id' | 'progressPct' | 'grade' | 'milestones'>) => Promise<void>;
   updateKR: (krId: string, updates: Partial<DynamicKR>) => Promise<void>;
   deleteKR: (krId: string) => Promise<void>;
 
+  // ==================== Getters ====================
   getOrgById: (orgId: string) => Organization | undefined;
   getObjectivesByOrgId: (orgId: string) => Objective[];
   getKRsByObjectiveId: (objId: string) => DynamicKR[];
+  getKRsByOrgId: (orgId: string) => DynamicKR[];
 }
 
 export const useStore = create<AppState>((set, get) => ({
+  // ==================== Initial State ====================
+  company: null,
   organizations: [],
   objectives: [],
   krs: [],
   loading: false,
-  company: null,
+  error: null,
 
-  // ----------------------------------------------------
-  // 1. Organization
-  // ----------------------------------------------------
+  // ==================== Company ====================
+  setCompany: (company) => set({ company }),
+
+  // ==================== Organizations ====================
   fetchOrganizations: async (companyId) => {
-    set({ loading: true });
-    const { data } = await supabase
-      .from('organizations')
-      .select('*')
-      .eq('company_id', companyId)
-      .order('sort_order');
+    console.log('🔄 fetchOrganizations called with:', companyId);
+    set({ loading: true, error: null });
+    
+    try {
+      const { data, error } = await supabase
+        .from('organizations')
+        .select('*')
+        .eq('company_id', companyId)
+        .order('sort_order');
       
-    if (data) {
-      set({ organizations: data.map(org => ({
-        id: org.id,
-        companyId: org.company_id,
-        name: org.name,
-        level: org.level,
-        parentOrgId: org.parent_org_id,
-        orgType: org.org_type,
-        mission: org.mission || '',
-        functionTags: org.function_tags || [],
-        headcount: org.headcount || 0,
-        children: []
-      }))});
+      if (error) throw error;
+      
+      console.log('✅ Fetched organizations:', data?.length);
+      
+      if (data) {
+        const organizations: Organization[] = data.map(org => ({
+          id: org.id,
+          companyId: org.company_id,
+          name: org.name,
+          level: org.level,
+          parentOrgId: org.parent_org_id || null,
+          orgType: org.org_type,
+          mission: org.mission || '',
+          functionTags: org.function_tags || [],
+          headcount: org.headcount || 0,
+          children: [] // 트리 구조는 UI에서 계산
+        }));
+        
+        set({ organizations });
+      }
+    } catch (error: any) {
+      console.error('❌ fetchOrganizations error:', error);
+      set({ error: error.message });
+    } finally {
+      set({ loading: false });
     }
-    set({ loading: false });
+  },
+
+  addOrganization: async (org) => {
+    console.log('➕ addOrganization:', org.name);
+    try {
+      const { data, error } = await supabase
+        .from('organizations')
+        .insert({
+          company_id: org.companyId,
+          name: org.name,
+          level: org.level,
+          parent_org_id: org.parentOrgId,
+          org_type: org.orgType,
+          mission: org.mission,
+          function_tags: org.functionTags,
+          headcount: org.headcount,
+          sort_order: 0
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      if (data) {
+        const newOrg: Organization = {
+          id: data.id,
+          companyId: data.company_id,
+          name: data.name,
+          level: data.level,
+          parentOrgId: data.parent_org_id,
+          orgType: data.org_type,
+          mission: data.mission || '',
+          functionTags: data.function_tags || [],
+          headcount: data.headcount || 0,
+          children: []
+        };
+        
+        set(state => ({
+          organizations: [...state.organizations, newOrg]
+        }));
+        
+        console.log('✅ Organization added');
+      }
+    } catch (error: any) {
+      console.error('❌ addOrganization error:', error);
+      set({ error: error.message });
+    }
   },
 
   updateOrganization: async (orgId, updates) => {
-    const dbUpdates: any = { updated_at: new Date().toISOString() };
-    if (updates.name) dbUpdates.name = updates.name;
-    if (updates.level) dbUpdates.level = updates.level;
-    if (updates.orgType) dbUpdates.org_type = updates.orgType;
-    if (updates.mission) dbUpdates.mission = updates.mission;
-    if (updates.functionTags) dbUpdates.function_tags = updates.functionTags;
-    if (updates.headcount) dbUpdates.headcount = updates.headcount;
+    console.log('✏️ updateOrganization:', orgId, updates);
+    try {
+      const dbUpdates: any = { updated_at: new Date().toISOString() };
+      
+      if (updates.name !== undefined) dbUpdates.name = updates.name;
+      if (updates.level !== undefined) dbUpdates.level = updates.level;
+      if (updates.orgType !== undefined) dbUpdates.org_type = updates.orgType;
+      if (updates.mission !== undefined) dbUpdates.mission = updates.mission;
+      if (updates.functionTags !== undefined) dbUpdates.function_tags = updates.functionTags;
+      if (updates.headcount !== undefined) dbUpdates.headcount = updates.headcount;
+      if (updates.parentOrgId !== undefined) dbUpdates.parent_org_id = updates.parentOrgId;
 
-    const { error } = await supabase.from('organizations').update(dbUpdates).eq('id', orgId);
-    if (!error) {
+      const { error } = await supabase
+        .from('organizations')
+        .update(dbUpdates)
+        .eq('id', orgId);
+
+      if (error) throw error;
+
       set(state => ({
-        organizations: state.organizations.map(o => o.id === orgId ? { ...o, ...updates } : o)
+        organizations: state.organizations.map(org =>
+          org.id === orgId ? { ...org, ...updates } : org
+        )
       }));
+
+      console.log('✅ Organization updated');
+    } catch (error: any) {
+      console.error('❌ updateOrganization error:', error);
+      set({ error: error.message });
     }
   },
 
-  // ----------------------------------------------------
-  // 2. Objective (목표)
-  // ----------------------------------------------------
-  fetchObjectives: async (orgId) => {
-    const { data } = await supabase
-      .from('objectives')
-      .select('*')
-      .eq('org_id', orgId)
-      .order('sort_order');
+  deleteOrganization: async (orgId) => {
+    console.log('🗑️ deleteOrganization:', orgId);
+    try {
+      const { error } = await supabase
+        .from('organizations')
+        .delete()
+        .eq('id', orgId);
 
-    if (data) {
-      set({ objectives: data.map(obj => ({
-        id: obj.id,
-        orgId: obj.org_id,
-        name: obj.name,
-        biiType: obj.bii_type,
-        period: obj.period,
-        status: obj.status,
-        parentObjId: obj.parent_obj_id,
-        order: obj.sort_order
-      }))});
+      if (error) throw error;
+
+      set(state => ({
+        organizations: state.organizations.filter(org => org.id !== orgId)
+      }));
+
+      console.log('✅ Organization deleted');
+    } catch (error: any) {
+      console.error('❌ deleteOrganization error:', error);
+      set({ error: error.message });
+    }
+  },
+
+  // ==================== Objectives ====================
+  fetchObjectives: async (orgId) => {
+    console.log('🔄 fetchObjectives for org:', orgId);
+    try {
+      const { data, error } = await supabase
+        .from('objectives')
+        .select('*')
+        .eq('org_id', orgId)
+        .order('sort_order');
+
+      if (error) throw error;
+      
+      console.log('✅ Fetched objectives:', data?.length);
+
+      if (data) {
+        const objectives: Objective[] = data.map(obj => ({
+          id: obj.id,
+          orgId: obj.org_id,
+          name: obj.name,
+          biiType: obj.bii_type,
+          period: obj.period,
+          status: obj.status,
+          parentObjId: obj.parent_obj_id,
+          order: obj.sort_order
+        }));
+        
+        set({ objectives });
+      }
+    } catch (error: any) {
+      console.error('❌ fetchObjectives error:', error);
+      set({ error: error.message });
     }
   },
 
   addObjective: async (obj) => {
-    // DB Insert
-    const { data, error } = await supabase.from('objectives').insert({
-      org_id: obj.orgId,
-      name: obj.name,
-      bii_type: obj.biiType,
-      period: obj.period,
-      status: obj.status,
-      parent_obj_id: obj.parentObjId,
-      sort_order: obj.order
-    }).select().single();
+    console.log('➕ addObjective:', obj.name);
+    try {
+      const { data, error } = await supabase
+        .from('objectives')
+        .insert({
+          org_id: obj.orgId,
+          name: obj.name,
+          bii_type: obj.biiType,
+          period: obj.period || '2025-H1',
+          status: obj.status || 'draft',
+          parent_obj_id: obj.parentObjId,
+          sort_order: obj.order || 0
+        })
+        .select()
+        .single();
 
-    if (data) {
-      // 로컬 State 추가
-      const newObj: Objective = {
-        id: data.id,
-        orgId: data.org_id,
-        name: data.name,
-        biiType: data.bii_type,
-        period: data.period,
-        status: data.status,
-        parentObjId: data.parent_obj_id,
-        order: data.sort_order
-      };
-      set(state => ({ objectives: [...state.objectives, newObj] }));
+      if (error) throw error;
+
+      if (data) {
+        const newObj: Objective = {
+          id: data.id,
+          orgId: data.org_id,
+          name: data.name,
+          biiType: data.bii_type,
+          period: data.period,
+          status: data.status,
+          parentObjId: data.parent_obj_id,
+          order: data.sort_order
+        };
+        
+        set(state => ({
+          objectives: [...state.objectives, newObj]
+        }));
+        
+        console.log('✅ Objective added');
+      }
+    } catch (error: any) {
+      console.error('❌ addObjective error:', error);
+      set({ error: error.message });
     }
   },
 
   updateObjective: async (objId, updates) => {
-    const dbUpdates: any = { updated_at: new Date().toISOString() };
-    if (updates.name) dbUpdates.name = updates.name;
-    if (updates.status) dbUpdates.status = updates.status;
-    
-    const { error } = await supabase.from('objectives').update(dbUpdates).eq('id', objId);
-    if (!error) {
+    console.log('✏️ updateObjective:', objId, updates);
+    try {
+      const dbUpdates: any = { updated_at: new Date().toISOString() };
+      
+      if (updates.name !== undefined) dbUpdates.name = updates.name;
+      if (updates.status !== undefined) dbUpdates.status = updates.status;
+      if (updates.biiType !== undefined) dbUpdates.bii_type = updates.biiType;
+
+      const { error } = await supabase
+        .from('objectives')
+        .update(dbUpdates)
+        .eq('id', objId);
+
+      if (error) throw error;
+
       set(state => ({
-        objectives: state.objectives.map(o => o.id === objId ? { ...o, ...updates } : o)
+        objectives: state.objectives.map(obj =>
+          obj.id === objId ? { ...obj, ...updates } : obj
+        )
       }));
+
+      console.log('✅ Objective updated');
+    } catch (error: any) {
+      console.error('❌ updateObjective error:', error);
+      set({ error: error.message });
     }
   },
 
   deleteObjective: async (objId) => {
-    const { error } = await supabase.from('objectives').delete().eq('id', objId);
-    if (!error) {
+    console.log('🗑️ deleteObjective:', objId);
+    try {
+      const { error } = await supabase
+        .from('objectives')
+        .delete()
+        .eq('id', objId);
+
+      if (error) throw error;
+
       set(state => ({
-        objectives: state.objectives.filter(o => o.id !== objId)
+        objectives: state.objectives.filter(obj => obj.id !== objId)
       }));
+
+      console.log('✅ Objective deleted');
+    } catch (error: any) {
+      console.error('❌ deleteObjective error:', error);
+      set({ error: error.message });
     }
   },
 
-  // ----------------------------------------------------
-  // 3. Key Result (KR)
-  // ----------------------------------------------------
+  // ==================== Key Results ====================
   fetchKRs: async (orgId) => {
-    // 해당 조직의 모든 KR과 마일스톤을 가져옵니다.
-    const { data } = await supabase
-      .from('key_results')
-      .select(`
-        *,
-        milestones (*)
-      `)
-      .eq('org_id', orgId)
-      .order('created_at'); // 정렬 기준
+    console.log('🔄 fetchKRs for org:', orgId);
+    try {
+      const { data, error } = await supabase
+        .from('key_results')
+        .select(`
+          *,
+          milestones (*)
+        `)
+        .eq('org_id', orgId)
+        .order('created_at');
 
-    if (data) {
-      set({ krs: data.map((kr: any) => ({
-        id: kr.id,
-        objectiveId: kr.objective_id,
-        orgId: kr.org_id,
-        name: kr.name,
-        definition: kr.definition || '',
-        formula: kr.formula || '',
-        unit: kr.unit,
-        weight: kr.weight,
-        targetValue: kr.target_value,
-        currentValue: kr.current_value,
-        progressPct: kr.progress_pct || 0,
-        biiType: kr.bii_type,
-        biiScore: kr.bii_score || 0,
-        kpiCategory: kr.kpi_category,
-        perspective: kr.perspective,
-        indicatorType: kr.indicator_type,
-        measurementCycle: kr.measurement_cycle,
-        gradeCriteria: kr.grade_criteria,
-        quarterlyTargets: kr.quarterly_targets,
-        quarterlyActuals: kr.quarterly_actuals,
-        cascadingType: kr.cascading_type,
-        parentKrId: kr.parent_kr_id,
-        poolKpiId: kr.pool_kpi_id,
-        status: kr.status,
-        dataSource: kr.data_source,
-        dataSourceDetail: kr.data_source_detail,
-        milestones: kr.milestones ? kr.milestones.map((m: any) => ({
-          id: m.id,
-          text: m.text,
-          quarter: m.quarter,
-          completed: m.completed
-        })) : []
-      }))});
+      if (error) throw error;
+      
+      console.log('✅ Fetched KRs:', data?.length);
+
+      if (data) {
+        const krs: DynamicKR[] = data.map((kr: any) => ({
+          id: kr.id,
+          objectiveId: kr.objective_id,
+          orgId: kr.org_id,
+          name: kr.name,
+          definition: kr.definition || '',
+          formula: kr.formula || '',
+          unit: kr.unit,
+          weight: kr.weight,
+          targetValue: kr.target_value,
+          currentValue: kr.current_value,
+          progressPct: kr.progress_pct || 0,
+          grade: calculateGrade(kr.progress_pct || 0, kr.grade_criteria),
+          biiType: kr.bii_type,
+          biiScore: kr.bii_score || 0,
+          kpiCategory: kr.kpi_category,
+          perspective: kr.perspective,
+          indicatorType: kr.indicator_type,
+          measurementCycle: kr.measurement_cycle,
+          gradeCriteria: kr.grade_criteria,
+          quarterlyTargets: kr.quarterly_targets,
+          quarterlyActuals: kr.quarterly_actuals,
+          cascadingType: kr.cascading_type,
+          parentKrId: kr.parent_kr_id,
+          poolKpiId: kr.pool_kpi_id,
+          status: kr.status,
+          dataSource: kr.data_source,
+          dataSourceDetail: kr.data_source_detail,
+          milestones: kr.milestones ? kr.milestones.map((m: any) => ({
+            id: m.id,
+            text: m.text,
+            quarter: m.quarter,
+            completed: m.completed || false
+          })) : []
+        }));
+        
+        set({ krs });
+      }
+    } catch (error: any) {
+      console.error('❌ fetchKRs error:', error);
+      set({ error: error.message });
     }
   },
 
   addKR: async (kr) => {
-    // 1. KR Insert
-    const { data: newKR, error } = await supabase.from('key_results').insert({
-      objective_id: kr.objectiveId,
-      org_id: kr.orgId,
-      name: kr.name,
-      // ...필요한 나머지 필드들 매핑 (양이 많으므로 생략 시 주의)
-      unit: kr.unit,
-      target_value: kr.targetValue,
-      current_value: 0,
-      bii_type: kr.biiType,
-      status: 'active' // 기본값
-    }).select().single();
+    console.log('➕ addKR:', kr.name);
+    try {
+      const { data, error } = await supabase
+        .from('key_results')
+        .insert({
+          objective_id: kr.objectiveId,
+          org_id: kr.orgId,
+          name: kr.name,
+          definition: kr.definition || '',
+          formula: kr.formula || '',
+          unit: kr.unit || '%',
+          weight: kr.weight || 0,
+          target_value: kr.targetValue || 0,
+          current_value: kr.currentValue || 0,
+          bii_type: kr.biiType,
+          bii_score: kr.biiScore || 0,
+          kpi_category: kr.kpiCategory || '전략',
+          perspective: kr.perspective || '재무',
+          indicator_type: kr.indicatorType || '결과',
+          measurement_cycle: kr.measurementCycle || '월',
+          grade_criteria: kr.gradeCriteria || { S: 120, A: 110, B: 100, C: 90, D: 0 },
+          quarterly_targets: kr.quarterlyTargets || { Q1: 0, Q2: 0, Q3: 0, Q4: 0 },
+          quarterly_actuals: kr.quarterlyActuals || { Q1: null, Q2: null, Q3: null, Q4: null },
+          cascading_type: kr.cascadingType,
+          parent_kr_id: kr.parentKrId,
+          pool_kpi_id: kr.poolKpiId,
+          status: kr.status || 'active',
+          data_source: kr.dataSource || 'manual',
+          data_source_detail: kr.dataSourceDetail
+        })
+        .select()
+        .single();
 
-    if (newKR) {
-      // 2. Milestones Insert (있다면)
-      if (kr.milestones && kr.milestones.length > 0) {
-        const milestonesToInsert = kr.milestones.map(m => ({
-          kr_id: newKR.id,
-          text: m.text,
-          quarter: m.quarter,
-          completed: m.completed || false
-        }));
-        await supabase.from('milestones').insert(milestonesToInsert);
-      }
+      if (error) throw error;
 
-      // 로컬 State 업데이트를 위해 fetch 다시 호출하는 게 가장 안전
-      get().fetchKRs(kr.orgId); 
+      // 다시 fetch해서 최신 데이터 가져오기
+      await get().fetchKRs(kr.orgId);
+      
+      console.log('✅ KR added');
+    } catch (error: any) {
+      console.error('❌ addKR error:', error);
+      set({ error: error.message });
     }
   },
 
   updateKR: async (krId, updates) => {
-    // 간단한 업데이트 예시
-    const dbUpdates: any = { updated_at: new Date().toISOString() };
-    if (updates.currentValue !== undefined) dbUpdates.current_value = updates.currentValue;
-    if (updates.name) dbUpdates.name = updates.name;
+    console.log('✏️ updateKR:', krId, updates);
+    try {
+      const dbUpdates: any = { updated_at: new Date().toISOString() };
+      
+      if (updates.name !== undefined) dbUpdates.name = updates.name;
+      if (updates.currentValue !== undefined) dbUpdates.current_value = updates.currentValue;
+      if (updates.weight !== undefined) dbUpdates.weight = updates.weight;
+      if (updates.targetValue !== undefined) dbUpdates.target_value = updates.targetValue;
 
-    const { error } = await supabase.from('key_results').update(dbUpdates).eq('id', krId);
-    if (!error) {
+      const { error } = await supabase
+        .from('key_results')
+        .update(dbUpdates)
+        .eq('id', krId);
+
+      if (error) throw error;
+
       set(state => ({
-        krs: state.krs.map(k => k.id === krId ? { ...k, ...updates } : k)
+        krs: state.krs.map(k =>
+          k.id === krId ? { ...k, ...updates } : k
+        )
       }));
+
+      console.log('✅ KR updated');
+    } catch (error: any) {
+      console.error('❌ updateKR error:', error);
+      set({ error: error.message });
     }
   },
 
   deleteKR: async (krId) => {
-    await supabase.from('key_results').delete().eq('id', krId);
-    set(state => ({ krs: state.krs.filter(k => k.id !== krId) }));
+    console.log('🗑️ deleteKR:', krId);
+    try {
+      const { error } = await supabase
+        .from('key_results')
+        .delete()
+        .eq('id', krId);
+
+      if (error) throw error;
+
+      set(state => ({
+        krs: state.krs.filter(k => k.id !== krId)
+      }));
+
+      console.log('✅ KR deleted');
+    } catch (error: any) {
+      console.error('❌ deleteKR error:', error);
+      set({ error: error.message });
+    }
   },
 
-  // ----------------------------------------------------
-  // Getters
-  // ----------------------------------------------------
-  getOrgById: (orgId) => get().organizations.find(o => o.id === orgId),
-  getObjectivesByOrgId: (orgId) => get().objectives.filter(o => o.orgId === orgId),
-  getKRsByObjectiveId: (objId) => get().krs.filter(k => k.objectiveId === objId),
+  // ==================== Getters ====================
+  getOrgById: (orgId) => {
+    return get().organizations.find(o => o.id === orgId);
+  },
+
+  getObjectivesByOrgId: (orgId) => {
+    return get().objectives.filter(o => o.orgId === orgId);
+  },
+
+  getKRsByObjectiveId: (objId) => {
+    return get().krs.filter(k => k.objectiveId === objId);
+  },
+
+  getKRsByOrgId: (orgId) => {
+    return get().krs.filter(k => k.orgId === orgId);
+  },
 }));
+
+// ==================== Helper Functions ====================
+function calculateGrade(progressPct: number, criteria: any): string {
+  if (!criteria) return 'N/A';
+  
+  if (progressPct >= criteria.S) return 'S';
+  if (progressPct >= criteria.A) return 'A';
+  if (progressPct >= criteria.B) return 'B';
+  if (progressPct >= criteria.C) return 'C';
+  return 'D';
+}
