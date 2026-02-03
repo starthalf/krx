@@ -2,7 +2,16 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import type { User, Session } from '@supabase/supabase-js';
-import type { Profile } from '../lib/database.types';
+
+// Profile 타입 (간소화)
+interface Profile {
+  id: string;
+  company_id: string | null;
+  full_name: string;
+  role: string;
+  avatar_url: string | null;
+  created_at: string;
+}
 
 interface AuthContextType {
   user: User | null;
@@ -23,19 +32,64 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // 프로필 조회
-  const fetchProfile = async (userId: string) => {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', userId)
-      .single();
+  // 프로필 조회 (에러 핸들링 개선)
+  const fetchProfile = async (userId: string): Promise<Profile | null> => {
+    try {
+      console.log('📡 프로필 조회 시도:', userId);
+      
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .single();
 
-    if (error) {
-      console.error('프로필 조회 오류:', error);
+      if (error) {
+        console.error('❌ 프로필 조회 실패:', error);
+        
+        // 404 에러 (프로필이 없음) - 자동 생성 시도
+        if (error.code === 'PGRST116') {
+          console.log('🔧 프로필이 없음. 자동 생성 시도...');
+          return await createProfile(userId);
+        }
+        
+        return null;
+      }
+
+      console.log('✅ 프로필 조회 성공:', data);
+      return data as Profile;
+    } catch (error) {
+      console.error('❌ 프로필 조회 예외:', error);
       return null;
     }
-    return data;
+  };
+
+  // 프로필 생성 (트리거가 작동하지 않을 경우 대비)
+  const createProfile = async (userId: string): Promise<Profile | null> => {
+    try {
+      console.log('🔧 프로필 생성 시도:', userId);
+      
+      const { data, error } = await supabase
+        .from('profiles')
+        .insert({
+          id: userId,
+          full_name: '사용자',
+          company_id: '00000000-0000-0000-0000-000000000001', // 기본 회사
+          role: 'member'
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error('❌ 프로필 생성 실패:', error);
+        return null;
+      }
+
+      console.log('✅ 프로필 생성 성공:', data);
+      return data as Profile;
+    } catch (error) {
+      console.error('❌ 프로필 생성 예외:', error);
+      return null;
+    }
   };
 
   // 프로필 새로고침
@@ -48,19 +102,43 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // 초기 세션 확인 및 Auth 상태 리스너
   useEffect(() => {
+    let mounted = true;
+
     // 현재 세션 가져오기
     const getInitialSession = async () => {
-      const { data: { session: currentSession } } = await supabase.auth.getSession();
-      
-      setSession(currentSession);
-      setUser(currentSession?.user ?? null);
+      try {
+        console.log('🔐 초기 세션 확인 중...');
+        
+        const { data: { session: currentSession }, error } = await supabase.auth.getSession();
+        
+        if (error) {
+          console.error('❌ 세션 조회 실패:', error);
+        }
 
-      if (currentSession?.user) {
-        const profileData = await fetchProfile(currentSession.user.id);
-        setProfile(profileData);
+        if (!mounted) return;
+
+        setSession(currentSession);
+        setUser(currentSession?.user ?? null);
+
+        if (currentSession?.user) {
+          console.log('✅ 세션 있음. 프로필 조회 중...');
+          const profileData = await fetchProfile(currentSession.user.id);
+          if (mounted) {
+            setProfile(profileData);
+          }
+        } else {
+          console.log('ℹ️ 세션 없음 (로그아웃 상태)');
+        }
+
+        if (mounted) {
+          setLoading(false);
+        }
+      } catch (error) {
+        console.error('❌ 초기 세션 확인 예외:', error);
+        if (mounted) {
+          setLoading(false);
+        }
       }
-
-      setLoading(false);
     };
 
     getInitialSession();
@@ -68,26 +146,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Auth 상태 변경 리스너
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, newSession) => {
-        console.log('Auth 상태 변경:', event);
+        console.log('🔄 Auth 상태 변경:', event);
         
+        if (!mounted) return;
+
         setSession(newSession);
         setUser(newSession?.user ?? null);
 
         if (newSession?.user) {
           // 약간의 딜레이 후 프로필 조회 (트리거가 프로필 생성할 시간 확보)
           setTimeout(async () => {
+            if (!mounted) return;
             const profileData = await fetchProfile(newSession.user.id);
-            setProfile(profileData);
-          }, 100);
+            if (mounted) {
+              setProfile(profileData);
+            }
+          }, 500); // 500ms 대기
         } else {
           setProfile(null);
         }
 
-        setLoading(false);
+        if (mounted) {
+          setLoading(false);
+        }
       }
     );
 
     return () => {
+      mounted = false;
       subscription.unsubscribe();
     };
   }, []);
@@ -95,17 +181,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // 로그인
   const signIn = async (email: string, password: string) => {
     try {
+      console.log('🔑 로그인 시도:', email);
+      
       const { error } = await supabase.auth.signInWithPassword({
         email,
         password,
       });
 
       if (error) {
+        console.error('❌ 로그인 실패:', error);
         return { error };
       }
 
+      console.log('✅ 로그인 성공');
       return { error: null };
     } catch (error) {
+      console.error('❌ 로그인 예외:', error);
       return { error: error as Error };
     }
   };
@@ -118,34 +209,41 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     companyId?: string
   ) => {
     try {
+      console.log('📝 회원가입 시도:', email);
+      
       const { error } = await supabase.auth.signUp({
         email,
         password,
         options: {
           data: {
             full_name: fullName,
-            company_id: companyId || '00000000-0000-0000-0000-000000000001', // 기본 데모 회사
+            company_id: companyId || '00000000-0000-0000-0000-000000000001',
             role: 'member',
           },
         },
       });
 
       if (error) {
+        console.error('❌ 회원가입 실패:', error);
         return { error };
       }
 
+      console.log('✅ 회원가입 성공');
       return { error: null };
     } catch (error) {
+      console.error('❌ 회원가입 예외:', error);
       return { error: error as Error };
     }
   };
 
   // 로그아웃
   const signOut = async () => {
+    console.log('👋 로그아웃 시도');
     await supabase.auth.signOut();
     setUser(null);
     setSession(null);
     setProfile(null);
+    console.log('✅ 로그아웃 완료');
   };
 
   const value = {
