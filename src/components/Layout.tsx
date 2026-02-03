@@ -7,15 +7,28 @@ import { useAuth } from '../contexts/AuthContext';
 import { useStore } from '../store/useStore';
 
 export default function Layout() {
-  const { profile } = useAuth(); // AuthContext에서 profile(company_id 포함) 가져오기
-  const { fetchOrganizations, organizations } = useStore();
+  const { profile } = useAuth();
+  const { fetchOrganizations, organizations, loading, error } = useStore();
+
+  // 디버깅 로그
+  useEffect(() => {
+    console.log('=== Layout Debug ===');
+    console.log('profile:', profile);
+    console.log('company_id:', profile?.company_id);
+    console.log('organizations count:', organizations.length);
+    console.log('loading:', loading);
+    console.log('error:', error);
+  }, [profile, organizations, loading, error]);
 
   // 앱 진입 시 조직 데이터 로딩
   useEffect(() => {
-    if (profile?.company_id && organizations.length === 0) {
+    if (profile?.company_id) {
+      console.log('🚀 Triggering fetchOrganizations for company:', profile.company_id);
       fetchOrganizations(profile.company_id);
+    } else {
+      console.log('⏳ Waiting for profile with company_id...');
     }
-  }, [profile, fetchOrganizations, organizations.length]);
+  }, [profile?.company_id]); // profile.company_id가 변경될 때만 실행
 
   return (
     <div className="flex h-screen bg-slate-50">
@@ -23,6 +36,11 @@ export default function Layout() {
       <div className="flex-1 flex flex-col overflow-hidden">
         <TopBar />
         <main className="flex-1 overflow-y-auto">
+          {error && (
+            <div className="p-4 bg-red-50 border border-red-200 text-red-700 m-4 rounded-lg">
+              오류: {error}
+            </div>
+          )}
           <Outlet />
         </main>
       </div>
