@@ -1,5 +1,17 @@
+// src/components/Sidebar.tsx
 import { Link, useLocation } from 'react-router-dom';
-import { Home, Target, TrendingUp, CheckSquare, Building2, BookOpen, Settings } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
+import { 
+  Home, 
+  Target, 
+  TrendingUp, 
+  CheckSquare, 
+  Building2, 
+  BookOpen, 
+  Settings,
+  LogOut,
+  User
+} from 'lucide-react';
 
 const navigation = [
   { name: '대시보드', href: '/', icon: Home },
@@ -21,14 +33,20 @@ const navigation = [
 
 export default function Sidebar() {
   const location = useLocation();
+  const { user, profile, signOut } = useAuth();
 
   const isActive = (href: string) => {
     if (href === '/') return location.pathname === '/';
     return location.pathname.startsWith(href);
   };
 
+  const handleSignOut = async () => {
+    await signOut();
+  };
+
   return (
     <div className="w-60 bg-white border-r border-slate-200 h-screen flex flex-col">
+      {/* 로고 */}
       <div className="p-6 border-b border-slate-200">
         <div className="flex items-center gap-2">
           <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-violet-600 rounded-lg flex items-center justify-center">
@@ -38,6 +56,7 @@ export default function Sidebar() {
         </div>
       </div>
 
+      {/* 네비게이션 */}
       <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
         {navigation.map((item) => {
           if (item.children) {
@@ -69,9 +88,9 @@ export default function Sidebar() {
           return (
             <Link
               key={item.name}
-              to={item.href}
+              to={item.href!}
               className={`flex items-center gap-2 px-3 py-2 text-sm rounded-lg transition-colors ${
-                isActive(item.href)
+                isActive(item.href!)
                   ? 'bg-blue-50 text-blue-700 font-medium'
                   : 'text-slate-600 hover:bg-slate-50'
               }`}
@@ -83,8 +102,34 @@ export default function Sidebar() {
         })}
       </nav>
 
+      {/* 사용자 정보 & 로그아웃 */}
       <div className="p-4 border-t border-slate-200">
-        <div className="text-xs text-slate-500 text-center">
+        {/* 사용자 정보 */}
+        <div className="flex items-center gap-3 mb-3">
+          <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
+            <User className="w-4 h-4 text-blue-600" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-medium text-slate-900 truncate">
+              {profile?.full_name || user?.email?.split('@')[0] || '사용자'}
+            </div>
+            <div className="text-xs text-slate-500 truncate">
+              {user?.email || '로그인 필요'}
+            </div>
+          </div>
+        </div>
+
+        {/* 로그아웃 버튼 */}
+        <button
+          onClick={handleSignOut}
+          className="w-full flex items-center justify-center gap-2 px-3 py-2 text-sm text-slate-600 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+        >
+          <LogOut className="w-4 h-4" />
+          로그아웃
+        </button>
+
+        {/* 버전 정보 */}
+        <div className="text-xs text-slate-400 text-center mt-3">
           OKRio v1.0.0
         </div>
       </div>
