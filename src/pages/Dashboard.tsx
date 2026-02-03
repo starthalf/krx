@@ -1,14 +1,14 @@
 import { TrendingUp, Target, CheckSquare, AlertTriangle, Bot } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts'; // Legend 제거 (미사용)
 import { useStore } from '../store/useStore';
-import { calculateGrade, formatNumber } from '../utils/helpers';
-import { useNavigate } from 'react-router-dom';
+import { calculateGrade } from '../utils/helpers';
+// formatNumber, useNavigate 제거 (미사용)
 
 export default function Dashboard() {
-  const navigate = useNavigate();
-  const krs = useStore(state => state.krs);
-  const objectives = useStore(state => state.objectives);
-  const activityFeed = useStore(state => state.activityFeed);
+  // [수정] 데이터가 undefined일 경우를 대비해 기본값 [] 처리
+  const krs = useStore(state => state.krs) || [];
+  const objectives = useStore(state => state.objectives) || [];
+  const activityFeed = useStore(state => state.activityFeed) || [];
 
   const allKRs = krs.filter(kr => kr.status === 'active');
   const totalProgress = allKRs.length > 0
@@ -28,6 +28,7 @@ export default function Dashboard() {
     return grade === 'C' || grade === 'D';
   });
 
+  // [참고] 이 데이터는 나중에 Phase 7에서 실시간 집계로 교체될 예정 (현재는 하드코딩 유지)
   const orgProgress = [
     { name: '마케팅본부', S: 0, A: 1, B: 3, C: 2, D: 0, total: 72 },
     { name: '영업본부', S: 1, A: 2, B: 2, C: 0, D: 0, total: 85 },
@@ -48,7 +49,9 @@ export default function Dashboard() {
 
   return (
     <div className="p-6 space-y-6">
+      {/* 상단 카드 4개 */}
       <div className="grid grid-cols-4 gap-6">
+        {/* 전체 진행률 */}
         <div className="bg-white rounded-xl border border-slate-200 p-6">
           <div className="flex items-center justify-between mb-4">
             <span className="text-sm font-medium text-slate-600">전체 진행률</span>
@@ -66,6 +69,7 @@ export default function Dashboard() {
           </div>
         </div>
 
+        {/* OKR 현황 */}
         <div className="bg-white rounded-xl border border-slate-200 p-6">
           <div className="flex items-center justify-between mb-4">
             <span className="text-sm font-medium text-slate-600">OKR 현황</span>
@@ -86,6 +90,7 @@ export default function Dashboard() {
           </div>
         </div>
 
+        {/* 체크인 현황 */}
         <div className="bg-white rounded-xl border border-slate-200 p-6">
           <div className="flex items-center justify-between mb-4">
             <span className="text-sm font-medium text-slate-600">체크인 현황</span>
@@ -109,6 +114,7 @@ export default function Dashboard() {
           </div>
         </div>
 
+        {/* 주의 KR */}
         <div className="bg-white rounded-xl border border-slate-200 p-6">
           <div className="flex items-center justify-between mb-4">
             <span className="text-sm font-medium text-slate-600">주의 KR</span>
@@ -129,6 +135,7 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* 중간 차트 섹션 */}
       <div className="grid grid-cols-3 gap-6">
         <div className="col-span-2 bg-white rounded-xl border border-slate-200 p-6">
           <h2 className="text-lg font-semibold text-slate-900 mb-4">조직별 진행률</h2>
@@ -181,23 +188,29 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* 하단 피드 및 AI 인사이트 */}
       <div className="grid grid-cols-3 gap-6">
         <div className="col-span-2 bg-white rounded-xl border border-slate-200 p-6">
           <h2 className="text-lg font-semibold text-slate-900 mb-4">최근 활동 피드</h2>
           <div className="space-y-3">
-            {activityFeed.slice(0, 10).map((activity) => (
-              <div key={activity.id} className="flex items-start gap-3">
-                <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-violet-500 rounded-full flex items-center justify-center flex-shrink-0">
-                  <span className="text-white text-xs font-medium">{activity.user[0]}</span>
+            {/* [수정] activityFeed가 있는지 확인 후 slice 호출 */}
+            {activityFeed && activityFeed.length > 0 ? (
+              activityFeed.slice(0, 10).map((activity) => (
+                <div key={activity.id} className="flex items-start gap-3">
+                  <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-violet-500 rounded-full flex items-center justify-center flex-shrink-0">
+                    <span className="text-white text-xs font-medium">{activity.user[0]}</span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-slate-700">
+                      <span className="font-medium text-slate-900">{activity.user}</span>이 {activity.message}
+                    </p>
+                    <span className="text-xs text-slate-500">{activity.timestamp}</span>
+                  </div>
                 </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm text-slate-700">
-                    <span className="font-medium text-slate-900">{activity.user}</span>이 {activity.message}
-                  </p>
-                  <span className="text-xs text-slate-500">{activity.timestamp}</span>
-                </div>
-              </div>
-            ))}
+              ))
+            ) : (
+              <div className="text-sm text-slate-500">최근 활동이 없습니다.</div>
+            )}
             <button className="text-sm text-blue-600 hover:text-blue-700 font-medium">
               더보기 →
             </button>
