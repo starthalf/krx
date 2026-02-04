@@ -199,18 +199,30 @@ export default function OKRStatus() {
 
   // 본부 뷰: 자동 선택
   useEffect(() => {
-    if (viewMode === 'division' && !selectedOrgId && divisions.length > 0) {
-      setSelectedOrgId(divisions[0].id);
+    if (viewMode === 'division') {
+      // 현재 선택된 조직이 본부가 아니거나 없으면 첫 번째 본부 선택
+      const currentOrg = organizations.find(o => o.id === selectedOrgId);
+      if (!currentOrg || currentOrg.level !== '본부') {
+        if (divisions.length > 0) {
+          setSelectedOrgId(divisions[0].id);
+        }
+      }
     }
   }, [viewMode, divisions.length]);
 
   // 팀 뷰: 자동 선택
   useEffect(() => {
-    if (viewMode === 'team' && !selectedOrgId) {
-      const firstTeam = organizations.find(o => o.level === '팀');
-      if (firstTeam) setSelectedOrgId(firstTeam.id);
+    if (viewMode === 'team') {
+      const allTeams = organizations.filter(o => o.level === '팀');
+      // 현재 선택된 조직이 팀이 아니거나 없으면 첫 번째 팀 선택
+      const currentOrg = organizations.find(o => o.id === selectedOrgId);
+      if (!currentOrg || currentOrg.level !== '팀') {
+        if (allTeams.length > 0) {
+          setSelectedOrgId(allTeams[0].id);
+        }
+      }
     }
-  }, [viewMode]);
+  }, [viewMode, organizations.length]);
 
   // 뷰 모드별 렌더링
   const renderCompanyView = () => {
