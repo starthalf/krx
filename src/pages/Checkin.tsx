@@ -44,6 +44,9 @@ export default function Checkin() {
 
   const selectedOrg = organizations.find(o => o.id === selectedOrgId);
   const orgObjectives = objectives.filter(o => o.orgId === selectedOrgId);
+  
+  // 선택된 조직의 KR만 필터링
+  const orgKRs = krs.filter(k => k.orgId === selectedOrgId);
 
   // 로딩 중
   if (loading) {
@@ -124,7 +127,7 @@ export default function Checkin() {
             </div>
             <div className="text-right">
               <div className="text-2xl font-bold text-blue-900">
-                {krs.length}개
+                {orgKRs.length}개
               </div>
               <div className="text-sm text-blue-600">핵심결과</div>
             </div>
@@ -157,8 +160,8 @@ export default function Checkin() {
         /* 목표별 KR 카드 목록 */
         <div className="space-y-6">
           {orgObjectives.map((objective) => {
-            // 이 목표의 KR들
-            const objectiveKRs = krs.filter(k => k.objectiveId === objective.id);
+            // 이 목표의 KR들 (선택된 조직의 KR만)
+            const objectiveKRs = orgKRs.filter(k => k.objectiveId === objective.id);
             
             // 진행률 계산
             const totalProgress = objectiveKRs.length > 0
