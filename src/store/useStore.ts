@@ -501,6 +501,15 @@ export const useStore = create<AppState>((set, get) => ({
   getKRsByOrgId: (orgId) => {
     return get().krs.filter(k => k.orgId === orgId);
   },
+
+  // CFR 관련 (Phase 5에서 구현 예정, 임시로 빈 배열 반환)
+  getCFRsByKRId: (krId) => {
+    return [];
+  },
+
+  addCFRThread: (thread) => {
+    console.log('CFR 추가 (미구현):', thread);
+  },
 }));
 
 // ==================== Helper Functions ====================
