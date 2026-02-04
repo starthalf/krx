@@ -1,4 +1,4 @@
-// src/components/KRCard.tsx - Phase 5: 실적 입력 기능 추가
+// src/components/KRCard.tsx - 완전 수정본
 import { useState } from 'react';
 import { MessageSquare, MoreVertical, CheckSquare, Link as LinkIcon, FileText, History, Save, X } from 'lucide-react';
 import { calculateGrade, getGradeColor, getBIIColor, getKPICategoryColor, formatNumber, getMilestoneProgress } from '../utils/helpers';
@@ -32,7 +32,9 @@ export default function KRCard({ kr }: KRCardProps) {
 
   const cfrThreads = getCFRsByKRId(kr.id);
 
-  const progress = kr.milestones ? getMilestoneProgress(kr) : kr.progressPct;
+  // 마일스톤 있으면 마일스톤 진행률, 없으면 일반 진행률
+  const hasMilestones = kr.milestones && kr.milestones.length > 0;
+  const progress = hasMilestones ? getMilestoneProgress(kr) : kr.progressPct;
 
   const handleSendCFR = () => {
     if (!cfrMessage.trim()) return;
@@ -100,6 +102,7 @@ export default function KRCard({ kr }: KRCardProps) {
   return (
     <>
       <div className="bg-white rounded-xl border border-slate-200 p-6">
+        {/* 헤더 */}
         <div className="flex items-start justify-between mb-4">
           <div className="flex items-center gap-2">
             <span className={`px-2 py-1 rounded-full text-xs font-medium ${biiColor.bg} ${biiColor.text}`}>
@@ -121,92 +124,78 @@ export default function KRCard({ kr }: KRCardProps) {
           </div>
         </div>
 
-        {!kr.milestones ? (
-          <>
-            {/* 정량 KR - 실적 입력 UI */}
-            <div className="grid grid-cols-3 gap-4 mb-4">
-              <div>
-                <div className="text-xs text-slate-500 mb-1">목표</div>
-                <div className="text-lg font-semibold text-slate-900">
-                  {formatNumber(kr.targetValue)} <span className="text-sm text-slate-600">{kr.unit}</span>
+        {/* 정량 KR - 목표/현재/달성률 */}
+        {!hasMilestones && (
+          <div className="grid grid-cols-3 gap-4 mb-4 bg-slate-50 rounded-lg p-4 border border-slate-200">
+            <div>
+              <div className="text-xs font-medium text-slate-500 mb-1">목표</div>
+              <div className="text-lg font-bold text-slate-900">
+                {formatNumber(kr.targetValue)} <span className="text-sm font-normal text-slate-600">{kr.unit}</span>
+              </div>
+            </div>
+            <div>
+              <div className="text-xs font-medium text-slate-500 mb-1">현재</div>
+              {isEditing ? (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={editValue}
+                    onChange={(e) => setEditValue(e.target.value)}
+                    className="w-28 px-3 py-1.5 border-2 border-blue-500 rounded-lg text-lg font-bold focus:ring-2 focus:ring-blue-500 outline-none"
+                    autoFocus
+                  />
+                  <span className="text-sm text-slate-600">{kr.unit}</span>
                 </div>
-              </div>
-              <div>
-                <div className="text-xs text-slate-500 mb-1">현재</div>
-                {isEditing ? (
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      value={editValue}
-                      onChange={(e) => setEditValue(e.target.value)}
-                      className="w-24 px-2 py-1 border border-blue-500 rounded text-lg font-semibold focus:ring-2 focus:ring-blue-500 outline-none"
-                      autoFocus
-                    />
-                    <span className="text-sm text-slate-600">{kr.unit}</span>
-                  </div>
-                ) : (
-                  <div className="text-lg font-semibold text-blue-600">
-                    {formatNumber(kr.currentValue || 0)} <span className="text-sm text-slate-600">{kr.unit}</span>
-                  </div>
-                )}
-              </div>
-              <div>
-                <div className="text-xs text-slate-500 mb-1">달성률</div>
-                <div className="text-lg font-semibold text-slate-900">{progress}%</div>
-              </div>
-            </div>
-
-            <div className="mb-4">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm text-slate-600">진행률 {progress}%</span>
-                <span className={`px-2 py-1 rounded text-xs font-semibold ${gradeColor}`}>
-                  {grade}
-                </span>
-              </div>
-              <div className="h-2 bg-slate-200 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-blue-600 rounded-full transition-all duration-500"
-                  style={{ width: `${Math.min(progress, 100)}%` }}
-                />
-              </div>
-            </div>
-          </>
-        ) : (
-          <>
-            {/* 정성 KR - 마일스톤 */}
-            <div className="mb-4 space-y-2">
-              {kr.milestones.map((milestone) => (
-                <div key={milestone.id} className="flex items-center gap-3 text-sm">
-                  {milestone.completed ? (
-                    <CheckSquare className="w-5 h-5 text-green-600" />
-                  ) : (
-                    <div className="w-5 h-5 border-2 border-slate-300 rounded" />
-                  )}
-                  <span className={`text-sm ${milestone.completed ? 'text-slate-500 line-through' : 'text-slate-700'}`}>
-                    {milestone.text}
-                  </span>
-                  <span className="text-xs text-slate-500 ml-auto">{milestone.quarter}</span>
+              ) : (
+                <div className="text-lg font-bold text-blue-600">
+                  {formatNumber(kr.currentValue || 0)} <span className="text-sm font-normal text-slate-600">{kr.unit}</span>
                 </div>
-              ))}
+              )}
             </div>
-
-            <div className="mb-4">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm text-slate-600">진행률 {progress}%</span>
-                <span className={`px-2 py-1 rounded text-xs font-semibold ${gradeColor}`}>
-                  {grade}
-                </span>
-              </div>
-              <div className="h-2 bg-slate-200 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-blue-600 rounded-full transition-all duration-500"
-                  style={{ width: `${progress}%` }}
-                />
-              </div>
+            <div>
+              <div className="text-xs font-medium text-slate-500 mb-1">달성률</div>
+              <div className="text-lg font-bold text-slate-900">{progress}%</div>
             </div>
-          </>
+          </div>
         )}
 
+        {/* 정성 KR - 마일스톤 */}
+        {hasMilestones && (
+          <div className="mb-4 space-y-2 bg-slate-50 rounded-lg p-4 border border-slate-200">
+            {kr.milestones!.map((milestone) => (
+              <div key={milestone.id} className="flex items-center gap-3 text-sm">
+                {milestone.completed ? (
+                  <CheckSquare className="w-5 h-5 text-green-600 flex-shrink-0" />
+                ) : (
+                  <div className="w-5 h-5 border-2 border-slate-300 rounded flex-shrink-0" />
+                )}
+                <span className={`flex-1 ${milestone.completed ? 'text-slate-500 line-through' : 'text-slate-700'}`}>
+                  {milestone.text}
+                </span>
+                <span className="text-xs text-slate-500">{milestone.quarter}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* 진행률 바 */}
+        <div className="mb-4">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm text-slate-600">진행률 {progress}%</span>
+            <span className={`px-2 py-1 rounded text-xs font-semibold ${gradeColor}`}>
+              등급: {grade}
+            </span>
+          </div>
+          <div className="h-3 bg-slate-200 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-blue-600 rounded-full transition-all duration-500"
+              style={{ width: `${Math.min(progress, 100)}%` }}
+            />
+          </div>
+        </div>
+
+        {/* Cascading 정보 */}
         {kr.cascadingType && (
           <div className="mb-3 flex items-center gap-2 text-sm">
             <LinkIcon className="w-4 h-4 text-blue-600" />
@@ -214,13 +203,15 @@ export default function KRCard({ kr }: KRCardProps) {
           </div>
         )}
 
-        {kr.dataSource === 'auto' && (
+        {/* 데이터 소스 */}
+        {kr.dataSource === 'auto' && kr.dataSourceDetail && (
           <div className="mb-4 flex items-center gap-2 text-sm">
             <FileText className="w-4 h-4 text-emerald-600" />
             <span className="text-slate-600">데이터: {kr.dataSourceDetail} (마지막 동기화: 3.15)</span>
           </div>
         )}
 
+        {/* 액션 버튼 */}
         <div className="flex gap-2">
           {isEditing ? (
             <>
@@ -265,7 +256,7 @@ export default function KRCard({ kr }: KRCardProps) {
         </div>
       </div>
 
-      {/* CFR 모달 (기존 코드 유지) */}
+      {/* CFR 모달 */}
       {showCFR && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl p-6 max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto">
@@ -280,26 +271,32 @@ export default function KRCard({ kr }: KRCardProps) {
             </div>
 
             <div className="space-y-4 mb-4 max-h-96 overflow-y-auto">
-              {cfrThreads.map((thread) => (
-                <div key={thread.id} className="bg-slate-50 rounded-lg p-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm font-medium text-slate-900">{thread.author}</span>
-                    <span className="text-xs text-slate-500">
-                      {new Date(thread.createdAt).toLocaleDateString('ko-KR')}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2 mb-2">
-                    <span className={`px-2 py-1 rounded text-xs font-medium ${
-                      thread.type === 'Conversation' ? 'bg-blue-100 text-blue-700' :
-                      thread.type === 'Feedback' ? 'bg-amber-100 text-amber-700' :
-                      'bg-green-100 text-green-700'
-                    }`}>
-                      {thread.type}
-                    </span>
-                  </div>
-                  <p className="text-sm text-slate-700">{thread.content}</p>
+              {cfrThreads.length === 0 ? (
+                <div className="text-center py-8 text-slate-500">
+                  아직 CFR 메시지가 없습니다
                 </div>
-              ))}
+              ) : (
+                cfrThreads.map((thread) => (
+                  <div key={thread.id} className="bg-slate-50 rounded-lg p-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-medium text-slate-900">{thread.author}</span>
+                      <span className="text-xs text-slate-500">
+                        {new Date(thread.createdAt).toLocaleDateString('ko-KR')}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className={`px-2 py-1 rounded text-xs font-medium ${
+                        thread.type === 'Conversation' ? 'bg-blue-100 text-blue-700' :
+                        thread.type === 'Feedback' ? 'bg-amber-100 text-amber-700' :
+                        'bg-green-100 text-green-700'
+                      }`}>
+                        {thread.type}
+                      </span>
+                    </div>
+                    <p className="text-sm text-slate-700">{thread.content}</p>
+                  </div>
+                ))
+              )}
             </div>
 
             <div className="border-t border-slate-200 pt-4">
