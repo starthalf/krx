@@ -1,217 +1,223 @@
-import { useState } from 'react';
-import { Clock, CheckCircle, Bot } from 'lucide-react';
+// src/pages/Checkin.tsx
+import { useEffect, useState } from 'react';
 import { useStore } from '../store/useStore';
-import { formatNumber } from '../utils/helpers';
+import { getBIIColor } from '../utils/helpers';
+import KRCard from '../components/KRCard';
+import { Loader2, Calendar } from 'lucide-react';
 
-export default function CheckIn() {
-  const [showInsights, setShowInsights] = useState(false);
-  const [comment, setComment] = useState('');
-  const selectedOrgId = useStore(state => state.selectedOrgId);
-  const getOrgById = useStore(state => state.getOrgById);
-  const getKRsByOrgId = useStore(state => state.getKRsByOrgId);
+export default function Checkin() {
+  const { 
+    organizations, 
+    objectives, 
+    krs,
+    fetchObjectives,
+    fetchKRs,
+    loading 
+  } = useStore();
 
-  const org = getOrgById(selectedOrgId || 'org-marketing');
-  const krs = getKRsByOrgId(selectedOrgId || 'org-marketing');
+  // 선택된 조직 (드롭다운)
+  const [selectedOrgId, setSelectedOrgId] = useState<string>('');
+  
+  // 선택된 기간
+  const [selectedPeriod, setSelectedPeriod] = useState('2025-03');
 
-  const autoKRs = krs.filter(kr => kr.dataSource === 'auto');
-  const manualKRs = krs.filter(kr => kr.dataSource === 'manual');
+  // 초기 로딩: 첫 번째 조직 자동 선택
+  useEffect(() => {
+    if (organizations.length > 0 && !selectedOrgId) {
+      // 팀 레벨 조직 우선, 없으면 본부, 없으면 첫 번째 조직
+      const teamOrg = organizations.find(o => o.level === '팀');
+      const deptOrg = organizations.find(o => o.level === '본부');
+      const firstOrg = teamOrg || deptOrg || organizations[0];
+      
+      setSelectedOrgId(firstOrg.id);
+    }
+  }, [organizations, selectedOrgId]);
 
-  const handleCompleteCheckIn = () => {
-    setShowInsights(true);
-  };
+  // 조직이 선택되면 해당 조직의 목표와 KR 로딩
+  useEffect(() => {
+    if (selectedOrgId) {
+      console.log('🔄 Checkin: 데이터 로딩', selectedOrgId);
+      fetchObjectives(selectedOrgId);
+      fetchKRs(selectedOrgId);
+    }
+  }, [selectedOrgId, fetchObjectives, fetchKRs]);
 
-  if (!org) return <div className="p-6">조직을 찾을 수 없습니다</div>;
+  const selectedOrg = organizations.find(o => o.id === selectedOrgId);
+  const orgObjectives = objectives.filter(o => o.orgId === selectedOrgId);
+
+  // 로딩 중
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="text-center">
+          <Loader2 className="w-8 h-8 animate-spin text-blue-600 mx-auto mb-2" />
+          <p className="text-slate-600">체크인 데이터 로딩 중...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
-      <div className="bg-white rounded-xl border border-slate-200 p-6 mb-6">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900">3월 체크인</h1>
-            <p className="text-slate-600">{org.name}</p>
+    <div className="p-6 space-y-6">
+      {/* 헤더 */}
+      <div className="flex items-center justify-between">
+        <div>
+          <div className="text-sm text-slate-500 mb-1">실적 입력 및 관리</div>
+          <h1 className="text-2xl font-bold text-slate-900">체크인</h1>
+        </div>
+        
+        <div className="flex gap-3">
+          {/* 기간 선택 */}
+          <div className="flex items-center gap-2 border border-slate-300 rounded-lg px-3 py-2 bg-white">
+            <Calendar className="w-4 h-4 text-slate-500" />
+            <select 
+              value={selectedPeriod}
+              onChange={(e) => setSelectedPeriod(e.target.value)}
+              className="text-sm outline-none bg-transparent"
+            >
+              <option value="2025-01">2025년 1월</option>
+              <option value="2025-02">2025년 2월</option>
+              <option value="2025-03">2025년 3월</option>
+              <option value="2025-04">2025년 4월</option>
+              <option value="2025-05">2025년 5월</option>
+              <option value="2025-06">2025년 6월</option>
+              <option value="2025-Q1">2025년 1분기</option>
+              <option value="2025-Q2">2025년 2분기</option>
+            </select>
           </div>
-          <div className="flex items-center gap-2 text-sm text-slate-600">
-            <Clock className="w-4 h-4" />
-            <span>예상 소요: 15초</span>
-          </div>
+
+          {/* 조직 선택 */}
+          <select 
+            value={selectedOrgId}
+            onChange={(e) => setSelectedOrgId(e.target.value)}
+            className="text-sm border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white"
+          >
+            <option value="">조직 선택</option>
+            {organizations
+              .filter(o => o.level !== '전사') // 전사는 제외
+              .map(org => (
+                <option key={org.id} value={org.id}>
+                  [{org.level}] {org.name}
+                </option>
+              ))
+            }
+          </select>
         </div>
       </div>
 
-      <div className="bg-green-50 border border-green-200 rounded-xl p-6 mb-6">
-        <div className="flex items-center gap-2 mb-4">
-          <CheckCircle className="w-5 h-5 text-green-600" />
-          <h2 className="text-lg font-semibold text-green-900">자동 수집 완료 ({autoKRs.length}/{krs.length})</h2>
-        </div>
-        <div className="space-y-3">
-          {autoKRs.map((kr) => (
-            <div key={kr.id} className="flex items-center justify-between bg-white rounded-lg p-4">
-              <span className="font-medium text-slate-900">{kr.name}</span>
-              <div className="flex items-center gap-4 text-sm">
-                <span className="text-slate-600">
-                  {formatNumber(kr.currentValue)} / {formatNumber(kr.targetValue)} {kr.unit}
-                </span>
-                <span className="font-medium text-slate-900">{kr.progressPct}%</span>
-                <span className={`px-2 py-1 rounded text-xs font-semibold ${
-                  kr.progressPct >= 100 ? 'bg-blue-600 text-white' :
-                  kr.progressPct >= 90 ? 'bg-lime-600 text-white' :
-                  kr.progressPct >= 80 ? 'bg-orange-500 text-white' : 'bg-red-600 text-white'
-                }`}>
-                  {kr.progressPct >= 100 ? 'A' : kr.progressPct >= 90 ? 'B' : kr.progressPct >= 80 ? 'C' : 'D'}
-                </span>
-                <span className="text-xs text-green-600 flex items-center gap-1">
-                  🔗 자동
-                </span>
+      {/* 선택된 조직 정보 */}
+      {selectedOrg && (
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-sm text-blue-600 font-medium">
+                {selectedOrg.level} • {selectedOrg.orgType}
               </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {manualKRs.length > 0 && (
-        <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-6 mb-6">
-          <div className="flex items-center gap-2 mb-4">
-            <div className="w-5 h-5 bg-yellow-500 rounded-full flex items-center justify-center text-white text-xs font-bold">
-              !
-            </div>
-            <h2 className="text-lg font-semibold text-yellow-900">입력 필요 ({manualKRs.length}/{krs.length})</h2>
-          </div>
-          <div className="space-y-4">
-            {manualKRs.map((kr) => (
-              <div key={kr.id} className="bg-white rounded-lg p-4">
-                <div className="font-medium text-slate-900 mb-2">{kr.name}</div>
-                {kr.milestones ? (
-                  <div className="space-y-2">
-                    <p className="text-sm text-slate-600 mb-3">마일스톤 체크:</p>
-                    {kr.milestones.map((milestone) => (
-                      <label key={milestone.id} className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={milestone.completed}
-                          className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                        />
-                        <span className={`text-sm ${milestone.completed ? 'text-slate-500 line-through' : 'text-slate-700'}`}>
-                          {milestone.text}
-                        </span>
-                      </label>
-                    ))}
-                    <p className="text-sm text-slate-600 mt-2">→ 진행률: {getMilestoneProgress(kr)}%</p>
-                  </div>
-                ) : (
-                  <div>
-                    <div className="flex items-center gap-2 mb-2">
-                      <input
-                        type="number"
-                        placeholder="값 입력"
-                        className="flex-1 border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                      />
-                      <span className="text-slate-600">{kr.unit}</span>
-                      <span className="text-slate-500">/ {formatNumber(kr.targetValue)}{kr.unit}</span>
-                    </div>
-                    <p className="text-xs text-slate-500">
-                      💡 전월: {formatNumber(kr.currentValue)}{kr.unit} | 전년동월: {formatNumber(kr.currentValue * 0.9)}{kr.unit}
-                    </p>
-                  </div>
-                )}
+              <div className="text-lg font-semibold text-blue-900 mt-1">
+                {selectedOrg.name}
               </div>
-            ))}
+              {selectedOrg.mission && (
+                <div className="text-sm text-blue-700 mt-1">
+                  {selectedOrg.mission}
+                </div>
+              )}
+            </div>
+            <div className="text-right">
+              <div className="text-2xl font-bold text-blue-900">
+                {krs.length}개
+              </div>
+              <div className="text-sm text-blue-600">핵심결과</div>
+            </div>
           </div>
         </div>
       )}
 
-      <div className="bg-white rounded-xl border border-slate-200 p-6 mb-6">
-        <h3 className="font-medium text-slate-900 mb-3">💬 이번 달 한줄 (선택)</h3>
-        <textarea
-          value={comment}
-          onChange={(e) => setComment(e.target.value)}
-          placeholder="이번 달 성과나 이슈를 간단히 공유해주세요..."
-          className="w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none"
-          rows={3}
-        />
-      </div>
+      {/* 목표가 없는 경우 */}
+      {!selectedOrgId ? (
+        <div className="bg-slate-50 border border-slate-200 rounded-xl p-10 text-center">
+          <p className="text-slate-600 mb-2">조직을 선택해주세요</p>
+          <p className="text-sm text-slate-500">
+            위의 드롭다운에서 체크인할 조직을 선택하세요
+          </p>
+        </div>
+      ) : orgObjectives.length === 0 ? (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-10 text-center">
+          <p className="text-yellow-800 mb-2">아직 설정된 목표가 없습니다</p>
+          <p className="text-sm text-yellow-600 mb-4">
+            목표 수립 페이지에서 OKR을 설정해주세요
+          </p>
+          <a 
+            href={`/wizard/${selectedOrgId}`}
+            className="inline-block px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition-colors"
+          >
+            목표 수립하기
+          </a>
+        </div>
+      ) : (
+        /* 목표별 KR 카드 목록 */
+        <div className="space-y-6">
+          {orgObjectives.map((objective) => {
+            // 이 목표의 KR들
+            const objectiveKRs = krs.filter(k => k.objectiveId === objective.id);
+            
+            // 진행률 계산
+            const totalProgress = objectiveKRs.length > 0
+              ? Math.round(
+                  objectiveKRs.reduce((sum, kr) => sum + (kr.progressPct || 0), 0) / 
+                  objectiveKRs.length
+                )
+              : 0;
 
-      <button
-        onClick={handleCompleteCheckIn}
-        className="w-full bg-blue-600 text-white rounded-xl py-4 text-lg font-semibold hover:bg-blue-700 transition-colors"
-      >
-        ✅ 체크인 완료
-      </button>
-
-      {showInsights && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-2xl p-8 max-w-2xl w-full mx-4">
-            <div className="text-center mb-6">
-              <div className="text-4xl mb-2">🎉</div>
-              <h2 className="text-2xl font-bold text-slate-900">3월 체크인 완료!</h2>
-            </div>
-
-            <div className="bg-slate-50 rounded-xl p-6 mb-6">
-              <div className="text-center mb-4">
-                <div className="text-3xl font-bold text-blue-600">78%</div>
-                <div className="text-sm text-slate-600">전체 진행률 (전월 대비 +6%p)</div>
-              </div>
-            </div>
-
-            <div className="bg-gradient-to-br from-blue-50 to-violet-50 rounded-xl p-6 mb-6">
-              <div className="flex items-center gap-2 mb-4">
-                <Bot className="w-6 h-6 text-blue-600" />
-                <h3 className="font-semibold text-slate-900">AI 인사이트</h3>
-              </div>
-
-              <div className="space-y-4">
-                <div>
-                  <h4 className="font-medium text-green-700 mb-2">✅ 강점</h4>
-                  <ul className="space-y-1 text-sm text-slate-700">
-                    <li>· 매출채권회전일 목표 조기 달성</li>
-                    <li>· 인재유지율 목표 초과 달성 중</li>
-                  </ul>
-                </div>
-
-                <div>
-                  <h4 className="font-medium text-orange-700 mb-2">⚠️ 개선 포인트</h4>
-                  <ul className="space-y-1 text-sm text-slate-700">
-                    <li>· 영업이익률 목표 대비 8%p 갭</li>
-                    <li className="ml-4 text-slate-600">→ "원가 구조 점검 또는 고마진 제품 비중 확대 권장"</li>
-                    <li>· 교육이수율 85%</li>
-                    <li className="ml-4 text-slate-600">→ "잔여 2개월간 월 7.5%p씩 필요"</li>
-                  </ul>
-                </div>
-
-                <div>
-                  <h4 className="font-medium text-slate-700 mb-2">📊 등급 분포</h4>
-                  <div className="flex gap-2">
-                    <span className="px-3 py-1 bg-blue-600 text-white rounded text-sm font-medium">S 0</span>
-                    <span className="px-3 py-1 bg-emerald-600 text-white rounded text-sm font-medium">A 1</span>
-                    <span className="px-3 py-1 bg-lime-600 text-white rounded text-sm font-medium">B 3</span>
-                    <span className="px-3 py-1 bg-orange-500 text-white rounded text-sm font-medium">C 2</span>
-                    <span className="px-3 py-1 bg-red-600 text-white rounded text-sm font-medium">D 0</span>
+            return (
+              <div key={objective.id} className="bg-white rounded-xl border border-slate-200 p-6">
+                {/* 목표 헤더 */}
+                <div className="flex items-start justify-between mb-6 pb-4 border-b border-slate-200">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className={`px-2 py-1 rounded text-xs font-medium ${getBIIColor(objective.biiType)}`}>
+                        {objective.biiType}
+                      </span>
+                      <span className="text-sm text-slate-500">
+                        Objective
+                      </span>
+                    </div>
+                    <h2 className="text-xl font-bold text-slate-900">{objective.name}</h2>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-3xl font-bold text-slate-900">{totalProgress}%</div>
+                    <div className="text-sm text-slate-500">진행률</div>
                   </div>
                 </div>
-              </div>
-            </div>
 
-            <div className="flex gap-3">
-              <button
-                onClick={() => window.location.href = '/'}
-                className="flex-1 bg-blue-600 text-white rounded-lg py-3 font-medium hover:bg-blue-700 transition-colors"
-              >
-                📊 대시보드 보기
-              </button>
-              <button
-                onClick={() => setShowInsights(false)}
-                className="flex-1 border border-slate-300 text-slate-700 rounded-lg py-3 font-medium hover:bg-slate-50 transition-colors"
-              >
-                💬 팀장에게 공유
-              </button>
-            </div>
-          </div>
+                {/* KR 카드들 */}
+                {objectiveKRs.length > 0 ? (
+                  <div className="space-y-4">
+                    {objectiveKRs.map((kr) => (
+                      <KRCard key={kr.id} kr={kr} />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-6 text-center text-slate-500">
+                    이 목표에 연결된 KR이 없습니다
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* 하단 액션 버튼 */}
+      {orgObjectives.length > 0 && (
+        <div className="flex justify-end gap-3 pt-4">
+          <button className="px-6 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors">
+            임시 저장
+          </button>
+          <button className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium">
+            체크인 완료
+          </button>
         </div>
       )}
     </div>
   );
-}
-
-function getMilestoneProgress(kr: { milestones?: Array<{ completed: boolean }> }): number {
-  if (!kr.milestones || kr.milestones.length === 0) return 0;
-  const completed = kr.milestones.filter(m => m.completed).length;
-  return Math.round((completed / kr.milestones.length) * 100);
 }
