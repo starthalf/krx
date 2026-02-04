@@ -1,5 +1,5 @@
 // src/pages/Wizard.tsx
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, Bot, Target, RefreshCw, Pencil, Trash2, ChevronDown, BookOpen, Plus, X, ArrowLeft, Loader2 } from 'lucide-react';
 import { supabase } from '../lib/supabase'; // Supabase 클라이언트
@@ -37,11 +37,15 @@ interface KRCandidate {
 
 export default function Wizard() {
   const navigate = useNavigate();
-  const { orgId } = useParams<{ orgId: string }>(); // URL에서 조직 ID 가져오기
-  const { fetchObjectives, fetchKRs, organizations } = useStore(); // Store Hook
+  const { orgId: urlOrgId } = useParams<{ orgId: string }>();  // 변수명 변경
+  const { fetchObjectives, fetchKRs, organizations } = useStore();
+
+  // 조직 선택 state 추가
+  const [selectedOrgId, setSelectedOrgId] = useState<string | null>(urlOrgId || null);
+  const [showOrgSelector, setShowOrgSelector] = useState(!urlOrgId);
 
   const [currentStep, setCurrentStep] = useState(0);
-  const [showOneClickModal, setShowOneClickModal] = useState(true);
+  const [showOneClickModal, setShowOneClickModal] = useState(!urlOrgId); // 조건 변경
   
   // 로딩 상태들
   const [isAIGenerating, setIsAIGenerating] = useState(false);
@@ -51,9 +55,24 @@ export default function Wizard() {
   const [selectedObjectiveTab, setSelectedObjectiveTab] = useState('1');
   const [expandedKR, setExpandedKR] = useState<string | null>(null);
 
-  // 현재 조직 이름 (UI 표시용)
+ // 조직 ID는 선택된 ID 사용
+  const orgId = selectedOrgId;
   const currentOrg = organizations.find(o => o.id === orgId);
   const currentOrgName = currentOrg?.name || '우리 조직';
+
+  // 조직이 선택되면 모달 표시
+  useEffect(() => {
+    if (selectedOrgId && showOrgSelector) {
+      setShowOrgSelector(false);
+      setShowOneClickModal(true);
+    }
+  }, [selectedOrgId, showOrgSelector]);
+
+  // 조직 선택 핸들러
+  const handleSelectOrg = (selectOrgId: string) => {
+    setSelectedOrgId(selectOrgId);
+    navigate(`/wizard/${selectOrgId}`, { replace: true });
+  };
 
   // 목표(Objective) 후보군 State
   const [objectives, setObjectives] = useState<ObjectiveCandidate[]>([
@@ -286,6 +305,121 @@ export default function Wizard() {
     Improve: objectives.filter(o => o.selected && o.biiType === 'Improve').length,
   };
 
+// ========== 조직 선택 화면 ==========
+  if (showOrgSelector) {
+    return (
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+        <div className="bg-white rounded-2xl p-8 max-w-4xl w-full mx-4 max-h-[80vh] overflow-y-auto">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-2xl font-bold text-slate-900">조직 선택</h2>
+            <button 
+              onClick={() => navigate(-1)}
+              className="text-slate-400 hover:text-slate-600 transition-colors"
+            >
+              <X className="w-6 h-6" />
+            </button>
+          </div>
+
+          <p className="text-slate-600 mb-6">
+            목표를 수립할 조직을 선택해주세요
+          </p>
+
+          {/* 전사 */}
+          {organizations.filter(o => o.level === '전사').length > 0 && (
+            <div className="mb-6">
+              <h3 className="text-sm font-semibold text-slate-700 mb-3">전사</h3>
+              <div className="grid grid-cols-1 gap-3">
+                {organizations
+                  .filter(o => o.level === '전사')
+                  .map(org => (
+                    <button
+                      key={org.id}
+                      onClick={() => handleSelectOrg(org.id)}
+                      className="text-left border-2 border-slate-200 rounded-xl p-4 hover:border-blue-500 hover:bg-blue-50 transition-all"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <div className="text-sm text-slate-500">{org.level} • {org.orgType}</div>
+                          <div className="text-lg font-semibold text-slate-900 mt-1">{org.name}</div>
+                          {org.mission && (
+                            <div className="text-sm text-slate-600 mt-1">{org.mission}</div>
+                          )}
+                        </div>
+                        <ChevronRight className="w-5 h-5 text-slate-400" />
+                      </div>
+                    </button>
+                  ))}
+              </div>
+            </div>
+          )}
+
+          {/* 본부 */}
+          {organizations.filter(o => o.level === '본부').length > 0 && (
+            <div className="mb-6">
+              <h3 className="text-sm font-semibold text-slate-700 mb-3">본부</h3>
+              <div className="grid grid-cols-2 gap-3">
+                {organizations
+                  .filter(o => o.level === '본부')
+                  .map(org => (
+                    <button
+                      key={org.id}
+                      onClick={() => handleSelectOrg(org.id)}
+                      className="text-left border-2 border-slate-200 rounded-xl p-4 hover:border-blue-500 hover:bg-blue-50 transition-all"
+                    >
+                      <div className="text-sm text-slate-500">{org.level} • {org.orgType}</div>
+                      <div className="text-base font-semibold text-slate-900 mt-1">{org.name}</div>
+                    </button>
+                  ))}
+              </div>
+            </div>
+          )}
+
+          {/* 팀 */}
+          {organizations.filter(o => o.level === '팀').length > 0 && (
+            <div>
+              <h3 className="text-sm font-semibold text-slate-700 mb-3">팀</h3>
+              <div className="grid grid-cols-2 gap-3">
+                {organizations
+                  .filter(o => o.level === '팀')
+                  .map(org => (
+                    <button
+                      key={org.id}
+                      onClick={() => handleSelectOrg(org.id)}
+                      className="text-left border-2 border-slate-200 rounded-xl p-4 hover:border-blue-500 hover:bg-blue-50 transition-all"
+                    >
+                      <div className="text-sm text-slate-500">{org.level} • {org.orgType}</div>
+                      <div className="text-base font-semibold text-slate-900 mt-1">{org.name}</div>
+                    </button>
+                  ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ========== 조직 ID 검증 ==========
+  if (!orgId) {
+    return (
+      <div className="p-6 text-center">
+        <div className="bg-red-50 border border-red-200 rounded-xl p-6 max-w-md mx-auto">
+          <p className="text-red-800 mb-2">조직 정보를 불러올 수 없습니다</p>
+          <button
+            onClick={() => navigate(-1)}
+            className="mt-4 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+          >
+            돌아가기
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ========== 기존 return 문은 그대로 유지 ==========
+  return (
+    // ... 기존 Wizard 코드 그대로 ...
+  
   return (
     <div className="p-6 max-w-6xl mx-auto">
       {/* 상단 헤더 */}
