@@ -160,6 +160,58 @@ export default function OKRStatus() {
     );
   };
 
+  // 전사 뷰 데이터 로딩
+  useEffect(() => {
+    if (viewMode === 'company' && companyOrg) {
+      fetchObjectives(companyOrg.id);
+      fetchKRs(companyOrg.id);
+      
+      // 본부별 데이터도 로딩
+      divisions.forEach(div => {
+        fetchObjectives(div.id);
+        fetchKRs(div.id);
+      });
+    }
+  }, [viewMode, companyOrg, divisions.length]);
+
+  // 본부 뷰 데이터 로딩
+  useEffect(() => {
+    if (viewMode === 'division' && selectedOrgId) {
+      fetchObjectives(selectedOrgId);
+      fetchKRs(selectedOrgId);
+      
+      // 팀 데이터도 로딩
+      const divTeams = organizations.filter(o => o.level === '팀' && o.parentOrgId === selectedOrgId);
+      divTeams.forEach(team => {
+        fetchObjectives(team.id);
+        fetchKRs(team.id);
+      });
+    }
+  }, [viewMode, selectedOrgId]);
+
+  // 팀 뷰 데이터 로딩
+  useEffect(() => {
+    if (viewMode === 'team' && selectedOrgId) {
+      fetchObjectives(selectedOrgId);
+      fetchKRs(selectedOrgId);
+    }
+  }, [viewMode, selectedOrgId]);
+
+  // 본부 뷰: 자동 선택
+  useEffect(() => {
+    if (viewMode === 'division' && !selectedOrgId && divisions.length > 0) {
+      setSelectedOrgId(divisions[0].id);
+    }
+  }, [viewMode, divisions.length]);
+
+  // 팀 뷰: 자동 선택
+  useEffect(() => {
+    if (viewMode === 'team' && !selectedOrgId) {
+      const firstTeam = organizations.find(o => o.level === '팀');
+      if (firstTeam) setSelectedOrgId(firstTeam.id);
+    }
+  }, [viewMode]);
+
   // 뷰 모드별 렌더링
   const renderCompanyView = () => {
     if (!companyOrg) {
@@ -169,22 +221,6 @@ export default function OKRStatus() {
         </div>
       );
     }
-
-    // 전사 목표 로딩
-    useEffect(() => {
-      if (companyOrg) {
-        fetchObjectives(companyOrg.id);
-        fetchKRs(companyOrg.id);
-      }
-    }, [companyOrg]);
-
-    // 본부별 데이터 로딩
-    useEffect(() => {
-      divisions.forEach(div => {
-        fetchObjectives(div.id);
-        fetchKRs(div.id);
-      });
-    }, [divisions.length]);
 
     const companyObjectives = objectives.filter(o => o.orgId === companyOrg.id);
 
@@ -230,33 +266,12 @@ export default function OKRStatus() {
   };
 
   const renderDivisionView = () => {
-    // 자동 선택: 첫 번째 본부
-    useEffect(() => {
-      if (!selectedOrgId && divisions.length > 0) {
-        setSelectedOrgId(divisions[0].id);
-      }
-    }, [divisions.length]);
-
     if (!selectedOrgId) {
       return <div className="text-center text-slate-500 py-20">본부를 선택해주세요</div>;
     }
 
     const selectedDiv = organizations.find(o => o.id === selectedOrgId);
     if (!selectedDiv) return null;
-
-    // 본부 및 팀 데이터 로딩
-    useEffect(() => {
-      if (selectedOrgId) {
-        fetchObjectives(selectedOrgId);
-        fetchKRs(selectedOrgId);
-        
-        const divTeams = organizations.filter(o => o.level === '팀' && o.parentOrgId === selectedOrgId);
-        divTeams.forEach(team => {
-          fetchObjectives(team.id);
-          fetchKRs(team.id);
-        });
-      }
-    }, [selectedOrgId]);
 
     const divObjectives = objectives.filter(o => o.orgId === selectedOrgId);
 
@@ -315,28 +330,12 @@ export default function OKRStatus() {
   };
 
   const renderTeamView = () => {
-    // 팀 선택이 없으면 첫 번째 팀 자동 선택
-    useEffect(() => {
-      if (!selectedOrgId) {
-        const firstTeam = organizations.find(o => o.level === '팀');
-        if (firstTeam) setSelectedOrgId(firstTeam.id);
-      }
-    }, []);
-
     if (!selectedOrgId) {
       return <div className="text-center text-slate-500 py-20">팀을 선택해주세요</div>;
     }
 
     const selectedTeam = organizations.find(o => o.id === selectedOrgId);
     if (!selectedTeam) return null;
-
-    // 팀 데이터 로딩
-    useEffect(() => {
-      if (selectedOrgId) {
-        fetchObjectives(selectedOrgId);
-        fetchKRs(selectedOrgId);
-      }
-    }, [selectedOrgId]);
 
     const teamObjectives = objectives.filter(o => o.orgId === selectedOrgId);
     const allTeams = organizations.filter(o => o.level === '팀');
