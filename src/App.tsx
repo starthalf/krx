@@ -6,12 +6,10 @@ import Layout from './components/Layout';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import OKRStatus from './pages/OKRStatus';
+import Checkin from './pages/Checkin';
 import Organization from './pages/Organization';
 import KPIPool from './pages/KPIPool';
 import Wizard from './pages/Wizard';
-
-// Checkin 페이지는 Phase 5에서 구현 예정
-// import Checkin from './pages/Checkin';
 
 function App() {
   return (
@@ -36,18 +34,18 @@ function App() {
             {/* 대시보드 */}
             <Route path="dashboard" element={<Dashboard />} />
             
-            {/* OKR 현황 */}
-            <Route path="okr" element={<OKRStatus />} />
+            {/* 목표 현황 (계층별 Alignment 시각화) */}
+            <Route path="okr" element={<Navigate to="/okr/company" replace />} />
             <Route path="okr/company" element={<OKRStatus />} />
             <Route path="okr/division" element={<OKRStatus />} />
             <Route path="okr/team" element={<OKRStatus />} />
             
+            {/* 체크인 (실적 입력 및 KR 상세 관리) */}
+            <Route path="checkin" element={<Checkin />} />
+            
             {/* 목표 수립 위저드 */}
             <Route path="wizard" element={<Wizard />} />
             <Route path="wizard/:orgId" element={<Wizard />} />
-            
-            {/* 체크인 - Phase 5에서 구현 예정, 임시로 Dashboard */}
-            <Route path="checkin" element={<Dashboard />} />
             
             {/* 조직 관리 */}
             <Route path="organization" element={<Organization />} />
