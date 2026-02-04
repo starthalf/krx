@@ -415,10 +415,6 @@ export default function Wizard() {
       </div>
     );
   }
-
-  // ========== 기존 return 문은 그대로 유지 ==========
-  return (
-    // ... 기존 Wizard 코드 그대로 ...
   
   return (
     <div className="p-6 max-w-6xl mx-auto">
