@@ -225,7 +225,14 @@ export const useStore = create<AppState>((set, get) => ({
           order: obj.sort_order
         }));
         
-        set({ objectives });
+        // 기존 데이터 유지하면서 새 데이터 추가 (중복 제거)
+        set(state => {
+          const existingIds = new Set(state.objectives.map(o => o.id));
+          const newObjectives = objectives.filter(o => !existingIds.has(o.id));
+          return {
+            objectives: [...state.objectives, ...newObjectives]
+          };
+        });
       }
     } catch (error: any) {
       console.error('❌ fetchObjectives error:', error);
@@ -380,7 +387,14 @@ export const useStore = create<AppState>((set, get) => ({
           })) : []
         }));
         
-        set({ krs });
+        // 기존 데이터 유지하면서 새 데이터 추가 (중복 제거)
+        set(state => {
+          const existingIds = new Set(state.krs.map(k => k.id));
+          const newKRs = krs.filter(k => !existingIds.has(k.id));
+          return {
+            krs: [...state.krs, ...newKRs]
+          };
+        });
       }
     } catch (error: any) {
       console.error('❌ fetchKRs error:', error);
