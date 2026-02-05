@@ -1,27 +1,33 @@
-// src/pages/Organization.tsx
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { ChevronRight, ChevronDown, Download, Upload, Bot, Loader2, Save } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { getOrgTypeColor } from '../utils/helpers';
+import { exportToExcel, readExcel } from '../utils/excel'; // [New] 엑셀 유틸
+import { supabase } from '../lib/supabase';
 import type { Organization } from '../types';
 
 export default function OrganizationPage() {
-  const { organizations, updateOrganization, loading } = useStore();
+  const { organizations, fetchOrganizations, updateOrganization, loading } = useStore();
+  const fileInputRef = useRef<HTMLInputElement>(null); // [New] 파일 입력 참조
   
   const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null);
   const [expandedOrgs, setExpandedOrgs] = useState<Set<string>>(new Set());
+  const [isUploading, setIsUploading] = useState(false);
 
-  // 첫 번째 조직 자동 선택
+  // [기존 코드 유지] 첫 번째 조직 자동 선택
   useEffect(() => {
     if (organizations.length > 0 && !selectedOrgId) {
       const rootOrg = organizations.find(o => !o.parentOrgId) || organizations[0];
-      setSelectedOrgId(rootOrg.id);
-      setExpandedOrgs(new Set([rootOrg.id]));
+      if (rootOrg) {
+        setSelectedOrgId(rootOrg.id);
+        setExpandedOrgs(new Set([rootOrg.id]));
+      }
     }
   }, [organizations, selectedOrgId]);
 
   const selectedOrg = organizations.find(org => org.id === selectedOrgId);
 
+  // [기존 코드 유지] 트리 확장 토글
   const toggleExpand = (orgId: string) => {
     const newExpanded = new Set(expandedOrgs);
     if (newExpanded.has(orgId)) {
@@ -32,10 +38,12 @@ export default function OrganizationPage() {
     setExpandedOrgs(newExpanded);
   };
 
+  // [기존 코드 유지] 자식 조직 찾기
   const getChildOrgs = (parentId: string | null) => {
     return organizations.filter(org => org.parentOrgId === parentId);
   };
 
+  // [기존 코드 유지] 트리 렌더링
   const renderOrgTree = (org: Organization, level: number = 0) => {
     const children = getChildOrgs(org.id);
     const hasChildren = children.length > 0;
@@ -88,6 +96,7 @@ export default function OrganizationPage() {
 
   const rootOrgs = organizations.filter(org => org.parentOrgId === null);
 
+  // [기존 코드 유지] 저장 핸들러
   const handleSave = async () => {
     if (!selectedOrg) return;
     
@@ -103,27 +112,114 @@ export default function OrganizationPage() {
     alert('✅ 조직 정보가 저장되었습니다');
   };
 
-  // 로딩 화면
+  // ------------------------------------------------------------------
+  // [New] 엑셀 기능 구현
+  // ------------------------------------------------------------------
+
+  // 1. 템플릿 다운로드
+  const handleDownloadTemplate = () => {
+    const template = [
+      {
+        조직명: '신규팀',
+        상위조직명: '제품개발본부', // 상위 조직 이름을 적으면 ID를 찾아 연결
+        레벨: '팀', // 전사, 부문, 본부, 실, 팀
+        유형: 'Middle', // Front, Middle, Back
+        미션: '팀의 미션을 입력하세요',
+        기능태그: '기획, 개발',
+        인원수: 5
+      },
+      {
+        조직명: '디자인실',
+        상위조직명: '테크스타트업(전사)',
+        레벨: '실',
+        유형: 'Middle',
+        미션: '사용자 경험 혁신',
+        기능태그: 'UI, UX, BX',
+        인원수: 10
+      }
+    ];
+    exportToExcel(template, '조직일괄등록_템플릿');
+  };
+
+  // 2. 파일 선택 트리거
+  const handleUploadClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  // 3. 파일 업로드 및 데이터 처리
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!confirm('기존 조직 데이터에 추가됩니다. 진행하시겠습니까?')) {
+      e.target.value = '';
+      return;
+    }
+
+    setIsUploading(true);
+    try {
+      const jsonData = await readExcel(file);
+      console.log('Parsed Excel:', jsonData);
+
+      // (1) 회사 ID 가져오기 (현재 조직들의 회사 ID 사용)
+      const companyId = organizations[0]?.companyId;
+      if (!companyId) throw new Error('기준 회사 정보를 찾을 수 없습니다.');
+
+      // (2) 데이터 변환 및 부모 조직 연결
+      // 주의: 부모 조직 ID를 찾기 위해 이름 매핑을 시도합니다.
+      // 실제로는 더 복잡한 로직(부모가 엑셀 안에 있는 경우 등)이 필요하지만, 
+      // 여기서는 "이미 존재하는 조직" 또는 "루트"만 처리합니다.
+      
+      const newOrgs = jsonData.map((row: any) => {
+        // 상위 조직 찾기
+        const parentName = row['상위조직명'];
+        const parent = organizations.find(o => o.name === parentName);
+        
+        return {
+          company_id: companyId,
+          name: row['조직명'],
+          level: row['레벨'] || '팀',
+          parent_org_id: parent ? parent.id : null, // 부모 못 찾으면 루트가 됨 (주의)
+          org_type: row['유형'] || 'Middle',
+          mission: row['미션'] || '',
+          function_tags: row['기능태그'] ? row['기능태그'].split(',').map((t:string) => t.trim()) : [],
+          headcount: row['인원수'] || 0,
+          sort_order: 99
+        };
+      });
+
+      // (3) Supabase Insert
+      const { error } = await supabase.from('organizations').insert(newOrgs);
+      if (error) throw error;
+
+      alert(`✅ ${newOrgs.length}개 조직이 성공적으로 업로드되었습니다!`);
+      await fetchOrganizations(companyId); // 목록 새로고침
+
+    } catch (error: any) {
+      console.error('Upload Error:', error);
+      alert(`업로드 실패: ${error.message}`);
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  // ------------------------------------------------------------------
+
   if (loading && organizations.length === 0) {
     return (
       <div className="flex items-center justify-center h-full">
-        <div className="text-center">
-          <Loader2 className="w-8 h-8 animate-spin text-blue-600 mx-auto mb-2" />
-          <p className="text-slate-600">조직 데이터 로딩 중...</p>
-        </div>
+        <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
       </div>
     );
   }
 
-  // 데이터 없음
   if (!loading && organizations.length === 0) {
     return (
       <div className="p-6">
         <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-6 text-center">
           <p className="text-yellow-800 mb-2">조직 데이터가 없습니다</p>
-          <p className="text-sm text-yellow-600">
-            Supabase에서 시드 데이터를 삽입해주세요
-          </p>
+          <p className="text-sm text-yellow-600">Supabase에서 시드 데이터를 삽입해주세요</p>
         </div>
       </div>
     );
@@ -139,13 +235,29 @@ export default function OrganizationPage() {
           </p>
         </div>
         <div className="flex gap-2">
-          <button className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors text-sm font-medium flex items-center gap-2">
+          {/* [New] 숨겨진 파일 입력 */}
+          <input 
+            type="file" 
+            ref={fileInputRef} 
+            onChange={handleFileChange} 
+            accept=".xlsx, .xls" 
+            hidden 
+          />
+
+          <button 
+            onClick={handleDownloadTemplate}
+            className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors text-sm font-medium flex items-center gap-2"
+          >
             <Download className="w-4 h-4" />
             엑셀 템플릿
           </button>
-          <button className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors text-sm font-medium flex items-center gap-2">
-            <Upload className="w-4 h-4" />
-            일괄 업로드
+          <button 
+            onClick={handleUploadClick}
+            disabled={isUploading}
+            className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors text-sm font-medium flex items-center gap-2 disabled:opacity-50"
+          >
+            {isUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+            {isUploading ? '업로드 중...' : '일괄 업로드'}
           </button>
           <button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium flex items-center gap-2">
             <Bot className="w-4 h-4" />
