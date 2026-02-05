@@ -1,9 +1,9 @@
 // src/pages/Wizard.tsx
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, Bot, Target, RefreshCw, Pencil, Trash2, ChevronDown, BookOpen, Plus, X, ArrowLeft, Loader2 } from 'lucide-react';
-import { supabase } from '../lib/supabase'; // Supabase 클라이언트
-import { useStore } from '../store/useStore'; // Store (조직정보, 리프레시용)
+import { supabase } from '../lib/supabase';
+import { useStore } from '../store/useStore';
 import { getBIIColor, getKPICategoryColor } from '../utils/helpers';
 import type { BIIType } from '../types';
 
@@ -37,17 +37,11 @@ interface KRCandidate {
 
 export default function Wizard() {
   const navigate = useNavigate();
-  const { orgId: urlOrgId } = useParams<{ orgId: string }>();  // 변수명 변경
+  const { orgId } = useParams<{ orgId: string }>();
   const { fetchObjectives, fetchKRs, organizations } = useStore();
 
-  // 조직 선택 state 추가
-  const [selectedOrgId, setSelectedOrgId] = useState<string | null>(urlOrgId || null);
-  const [showOrgSelector, setShowOrgSelector] = useState(!urlOrgId);
-
   const [currentStep, setCurrentStep] = useState(0);
-  const [showOneClickModal, setShowOneClickModal] = useState(!urlOrgId); // 조건 변경
-  
-  // 로딩 상태들
+  const [showOneClickModal, setShowOneClickModal] = useState(true);
   const [isAIGenerating, setIsAIGenerating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   
@@ -55,26 +49,9 @@ export default function Wizard() {
   const [selectedObjectiveTab, setSelectedObjectiveTab] = useState('1');
   const [expandedKR, setExpandedKR] = useState<string | null>(null);
 
- // 조직 ID는 선택된 ID 사용
-  const orgId = selectedOrgId;
   const currentOrg = organizations.find(o => o.id === orgId);
   const currentOrgName = currentOrg?.name || '우리 조직';
 
-  // 조직이 선택되면 모달 표시
-  useEffect(() => {
-    if (selectedOrgId && showOrgSelector) {
-      setShowOrgSelector(false);
-      setShowOneClickModal(true);
-    }
-  }, [selectedOrgId, showOrgSelector]);
-
-  // 조직 선택 핸들러
-  const handleSelectOrg = (selectOrgId: string) => {
-    setSelectedOrgId(selectOrgId);
-    navigate(`/wizard/${selectOrgId}`, { replace: true });
-  };
-
-  // 목표(Objective) 후보군 State
   const [objectives, setObjectives] = useState<ObjectiveCandidate[]>([
     { id: '1', name: '시장 선도형 신제품 수주 확대를 통한 매출 성장 달성', biiType: 'Improve', perspective: '재무', selected: true },
     { id: '2', name: '고객 중심 영업 프로세스 혁신', biiType: 'Innovate', perspective: '프로세스', selected: true },
@@ -83,15 +60,16 @@ export default function Wizard() {
     { id: '5', name: '브랜드 인지도 제고를 통한 시장 확대', biiType: 'Improve', perspective: '고객', selected: false },
   ]);
 
-  // KR 후보군 State
-  const [krs, setKrs] = useState<KRCandidate[]>([
+  // [수정 1] KRCandidate 타입에 selected 속성 추가하여 상태 관리
+  const [krs, setKrs] = useState<(KRCandidate & { selected?: boolean })[]>([
     {
       id: 'kr-1', objectiveId: '1', name: '매출 목표달성도', definition: '사업계획 대비 실제 매출 달성 정도',
       formula: '당해년도 매출액 / 계획상 매출액 × 100', unit: '억원', weight: 25, targetValue: 3528,
       biiType: 'Improve', kpiCategory: '전략', perspective: '재무', indicatorType: '결과', measurementCycle: '월',
       previousYear: 3200, poolMatch: 96,
       gradeCriteria: { S: 4234, A: 3881, B: 3528, C: 3175, D: 0 },
-      quarterlyTargets: { Q1: 843, Q2: 953, Q3: 868, Q4: 864 }
+      quarterlyTargets: { Q1: 843, Q2: 953, Q3: 868, Q4: 864 },
+      selected: true
     },
     {
       id: 'kr-2', objectiveId: '1', name: '영업이익액', definition: '매출에서 영업비용을 제외한 순이익',
@@ -99,7 +77,8 @@ export default function Wizard() {
       biiType: 'Improve', kpiCategory: '전략', perspective: '재무', indicatorType: '결과', measurementCycle: '월',
       previousYear: 260, poolMatch: 92,
       gradeCriteria: { S: 344, A: 316, B: 287, C: 258, D: 0 },
-      quarterlyTargets: { Q1: 68, Q2: 75, Q3: 72, Q4: 72 }
+      quarterlyTargets: { Q1: 68, Q2: 75, Q3: 72, Q4: 72 },
+      selected: true
     },
     {
       id: 'kr-3', objectiveId: '1', name: '수주금액', definition: '신규 계약 체결 금액의 합계',
@@ -107,7 +86,8 @@ export default function Wizard() {
       biiType: 'Improve', kpiCategory: '전략', perspective: '고객', indicatorType: '결과', measurementCycle: '월',
       previousYear: 3230, poolMatch: 88,
       gradeCriteria: { S: 4266, A: 3911, B: 3555, C: 3200, D: 0 },
-      quarterlyTargets: { Q1: 850, Q2: 960, Q3: 875, Q4: 870 }
+      quarterlyTargets: { Q1: 850, Q2: 960, Q3: 875, Q4: 870 },
+      selected: true
     },
     {
       id: 'kr-4', objectiveId: '2', name: '매출채권회전일', definition: '매출채권이 현금으로 회수되는데 걸리는 평균 일수',
@@ -115,7 +95,8 @@ export default function Wizard() {
       biiType: 'Innovate', kpiCategory: '고유업무', perspective: '프로세스', indicatorType: '결과', measurementCycle: '월',
       previousYear: 52, poolMatch: 94,
       gradeCriteria: { S: 37, A: 41, B: 46, C: 51, D: 999 },
-      quarterlyTargets: { Q1: 46, Q2: 46, Q3: 46, Q4: 46 }
+      quarterlyTargets: { Q1: 46, Q2: 46, Q3: 46, Q4: 46 },
+      selected: true
     },
     {
       id: 'kr-5', objectiveId: '2', name: '중점거래처 품목증가율', definition: '주요 거래처 대상 신규 품목 계약 확대',
@@ -123,7 +104,8 @@ export default function Wizard() {
       biiType: 'Innovate', kpiCategory: '전략', perspective: '고객', indicatorType: '과정', measurementCycle: '분기',
       previousYear: 0, poolMatch: 0,
       gradeCriteria: { S: 120, A: 110, B: 100, C: 80, D: 0 },
-      quarterlyTargets: { Q1: 25, Q2: 50, Q3: 75, Q4: 100 }
+      quarterlyTargets: { Q1: 25, Q2: 50, Q3: 75, Q4: 100 },
+      selected: true
     },
     {
       id: 'kr-6', objectiveId: '3', name: '인재유지율', definition: '핵심 인재의 조직 잔류율',
@@ -131,7 +113,8 @@ export default function Wizard() {
       biiType: 'Build', kpiCategory: '공통', perspective: '학습성장', indicatorType: '결과', measurementCycle: '월',
       previousYear: 93, poolMatch: 98,
       gradeCriteria: { S: 98, A: 96, B: 95, C: 93, D: 0 },
-      quarterlyTargets: { Q1: 95, Q2: 95, Q3: 95, Q4: 95 }
+      quarterlyTargets: { Q1: 95, Q2: 95, Q3: 95, Q4: 95 },
+      selected: true
     },
     {
       id: 'kr-7', objectiveId: '3', name: '교육이수율', definition: '필수 교육과정 이수 완료율',
@@ -139,22 +122,140 @@ export default function Wizard() {
       biiType: 'Build', kpiCategory: '공통', perspective: '학습성장', indicatorType: '결과', measurementCycle: '월',
       previousYear: 88, poolMatch: 95,
       gradeCriteria: { S: 110, A: 105, B: 100, C: 90, D: 0 },
-      quarterlyTargets: { Q1: 25, Q2: 50, Q3: 75, Q4: 100 }
+      quarterlyTargets: { Q1: 25, Q2: 50, Q3: 75, Q4: 100 },
+      selected: true
     },
   ]);
 
-  // ----------------------------------------------------
-  // [Phase 4] AI 목표 생성 핸들러 (Step 1)
-  // ----------------------------------------------------
-  const handleAIGenerateObjectives = async () => {
+  // [수정 2] 체크박스 토글 핸들러
+  const toggleKR = (krId: string) => {
+    setKrs(krs.map(kr => 
+      kr.id === krId ? { ...kr, selected: !kr.selected } : kr
+    ));
+  };
+
+  // [수정 3] 선택된 KR만 가중치 계산
+  const selectedKRs = krs.filter(kr => kr.selected !== false);
+  const totalWeight = selectedKRs
+    .filter(kr => kr.objectiveId === selectedObjectiveTab)
+    .reduce((sum, kr) => sum + kr.weight, 0);
+
+  // [수정 4] KR 추가 핸들러
+  const handleAddKR = () => {
+    const newKR: KRCandidate & { selected: boolean } = {
+      id: `kr-new-${Date.now()}`,
+      objectiveId: selectedObjectiveTab,
+      name: '새 KR',
+      definition: '',
+      formula: '',
+      unit: '%',
+      weight: 10,
+      targetValue: 100,
+      biiType: 'Improve',
+      kpiCategory: '전략',
+      perspective: '재무',
+      indicatorType: '결과',
+      measurementCycle: '월',
+      previousYear: 0,
+      poolMatch: 0,
+      gradeCriteria: { S: 120, A: 110, B: 100, C: 90, D: 0 },
+      quarterlyTargets: { Q1: 25, Q2: 50, Q3: 75, Q4: 100 },
+      selected: true
+    };
+    setKrs([...krs, newKR]);
+    setExpandedKR(newKR.id);
+  };
+
+  // [수정 5] AI KR 재생성 핸들러
+  const handleAIRegenerateKRs = async () => {
     setIsAIGenerating(true);
     
     try {
-      // Edge Function 호출
-      const { data, error } = await supabase.functions.invoke('generate-objectives', {
+      // Mock AI 응답 (실제로는 Edge Function 호출)
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      
+      const currentObj = objectives.find(o => o.id === selectedObjectiveTab);
+      if (!currentObj) return;
+      
+      const aiKRs: (KRCandidate & { selected: boolean })[] = [
+        {
+          id: `kr-ai-${Date.now()}-1`,
+          objectiveId: selectedObjectiveTab,
+          name: `${currentObj.name} - AI 추천 KR 1`,
+          definition: 'AI가 생성한 KR 정의',
+          formula: '계산식',
+          unit: '%',
+          weight: 35,
+          targetValue: 100,
+          biiType: currentObj.biiType,
+          kpiCategory: '전략',
+          perspective: currentObj.perspective,
+          indicatorType: '결과',
+          measurementCycle: '월',
+          previousYear: 85,
+          poolMatch: 92,
+          gradeCriteria: { S: 120, A: 110, B: 100, C: 90, D: 0 },
+          quarterlyTargets: { Q1: 25, Q2: 50, Q3: 75, Q4: 100 },
+          selected: true
+        },
+        {
+          id: `kr-ai-${Date.now()}-2`,
+          objectiveId: selectedObjectiveTab,
+          name: `${currentObj.name} - AI 추천 KR 2`,
+          definition: 'AI가 생성한 KR 정의',
+          formula: '계산식',
+          unit: '개',
+          weight: 30,
+          targetValue: 50,
+          biiType: currentObj.biiType,
+          kpiCategory: '고유업무',
+          perspective: currentObj.perspective,
+          indicatorType: '과정',
+          measurementCycle: '월',
+          previousYear: 40,
+          poolMatch: 88,
+          gradeCriteria: { S: 60, A: 55, B: 50, C: 45, D: 0 },
+          quarterlyTargets: { Q1: 12, Q2: 25, Q3: 38, Q4: 50 },
+          selected: true
+        }
+      ];
+      
+      // 현재 목표의 기존 KR을 제거하고 AI 추천 KR로 대체
+      setKrs([
+        ...krs.filter(kr => kr.objectiveId !== selectedObjectiveTab),
+        ...aiKRs
+      ]);
+      
+      alert('AI가 새로운 KR을 추천했습니다!');
+      
+    } catch (error: any) {
+      console.error('AI KR Error:', error);
+      alert(`AI 생성 실패: ${error.message}`);
+    } finally {
+      setIsAIGenerating(false);
+    }
+  };
+
+  const updateKRWeight = (krId: string, newWeight: number) => {
+    setKrs(krs.map(kr => kr.id === krId ? { ...kr, weight: newWeight } : kr));
+  };
+
+  const toggleObjective = (id: string) => {
+    setObjectives(objectives.map(obj =>
+      obj.id === id ? { ...obj, selected: !obj.selected } : obj
+    ));
+  };
+
+  // Phase 4-2: 원클릭 전체 생성 핸들러
+  const handleOneClickGenerate = async () => {
+    setIsAIGenerating(true);
+    setShowOneClickModal(false);
+
+    try {
+      const { data, error } = await supabase.functions.invoke('one-click-generate', {
         body: {
           orgName: currentOrgName,
-          orgMission: mission, // 현재 입력된 미션 사용
+          orgMission: mission,
           orgType: currentOrg?.orgType || 'Front',
           functionTags: currentOrg?.functionTags || [],
           industry: 'IT 서비스'
@@ -164,17 +265,86 @@ export default function Wizard() {
       if (error) throw error;
 
       if (data && data.objectives) {
-        // AI 응답을 ObjectiveCandidate 형식으로 변환
+        const newObjectives = data.objectives.map((obj: any, idx: number) => ({
+          id: String(idx + 1),
+          name: obj.name,
+          biiType: obj.biiType || 'Improve',
+          perspective: obj.perspective || '재무',
+          selected: true 
+        }));
+        setObjectives(newObjectives);
+
+        const newKRs: (KRCandidate & { selected: boolean })[] = [];
+        data.objectives.forEach((obj: any, objIdx: number) => {
+          if (obj.krs) {
+            obj.krs.forEach((kr: any, krIdx: number) => {
+              newKRs.push({
+                id: `kr-${objIdx}-${krIdx}`,
+                objectiveId: String(objIdx + 1),
+                name: kr.name,
+                definition: kr.definition || kr.name,
+                formula: kr.formula || '실적 측정',
+                unit: kr.unit || '건',
+                weight: kr.weight || 20,
+                targetValue: kr.targetValue || 100,
+                biiType: kr.biiType || obj.biiType,
+                kpiCategory: kr.kpiCategory || '전략',
+                perspective: kr.perspective || '재무',
+                indicatorType: kr.indicatorType || '결과',
+                measurementCycle: kr.measurementCycle || '월',
+                previousYear: 0,
+                poolMatch: 0,
+                gradeCriteria: kr.gradeCriteria || { S: 120, A: 110, B: 100, C: 90, D: 0 },
+                quarterlyTargets: { Q1: 0, Q2: 0, Q3: 0, Q4: 0 },
+                selected: true
+              });
+            });
+          }
+        });
+        setKrs(newKRs);
+
+        setCurrentStep(4);
+        alert('✨ AI가 OKR 전체 세트를 생성했습니다! 내용을 확인해주세요.');
+      }
+
+    } catch (error: any) {
+      console.error('AI Error:', error);
+      alert(`생성 실패: ${error.message}`);
+      setShowOneClickModal(true); 
+    } finally {
+      setIsAIGenerating(false);
+    }
+  };
+
+  const handleStartWizard = () => {
+    setShowOneClickModal(false);
+    setCurrentStep(0);
+  };
+
+  const handleAIGenerateObjectives = async () => {
+    setIsAIGenerating(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('generate-objectives', {
+        body: {
+          orgName: currentOrgName,
+          orgMission: mission,
+          orgType: currentOrg?.orgType || 'Front',
+          functionTags: currentOrg?.functionTags || [],
+          industry: 'IT 서비스'
+        }
+      });
+
+      if (error) throw error;
+
+      if (data && data.objectives) {
         const newObjectives = data.objectives.map((obj: any, index: number) => ({
           id: String(index + 1), 
           name: obj.name,
           biiType: obj.biiType || 'Improve',
           perspective: obj.perspective || '재무',
-          selected: index < 3 // 상위 3개 자동 선택
+          selected: index < 3
         }));
-        
         setObjectives(newObjectives);
-        // alert('AI가 새로운 목표를 제안했습니다!');
       }
 
     } catch (error: any) {
@@ -185,9 +355,6 @@ export default function Wizard() {
     }
   };
 
-  // ----------------------------------------------------
-  // [Phase 3] 실제 DB 저장 핸들러 (Step 4)
-  // ----------------------------------------------------
   const handleSave = async () => {
     if (!orgId) {
       alert('조직 ID가 없습니다. 다시 시도해주세요.');
@@ -201,7 +368,6 @@ export default function Wizard() {
       const selectedObjectives = objectives.filter(o => o.selected);
       
       for (const obj of selectedObjectives) {
-        // 1. 목표(Objective) 저장
         const { data: savedObj, error: objError } = await supabase
           .from('objectives')
           .insert({
@@ -218,8 +384,7 @@ export default function Wizard() {
         if (objError) throw new Error(`목표 저장 실패: ${objError.message}`);
         if (!savedObj) continue;
 
-        // 2. KR 저장
-        const relatedKRs = krs.filter(k => k.objectiveId === obj.id);
+        const relatedKRs = krs.filter(k => k.objectiveId === obj.id && k.selected !== false);
         
         for (const kr of relatedKRs) {
           const { error: krError } = await supabase
@@ -248,7 +413,6 @@ export default function Wizard() {
         }
       }
 
-      // 3. 성공 후 데이터 리프레시 및 이동
       await fetchObjectives(orgId);
       await fetchKRs(orgId);
       
@@ -261,34 +425,6 @@ export default function Wizard() {
     } finally {
       setIsSaving(false);
     }
-  };
-
-  // ----------------------------------------------------
-  // Helper Functions
-  // ----------------------------------------------------
-  const updateKRWeight = (krId: string, newWeight: number) => {
-    setKrs(krs.map(kr => kr.id === krId ? { ...kr, weight: newWeight } : kr));
-  };
-
-  const toggleObjective = (id: string) => {
-    setObjectives(objectives.map(obj =>
-      obj.id === id ? { ...obj, selected: !obj.selected } : obj
-    ));
-  };
-
-  // 모달용 핸들러 (원클릭 생성은 아직 구현 전이므로 페이크 처리)
-  const handleOneClickGenerate = () => {
-    setIsAIGenerating(true);
-    setTimeout(() => {
-      setIsAIGenerating(false);
-      setShowOneClickModal(false);
-      setCurrentStep(4);
-    }, 2000);
-  };
-
-  const handleStartWizard = () => {
-    setShowOneClickModal(false);
-    setCurrentStep(0);
   };
 
   const steps = [
@@ -305,120 +441,8 @@ export default function Wizard() {
     Improve: objectives.filter(o => o.selected && o.biiType === 'Improve').length,
   };
 
-// ========== 조직 선택 화면 ==========
-  if (showOrgSelector) {
-    return (
-      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-        <div className="bg-white rounded-2xl p-8 max-w-4xl w-full mx-4 max-h-[80vh] overflow-y-auto">
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-2xl font-bold text-slate-900">조직 선택</h2>
-            <button 
-              onClick={() => navigate(-1)}
-              className="text-slate-400 hover:text-slate-600 transition-colors"
-            >
-              <X className="w-6 h-6" />
-            </button>
-          </div>
-
-          <p className="text-slate-600 mb-6">
-            목표를 수립할 조직을 선택해주세요
-          </p>
-
-          {/* 전사 */}
-          {organizations.filter(o => o.level === '전사').length > 0 && (
-            <div className="mb-6">
-              <h3 className="text-sm font-semibold text-slate-700 mb-3">전사</h3>
-              <div className="grid grid-cols-1 gap-3">
-                {organizations
-                  .filter(o => o.level === '전사')
-                  .map(org => (
-                    <button
-                      key={org.id}
-                      onClick={() => handleSelectOrg(org.id)}
-                      className="text-left border-2 border-slate-200 rounded-xl p-4 hover:border-blue-500 hover:bg-blue-50 transition-all"
-                    >
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <div className="text-sm text-slate-500">{org.level} • {org.orgType}</div>
-                          <div className="text-lg font-semibold text-slate-900 mt-1">{org.name}</div>
-                          {org.mission && (
-                            <div className="text-sm text-slate-600 mt-1">{org.mission}</div>
-                          )}
-                        </div>
-                        <ChevronRight className="w-5 h-5 text-slate-400" />
-                      </div>
-                    </button>
-                  ))}
-              </div>
-            </div>
-          )}
-
-          {/* 본부 */}
-          {organizations.filter(o => o.level === '본부').length > 0 && (
-            <div className="mb-6">
-              <h3 className="text-sm font-semibold text-slate-700 mb-3">본부</h3>
-              <div className="grid grid-cols-2 gap-3">
-                {organizations
-                  .filter(o => o.level === '본부')
-                  .map(org => (
-                    <button
-                      key={org.id}
-                      onClick={() => handleSelectOrg(org.id)}
-                      className="text-left border-2 border-slate-200 rounded-xl p-4 hover:border-blue-500 hover:bg-blue-50 transition-all"
-                    >
-                      <div className="text-sm text-slate-500">{org.level} • {org.orgType}</div>
-                      <div className="text-base font-semibold text-slate-900 mt-1">{org.name}</div>
-                    </button>
-                  ))}
-              </div>
-            </div>
-          )}
-
-          {/* 팀 */}
-          {organizations.filter(o => o.level === '팀').length > 0 && (
-            <div>
-              <h3 className="text-sm font-semibold text-slate-700 mb-3">팀</h3>
-              <div className="grid grid-cols-2 gap-3">
-                {organizations
-                  .filter(o => o.level === '팀')
-                  .map(org => (
-                    <button
-                      key={org.id}
-                      onClick={() => handleSelectOrg(org.id)}
-                      className="text-left border-2 border-slate-200 rounded-xl p-4 hover:border-blue-500 hover:bg-blue-50 transition-all"
-                    >
-                      <div className="text-sm text-slate-500">{org.level} • {org.orgType}</div>
-                      <div className="text-base font-semibold text-slate-900 mt-1">{org.name}</div>
-                    </button>
-                  ))}
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  // ========== 조직 ID 검증 ==========
-  if (!orgId) {
-    return (
-      <div className="p-6 text-center">
-        <div className="bg-red-50 border border-red-200 rounded-xl p-6 max-w-md mx-auto">
-          <p className="text-red-800 mb-2">조직 정보를 불러올 수 없습니다</p>
-          <button
-            onClick={() => navigate(-1)}
-            className="mt-4 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
-          >
-            돌아가기
-          </button>
-        </div>
-      </div>
-    );
-  }
-  
   return (
     <div className="p-6 max-w-6xl mx-auto">
-      {/* 상단 헤더 */}
       {!showOneClickModal && (
         <div className="flex items-center gap-4 mb-6">
           <button 
@@ -432,7 +456,6 @@ export default function Wizard() {
         </div>
       )}
 
-      {/* 시작 모달 */}
       {showOneClickModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl p-8 max-w-3xl w-full mx-4 relative">
@@ -479,7 +502,6 @@ export default function Wizard() {
         </div>
       )}
 
-      {/* AI 로딩 오버레이 */}
       {isAIGenerating && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl p-8 max-w-md w-full mx-4 text-center">
@@ -493,7 +515,6 @@ export default function Wizard() {
         </div>
       )}
 
-      {/* 저장 로딩 오버레이 */}
       {isSaving && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl p-8 max-w-md w-full mx-4 text-center">
@@ -504,7 +525,6 @@ export default function Wizard() {
         </div>
       )}
 
-      {/* Stepper (진행 단계) */}
       <div className="bg-white rounded-xl border border-slate-200 p-8 mb-6">
         <div className="flex items-center justify-between mb-8">
           {steps.map((step, index) => (
@@ -533,19 +553,15 @@ export default function Wizard() {
         </div>
       </div>
 
-      {/* 메인 컨텐츠 영역 */}
       <div className="bg-white rounded-xl border border-slate-200 p-8">
         
-        {/* Step 0: 전략 방향 */}
         {currentStep === 0 && (
           <div className="space-y-6">
             <h2 className="text-xl font-bold text-slate-900">전략 방향 확인</h2>
-
             <div className="bg-blue-50 border border-blue-200 rounded-xl p-6">
               <h3 className="font-semibold text-blue-900 mb-2">전사 전략방향</h3>
               <p className="text-blue-700">디지털 혁신을 통한 지속 가능한 성장과 고객 가치 창출</p>
             </div>
-
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-2">우리 조직 미션</label>
               <textarea
@@ -559,7 +575,6 @@ export default function Wizard() {
                 AI 미션 제안
               </button>
             </div>
-
             <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
               <p className="text-sm text-slate-600">
                 💡 좋은 미션은 Build, Innovate, Improve 중 하나의 방향을 내포합니다
@@ -568,7 +583,6 @@ export default function Wizard() {
           </div>
         )}
 
-        {/* Step 1: 목표 수립 (여기에 AI 연결됨) */}
         {currentStep === 1 && (
           <div className="space-y-6">
             <div className="flex items-center justify-between">
@@ -639,7 +653,7 @@ export default function Wizard() {
 
             <div className="flex gap-2">
               <button 
-                onClick={handleAIGenerateObjectives} // [연결됨] AI 호출
+                onClick={handleAIGenerateObjectives}
                 disabled={isAIGenerating}
                 className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors text-sm font-medium flex items-center gap-2"
               >
@@ -654,16 +668,13 @@ export default function Wizard() {
           </div>
         )}
 
-        {/* Step 2: KR 설정 (수정됨) */}
         {currentStep === 2 && (
           <div className="space-y-6">
             <h2 className="text-xl font-bold text-slate-900">KR(핵심결과) 설정</h2>
 
-            {/* 탭 영역 (수정됨) */}
             <div className="flex gap-2 border-b border-slate-200 overflow-x-auto">
               {objectives.filter(o => o.selected).map((obj, idx) => {
                 const biiColor = getBIIColor(obj.biiType);
-                
                 return (
                   <button
                     key={obj.id}
@@ -693,18 +704,28 @@ export default function Wizard() {
               })}
             </div>
 
-            {/* KR 목록 */}
             <div className="space-y-4">
               {krs.filter(kr => kr.objectiveId === selectedObjectiveTab).map((kr) => {
                 const biiColor = getBIIColor(kr.biiType);
                 const categoryColor = getKPICategoryColor(kr.kpiCategory);
                 const isExpanded = expandedKR === kr.id;
+                const isSelected = kr.selected !== false;
 
                 return (
-                  <div key={kr.id} className="border border-slate-200 rounded-xl p-5 bg-white">
+                  <div 
+                    key={kr.id} 
+                    className={`border rounded-xl p-5 bg-white transition-opacity ${
+                      isSelected ? 'border-slate-200 opacity-100' : 'border-slate-200 opacity-50'
+                    }`}
+                  >
                     <div className="flex items-start justify-between mb-4">
                       <div className="flex items-center gap-3">
-                        <input type="checkbox" defaultChecked className="w-4 h-4 rounded border-slate-300 text-blue-600" />
+                        <input 
+                          type="checkbox" 
+                          checked={isSelected}
+                          onChange={() => toggleKR(kr.id)}
+                          className="w-4 h-4 rounded border-slate-300 text-blue-600" 
+                        />
                         <span className={`px-2 py-1 rounded-full text-xs font-medium ${biiColor.bg} ${biiColor.text}`}>
                           {kr.biiType}
                         </span>
@@ -716,7 +737,12 @@ export default function Wizard() {
                           {kr.kpiCategory}
                         </span>
                         <button className="p-1 hover:bg-slate-100 rounded"><Pencil className="w-4 h-4 text-slate-500" /></button>
-                        <button className="p-1 hover:bg-slate-100 rounded"><Trash2 className="w-4 h-4 text-slate-500" /></button>
+                        <button 
+                          onClick={() => setKrs(krs.filter(k => k.id !== kr.id))}
+                          className="p-1 hover:bg-slate-100 rounded"
+                        >
+                          <Trash2 className="w-4 h-4 text-slate-500" />
+                        </button>
                       </div>
                     </div>
 
@@ -810,7 +836,7 @@ export default function Wizard() {
                           </div>
                         </div>
                         <div className="space-y-2 text-sm mb-4">
-                          <div className="font-medium">목표(B등급): {kr.gradeCriteria.B.toLocaleString()}{kr.unit} (+{((kr.gradeCriteria.B / kr.previousYear - 1) * 100).toFixed(1)}%)</div>
+                          <div className="font-medium">목표(B등급): {kr.gradeCriteria.B.toLocaleString()}{kr.unit} (+{kr.previousYear > 0 ? ((kr.gradeCriteria.B / kr.previousYear - 1) * 100).toFixed(1) : 0}%)</div>
                           <div className="grid grid-cols-2 gap-2 text-xs text-slate-600">
                             <div>S등급: {kr.gradeCriteria.S.toLocaleString()}{kr.unit}↑</div>
                             <div>A등급: {kr.gradeCriteria.A.toLocaleString()}~{kr.gradeCriteria.S.toLocaleString()}{kr.unit}</div>
@@ -835,28 +861,33 @@ export default function Wizard() {
 
             <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
               <div className="flex items-center justify-between">
+                <div className="text-sm text-slate-600">
+                  <span className="font-medium">선택된 KR:</span> {selectedKRs.filter(kr => kr.objectiveId === selectedObjectiveTab).length}개
+                </div>
                 <div className="text-sm">
-                  <span className="text-purple-700 font-medium">전략 {krs.filter(k => k.kpiCategory === '전략').reduce((s, k) => s + k.weight, 0)}%</span>
-                  <span className="mx-2 text-slate-400">+</span>
-                  <span className="text-blue-700 font-medium">고유업무 {krs.filter(k => k.kpiCategory === '고유업무').reduce((s, k) => s + k.weight, 0)}%</span>
-                  <span className="mx-2 text-slate-400">+</span>
-                  <span className="text-slate-700 font-medium">공통 {krs.filter(k => k.kpiCategory === '공통').reduce((s, k) => s + k.weight, 0)}%</span>
-                  <span className="mx-2">=</span>
-                  <span className={`font-bold ${krs.reduce((s, k) => s + k.weight, 0) === 100 ? 'text-green-600' : 'text-red-600'}`}>
-                    {krs.reduce((s, k) => s + k.weight, 0)}% {krs.reduce((s, k) => s + k.weight, 0) === 100 ? '✅' : '❌'}
+                  <span className="text-slate-600">가중치 합계: </span>
+                  <span className={`font-bold text-lg ${totalWeight === 100 ? 'text-green-600' : 'text-red-600'}`}>
+                    {totalWeight}% {totalWeight === 100 ? '✅' : '❌'}
                   </span>
                 </div>
               </div>
             </div>
 
             <div className="flex gap-2">
-              <button className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors text-sm font-medium flex items-center gap-2">
+              <button 
+                onClick={handleAddKR}
+                className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors text-sm font-medium flex items-center gap-2"
+              >
                 <Plus className="w-4 h-4" />
                 KR 추가
               </button>
-              <button className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors text-sm font-medium flex items-center gap-2">
-                <RefreshCw className="w-4 h-4" />
-                AI 재추천
+              <button 
+                onClick={handleAIRegenerateKRs}
+                disabled={isAIGenerating}
+                className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors text-sm font-medium flex items-center gap-2 disabled:opacity-50"
+              >
+                <RefreshCw className={`w-4 h-4 ${isAIGenerating ? 'animate-spin' : ''}`} />
+                {isAIGenerating ? '생성 중...' : 'AI 재추천'}
               </button>
               <button className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors text-sm font-medium flex items-center gap-2">
                 <BookOpen className="w-4 h-4" />
@@ -866,7 +897,6 @@ export default function Wizard() {
           </div>
         )}
 
-        {/* Step 3: 세부 설정 (기존 UI 유지) */}
         {currentStep === 3 && (
           <div className="space-y-6">
             <h2 className="text-xl font-bold text-slate-900">세부 설정</h2>
@@ -917,7 +947,6 @@ export default function Wizard() {
           </div>
         )}
 
-        {/* Step 4: 최종 확인 (저장 로직 연결됨) */}
         {currentStep === 4 && (
           <div className="space-y-6">
             <h2 className="text-xl font-bold text-slate-900">최종 확인 & 확정</h2>
@@ -931,7 +960,7 @@ export default function Wizard() {
               </div>
               <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-center">
                 <div className="text-sm text-green-600 mb-1">가중치 합계</div>
-                <div className="text-lg font-bold text-green-700">{krs.reduce((s, k) => s + k.weight, 0)}% ✅</div>
+                <div className="text-lg font-bold text-green-700">{krs.filter(k => k.selected !== false).reduce((s, k) => s + k.weight, 0)}% ✅</div>
               </div>
               <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-center">
                 <div className="text-sm text-green-600 mb-1">Alignment</div>
@@ -958,7 +987,7 @@ export default function Wizard() {
                 </thead>
                 <tbody className="divide-y divide-slate-200">
                   {objectives.filter(o => o.selected).map((obj) => {
-                    const objKrs = krs.filter(kr => kr.objectiveId === obj.id);
+                    const objKrs = krs.filter(kr => kr.objectiveId === obj.id && kr.selected !== false);
                     return objKrs.map((kr, idx) => {
                       const biiColor = getBIIColor(kr.biiType);
                       const categoryColor = getKPICategoryColor(kr.kpiCategory);
@@ -1006,10 +1035,10 @@ export default function Wizard() {
                   <tr>
                     <td colSpan={2} className="px-4 py-3 text-sm font-medium text-slate-700">합계</td>
                     <td className="px-4 py-3 text-center">
-                      <span className="text-sm font-bold text-green-600">{krs.reduce((s, k) => s + k.weight, 0)}%</span>
+                      <span className="text-sm font-bold text-green-600">{krs.filter(k => k.selected !== false).reduce((s, k) => s + k.weight, 0)}%</span>
                     </td>
                     <td colSpan={4} className="px-4 py-3 text-right text-sm text-slate-600">
-                      총 {krs.length}개 KR
+                      총 {krs.filter(k => k.selected !== false).length}개 KR
                     </td>
                   </tr>
                 </tfoot>
