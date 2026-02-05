@@ -654,27 +654,46 @@ export default function Wizard() {
           </div>
         )}
 
-        {/* Step 2: KR 설정 (기존 UI 유지) */}
+        {/* Step 2: KR 설정 (수정됨) */}
         {currentStep === 2 && (
           <div className="space-y-6">
             <h2 className="text-xl font-bold text-slate-900">KR(핵심결과) 설정</h2>
 
-            <div className="flex gap-2 border-b border-slate-200">
-              {objectives.filter(o => o.selected).map((obj, idx) => (
-                <button
-                  key={obj.id}
-                  onClick={() => setSelectedObjectiveTab(obj.id)}
-                  className={`px-4 py-3 text-sm font-medium border-b-2 -mb-px transition-colors ${
-                    selectedObjectiveTab === obj.id
-                      ? 'border-blue-600 text-blue-600'
-                      : 'border-transparent text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  목표{idx + 1} {selectedObjectiveTab === obj.id ? '●' : '○'}
-                </button>
-              ))}
+            {/* 탭 영역 (수정됨) */}
+            <div className="flex gap-2 border-b border-slate-200 overflow-x-auto">
+              {objectives.filter(o => o.selected).map((obj, idx) => {
+                const biiColor = getBIIColor(obj.biiType);
+                
+                return (
+                  <button
+                    key={obj.id}
+                    onClick={() => setSelectedObjectiveTab(obj.id)}
+                    className={`px-4 py-3 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
+                      selectedObjectiveTab === obj.id
+                        ? 'border-blue-600 text-blue-600 bg-blue-50'
+                        : 'border-transparent text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${biiColor.bg} ${biiColor.text}`}>
+                        {obj.biiType}
+                      </span>
+                      <span className="font-semibold">목표{idx + 1}</span>
+                      <span className="text-xs">
+                        {selectedObjectiveTab === obj.id ? '●' : '○'}
+                      </span>
+                    </div>
+                    <div className={`text-xs mt-1 ${
+                      selectedObjectiveTab === obj.id ? 'text-blue-600' : 'text-slate-500'
+                    }`}>
+                      {obj.name.length > 30 ? obj.name.substring(0, 30) + '...' : obj.name}
+                    </div>
+                  </button>
+                );
+              })}
             </div>
 
+            {/* KR 목록 */}
             <div className="space-y-4">
               {krs.filter(kr => kr.objectiveId === selectedObjectiveTab).map((kr) => {
                 const biiColor = getBIIColor(kr.biiType);
