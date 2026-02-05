@@ -1,10 +1,7 @@
 // src/pages/Wizard.tsx
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { 
-  ChevronLeft, ChevronRight, Bot, Target, RefreshCw, Pencil, Trash2, 
-  ChevronDown, BookOpen, Plus, X, ArrowLeft, Loader2, Check 
-} from 'lucide-react';
+import { ChevronLeft, ChevronRight, Bot, Target, RefreshCw, Pencil, Trash2, ChevronDown, BookOpen, Plus, X, ArrowLeft, Loader2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useStore } from '../store/useStore';
 import { getBIIColor, getKPICategoryColor } from '../utils/helpers';
@@ -40,38 +37,29 @@ interface KRCandidate {
 
 export default function Wizard() {
   const navigate = useNavigate();
-  // URL 파라미터 처리 (조직 ID가 없을 수도 있음)
+  // [수정] URL 파라미터 변수명 변경 및 초기화 로직 수정
   const { orgId: urlOrgId } = useParams<{ orgId: string }>();
   const { fetchObjectives, fetchKRs, organizations } = useStore();
 
-  // ==================== State 관리 ====================
-  
-  // 조직 선택 관련
+  // [추가] 조직 선택 관련 State
   const [selectedOrgId, setSelectedOrgId] = useState<string | null>(urlOrgId || null);
-  const [showOrgSelector, setShowOrgSelector] = useState(!urlOrgId); // URL에 ID가 없으면 선택창 표시
+  const [showOrgSelector, setShowOrgSelector] = useState(!urlOrgId); // ID가 없으면 선택창 표시
 
-  // 위저드 진행 관련
   const [currentStep, setCurrentStep] = useState(0);
-  const [showOneClickModal, setShowOneClickModal] = useState(!urlOrgId); // 조직 선택 후 모달 표시
+  const [showOneClickModal, setShowOneClickModal] = useState(!urlOrgId); // 조건 변경 (선택 후 모달 표시)
   const [isAIGenerating, setIsAIGenerating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   
-  // 데이터 입력 관련
   const [mission, setMission] = useState('고객 중심의 마케팅 전략을 통한 시장 점유율 확대');
   const [selectedObjectiveTab, setSelectedObjectiveTab] = useState('1');
   const [expandedKR, setExpandedKR] = useState<string | null>(null);
-  
-  // [New] KR 편집 모드 (수정 중인 KR의 ID)
-  const [editingKRId, setEditingKRId] = useState<string | null>(null);
 
-  // 현재 선택된 조직 정보 계산
+  // [수정] 조직 ID 및 정보 결정 로직
   const orgId = selectedOrgId;
   const currentOrg = organizations.find(o => o.id === orgId);
   const currentOrgName = currentOrg?.name || '우리 조직';
 
-  // ==================== Effects ====================
-
-  // 조직 선택이 완료되면 초기 모달 띄우기
+  // [추가] 조직 선택 완료 시 모달 전환 Effect
   useEffect(() => {
     if (selectedOrgId && showOrgSelector) {
       setShowOrgSelector(false);
@@ -79,7 +67,11 @@ export default function Wizard() {
     }
   }, [selectedOrgId, showOrgSelector]);
 
-  // ==================== Data States ====================
+  // [추가] 조직 선택 핸들러
+  const handleSelectOrg = (selectOrgId: string) => {
+    setSelectedOrgId(selectOrgId);
+    navigate(`/wizard/${selectOrgId}`, { replace: true });
+  };
 
   const [objectives, setObjectives] = useState<ObjectiveCandidate[]>([
     { id: '1', name: '시장 선도형 신제품 수주 확대를 통한 매출 성장 달성', biiType: 'Improve', perspective: '재무', selected: true },
@@ -155,41 +147,17 @@ export default function Wizard() {
     },
   ]);
 
-  // ==================== Handlers ====================
-
-  // 조직 선택 핸들러
-  const handleSelectOrg = (selectOrgId: string) => {
-    setSelectedOrgId(selectOrgId);
-    navigate(`/wizard/${selectOrgId}`, { replace: true });
-  };
-
-  // KR 체크박스 토글
   const toggleKR = (krId: string) => {
     setKrs(krs.map(kr => 
       kr.id === krId ? { ...kr, selected: !kr.selected } : kr
     ));
   };
 
-  // KR 값 변경 핸들러 (편집 모드용)
-  const handleKRChange = (krId: string, field: string, value: any) => {
-    setKrs(prev => prev.map(kr => 
-      kr.id === krId ? { ...kr, [field]: value } : kr
-    ));
-  };
+  const selectedKRs = krs.filter(kr => kr.selected !== false);
+  const totalWeight = selectedKRs
+    .filter(kr => kr.objectiveId === selectedObjectiveTab)
+    .reduce((sum, kr) => sum + kr.weight, 0);
 
-  // KR 가중치 변경
-  const updateKRWeight = (krId: string, newWeight: number) => {
-    setKrs(krs.map(kr => kr.id === krId ? { ...kr, weight: newWeight } : kr));
-  };
-
-  // 목표 선택 토글
-  const toggleObjective = (id: string) => {
-    setObjectives(objectives.map(obj =>
-      obj.id === id ? { ...obj, selected: !obj.selected } : obj
-    ));
-  };
-
-  // KR 수동 추가
   const handleAddKR = () => {
     const newKR: KRCandidate & { selected: boolean } = {
       id: `kr-new-${Date.now()}`,
@@ -213,10 +181,8 @@ export default function Wizard() {
     };
     setKrs([...krs, newKR]);
     setExpandedKR(newKR.id);
-    setEditingKRId(newKR.id); // 추가하자마자 편집 모드
   };
 
-  // AI KR 추천 (실제 연결됨)
   const handleAIRegenerateKRs = async () => {
     const currentObj = objectives.find(o => o.id === selectedObjectiveTab);
     if (!currentObj) return;
@@ -272,7 +238,16 @@ export default function Wizard() {
     }
   };
 
-  // AI 원클릭 전체 생성
+  const updateKRWeight = (krId: string, newWeight: number) => {
+    setKrs(krs.map(kr => kr.id === krId ? { ...kr, weight: newWeight } : kr));
+  };
+
+  const toggleObjective = (id: string) => {
+    setObjectives(objectives.map(obj =>
+      obj.id === id ? { ...obj, selected: !obj.selected } : obj
+    ));
+  };
+
   const handleOneClickGenerate = async () => {
     setIsAIGenerating(true);
     setShowOneClickModal(false);
@@ -342,13 +317,11 @@ export default function Wizard() {
     }
   };
 
-  // 위저드 시작 (수동)
   const handleStartWizard = () => {
     setShowOneClickModal(false);
     setCurrentStep(0);
   };
 
-  // AI 목표 생성 핸들러 (Step 1)
   const handleAIGenerateObjectives = async () => {
     setIsAIGenerating(true);
     try {
@@ -383,7 +356,6 @@ export default function Wizard() {
     }
   };
 
-  // 최종 저장
   const handleSave = async () => {
     if (!orgId) {
       alert('조직 ID가 없습니다. 다시 시도해주세요.');
@@ -456,7 +428,6 @@ export default function Wizard() {
     }
   };
 
-  // Helper Values
   const steps = [
     { id: 0, name: '전략방향', description: '전사 전략 및 조직 미션 확인' },
     { id: 1, name: '목표수립', description: '3-5개 핵심 목표 선정' },
@@ -471,14 +442,7 @@ export default function Wizard() {
     Improve: objectives.filter(o => o.selected && o.biiType === 'Improve').length,
   };
 
-  const selectedKRs = krs.filter(kr => kr.selected !== false);
-  const totalWeight = selectedKRs
-    .filter(kr => kr.objectiveId === selectedObjectiveTab)
-    .reduce((sum, kr) => sum + kr.weight, 0);
-
-  // ==================== Render ====================
-
-  // [화면 1] 조직 선택 화면 (URL 파라미터 없을 때)
+  // [추가] 조직 선택 화면 렌더링
   if (showOrgSelector) {
     return (
       <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
@@ -572,7 +536,7 @@ export default function Wizard() {
     );
   }
 
-  // [예외처리] 잘못된 접근
+  // ========== 조직 ID 검증 ==========
   if (!orgId) {
     return (
       <div className="p-6 text-center">
@@ -591,7 +555,6 @@ export default function Wizard() {
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
-      {/* 헤더 */}
       {!showOneClickModal && (
         <div className="flex items-center gap-4 mb-6">
           <button 
@@ -605,7 +568,6 @@ export default function Wizard() {
         </div>
       )}
 
-      {/* 모달: 수립 방식 선택 */}
       {showOneClickModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl p-8 max-w-3xl w-full mx-4 relative">
@@ -652,7 +614,6 @@ export default function Wizard() {
         </div>
       )}
 
-      {/* 로딩 오버레이 */}
       {isAIGenerating && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl p-8 max-w-md w-full mx-4 text-center">
@@ -676,7 +637,6 @@ export default function Wizard() {
         </div>
       )}
 
-      {/* Stepper */}
       <div className="bg-white rounded-xl border border-slate-200 p-8 mb-6">
         <div className="flex items-center justify-between mb-8">
           {steps.map((step, index) => (
@@ -705,10 +665,8 @@ export default function Wizard() {
         </div>
       </div>
 
-      {/* Main Content */}
       <div className="bg-white rounded-xl border border-slate-200 p-8">
         
-        {/* Step 0: 전략 방향 */}
         {currentStep === 0 && (
           <div className="space-y-6">
             <h2 className="text-xl font-bold text-slate-900">전략 방향 확인</h2>
@@ -737,7 +695,6 @@ export default function Wizard() {
           </div>
         )}
 
-        {/* Step 1: 목표 수립 */}
         {currentStep === 1 && (
           <div className="space-y-6">
             <div className="flex items-center justify-between">
@@ -823,7 +780,6 @@ export default function Wizard() {
           </div>
         )}
 
-        {/* Step 2: KR 설정 (수정 기능 포함) */}
         {currentStep === 2 && (
           <div className="space-y-6">
             <h2 className="text-xl font-bold text-slate-900">KR(핵심결과) 설정</h2>
@@ -866,7 +822,6 @@ export default function Wizard() {
                 const categoryColor = getKPICategoryColor(kr.kpiCategory);
                 const isExpanded = expandedKR === kr.id;
                 const isSelected = kr.selected !== false;
-                const isEditing = editingKRId === kr.id; // 수정 모드 확인
 
                 return (
                   <div 
@@ -876,7 +831,7 @@ export default function Wizard() {
                     }`}
                   >
                     <div className="flex items-start justify-between mb-4">
-                      <div className="flex items-center gap-3 flex-1">
+                      <div className="flex items-center gap-3">
                         <input 
                           type="checkbox" 
                           checked={isSelected}
@@ -886,86 +841,34 @@ export default function Wizard() {
                         <span className={`px-2 py-1 rounded-full text-xs font-medium ${biiColor.bg} ${biiColor.text}`}>
                           {kr.biiType}
                         </span>
-                        
-                        {/* 이름 수정 모드 */}
-                        {isEditing ? (
-                          <input 
-                            type="text" 
-                            value={kr.name}
-                            onChange={(e) => handleKRChange(kr.id, 'name', e.target.value)}
-                            className="font-semibold text-slate-900 border border-slate-300 rounded px-2 py-1 w-full max-w-md"
-                          />
-                        ) : (
-                          <h3 className="font-semibold text-slate-900">{kr.name}</h3>
-                        )}
+                        <h3 className="font-semibold text-slate-900">{kr.name}</h3>
                       </div>
-
                       <div className="flex items-center gap-2">
-                        {!isEditing && <span className="text-sm text-slate-600">가중치 {kr.weight}%</span>}
+                        <span className="text-sm text-slate-600">가중치 {kr.weight}%</span>
                         <span className={`px-2 py-1 rounded text-xs font-medium border ${categoryColor}`}>
                           {kr.kpiCategory}
                         </span>
-                        
-                        {/* 수정 버튼 토글 */}
-                        {isEditing ? (
-                          <button 
-                            onClick={() => setEditingKRId(null)}
-                            className="p-1 hover:bg-green-100 text-green-600 rounded transition-colors"
-                            title="저장"
-                          >
-                            <Check className="w-4 h-4" />
-                          </button>
-                        ) : (
-                          <button 
-                            onClick={() => setEditingKRId(kr.id)}
-                            className="p-1 hover:bg-slate-100 rounded transition-colors"
-                            title="수정"
-                          >
-                            <Pencil className="w-4 h-4 text-slate-500" />
-                          </button>
-                        )}
-                        
+                        <button className="p-1 hover:bg-slate-100 rounded"><Pencil className="w-4 h-4 text-slate-500" /></button>
                         <button 
                           onClick={() => setKrs(krs.filter(k => k.id !== kr.id))}
-                          className="p-1 hover:bg-slate-100 rounded transition-colors"
-                          title="삭제"
+                          className="p-1 hover:bg-slate-100 rounded"
                         >
                           <Trash2 className="w-4 h-4 text-slate-500" />
                         </button>
                       </div>
                     </div>
 
-                    {/* 정의 및 산식 */}
                     <div className="grid grid-cols-2 gap-4 mb-4 text-sm">
-                      <div className="flex items-center">
-                        <span className="text-slate-500 w-12 shrink-0">정의:</span>
-                        {isEditing ? (
-                          <input
-                            type="text"
-                            value={kr.definition}
-                            onChange={(e) => handleKRChange(kr.id, 'definition', e.target.value)}
-                            className="w-full border border-slate-300 rounded px-2 py-1"
-                          />
-                        ) : (
-                          <span className="text-slate-700 truncate">{kr.definition}</span>
-                        )}
+                      <div>
+                        <span className="text-slate-500">정의:</span>
+                        <span className="ml-2 text-slate-700">{kr.definition}</span>
                       </div>
-                      <div className="flex items-center">
-                        <span className="text-slate-500 w-12 shrink-0">산식:</span>
-                        {isEditing ? (
-                          <input
-                            type="text"
-                            value={kr.formula}
-                            onChange={(e) => handleKRChange(kr.id, 'formula', e.target.value)}
-                            className="w-full border border-slate-300 rounded px-2 py-1"
-                          />
-                        ) : (
-                          <span className="text-slate-700 truncate">{kr.formula}</span>
-                        )}
+                      <div>
+                        <span className="text-slate-500">산식:</span>
+                        <span className="ml-2 text-slate-700">{kr.formula}</span>
                       </div>
                     </div>
 
-                    {/* 상세 설정 필드 */}
                     <div className="grid grid-cols-4 gap-4 mb-4">
                       <div>
                         <label className="block text-xs text-slate-500 mb-1">목표값</label>
@@ -973,52 +876,27 @@ export default function Wizard() {
                           <input
                             type="number"
                             value={kr.targetValue}
-                            onChange={(e) => handleKRChange(kr.id, 'targetValue', parseInt(e.target.value) || 0)}
-                            className={`w-24 border rounded px-2 py-1 text-sm ${isEditing ? 'border-blue-300 bg-blue-50' : 'border-slate-300'}`}
-                            readOnly={!isEditing}
+                            className="w-24 border border-slate-300 rounded px-2 py-1 text-sm"
+                            readOnly
                           />
-                          {isEditing ? (
-                            <input 
-                              type="text" 
-                              value={kr.unit}
-                              onChange={(e) => handleKRChange(kr.id, 'unit', e.target.value)}
-                              className="w-12 border border-blue-300 rounded px-1 py-1 text-sm text-center"
-                            />
-                          ) : (
-                            <span className="text-sm text-slate-600">{kr.unit}</span>
-                          )}
+                          <span className="text-sm text-slate-600">{kr.unit}</span>
                         </div>
                       </div>
                       <div>
                         <label className="block text-xs text-slate-500 mb-1">유형</label>
-                        <select 
-                          className={`w-full border rounded px-2 py-1 text-sm ${isEditing ? 'border-blue-300' : 'border-slate-300 bg-slate-50'}`}
-                          value={kr.indicatorType}
-                          disabled={!isEditing}
-                          onChange={(e) => handleKRChange(kr.id, 'indicatorType', e.target.value)}
-                        >
+                        <select className="w-full border border-slate-300 rounded px-2 py-1 text-sm" value={kr.indicatorType}>
                           <option>투입</option><option>과정</option><option>산출</option><option>결과</option>
                         </select>
                       </div>
                       <div>
                         <label className="block text-xs text-slate-500 mb-1">측정주기</label>
-                        <select 
-                          className={`w-full border rounded px-2 py-1 text-sm ${isEditing ? 'border-blue-300' : 'border-slate-300 bg-slate-50'}`}
-                          value={kr.measurementCycle}
-                          disabled={!isEditing}
-                          onChange={(e) => handleKRChange(kr.id, 'measurementCycle', e.target.value)}
-                        >
+                        <select className="w-full border border-slate-300 rounded px-2 py-1 text-sm" value={kr.measurementCycle}>
                           <option>월</option><option>분기</option><option>반기</option><option>연</option>
                         </select>
                       </div>
                       <div>
                         <label className="block text-xs text-slate-500 mb-1">관점</label>
-                        <select 
-                          className={`w-full border rounded px-2 py-1 text-sm ${isEditing ? 'border-blue-300' : 'border-slate-300 bg-slate-50'}`}
-                          value={kr.perspective}
-                          disabled={!isEditing}
-                          onChange={(e) => handleKRChange(kr.id, 'perspective', e.target.value)}
-                        >
+                        <select className="w-full border border-slate-300 rounded px-2 py-1 text-sm" value={kr.perspective}>
                           <option>재무</option><option>고객</option><option>프로세스</option><option>학습성장</option>
                         </select>
                       </div>
@@ -1131,7 +1009,6 @@ export default function Wizard() {
           </div>
         )}
 
-        {/* Step 3: 세부 설정 */}
         {currentStep === 3 && (
           <div className="space-y-6">
             <h2 className="text-xl font-bold text-slate-900">세부 설정</h2>
@@ -1182,7 +1059,6 @@ export default function Wizard() {
           </div>
         )}
 
-        {/* Step 4: 최종 확인 */}
         {currentStep === 4 && (
           <div className="space-y-6">
             <h2 className="text-xl font-bold text-slate-900">최종 확인 & 확정</h2>
