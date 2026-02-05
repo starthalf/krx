@@ -1,20 +1,20 @@
 import { useState, useEffect, useRef } from 'react';
-import { ChevronRight, ChevronDown, Download, Upload, Bot, Loader2, Save } from 'lucide-react';
+import { ChevronRight, ChevronDown, Download, Upload, Bot, Loader2, Save, AlertCircle } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { getOrgTypeColor } from '../utils/helpers';
-import { exportToExcel, readExcel } from '../utils/excel'; // [New] 엑셀 유틸
+import { exportToExcel, readExcel } from '../utils/excel';
 import { supabase } from '../lib/supabase';
 import type { Organization } from '../types';
 
 export default function OrganizationPage() {
   const { organizations, fetchOrganizations, updateOrganization, loading } = useStore();
-  const fileInputRef = useRef<HTMLInputElement>(null); // [New] 파일 입력 참조
+  const fileInputRef = useRef<HTMLInputElement>(null);
   
   const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null);
   const [expandedOrgs, setExpandedOrgs] = useState<Set<string>>(new Set());
   const [isUploading, setIsUploading] = useState(false);
 
-  // [기존 코드 유지] 첫 번째 조직 자동 선택
+  // [기존 코드 유지] 초기 선택 로직
   useEffect(() => {
     if (organizations.length > 0 && !selectedOrgId) {
       const rootOrg = organizations.find(o => !o.parentOrgId) || organizations[0];
@@ -27,7 +27,7 @@ export default function OrganizationPage() {
 
   const selectedOrg = organizations.find(org => org.id === selectedOrgId);
 
-  // [기존 코드 유지] 트리 확장 토글
+  // [기존 코드 유지] 트리 토글
   const toggleExpand = (orgId: string) => {
     const newExpanded = new Set(expandedOrgs);
     if (newExpanded.has(orgId)) {
@@ -96,7 +96,6 @@ export default function OrganizationPage() {
 
   const rootOrgs = organizations.filter(org => org.parentOrgId === null);
 
-  // [기존 코드 유지] 저장 핸들러
   const handleSave = async () => {
     if (!selectedOrg) return;
     
@@ -113,40 +112,46 @@ export default function OrganizationPage() {
   };
 
   // ------------------------------------------------------------------
-  // [New] 엑셀 기능 구현
+  // [개선된] 엑셀 기능 구현
   // ------------------------------------------------------------------
 
-  // 1. 템플릿 다운로드
   const handleDownloadTemplate = () => {
     const template = [
       {
-        조직명: '신규팀',
-        상위조직명: '제품개발본부', // 상위 조직 이름을 적으면 ID를 찾아 연결
-        레벨: '팀', // 전사, 부문, 본부, 실, 팀
+        조직명: '제품개발본부',
+        상위조직명: '테크스타트업(전사)', 
+        레벨: '본부', // 전사 > 부문 > 본부 > 실 > 팀
         유형: 'Middle', // Front, Middle, Back
-        미션: '팀의 미션을 입력하세요',
-        기능태그: '기획, 개발',
-        인원수: 5
+        미션: '최고의 제품 개발',
+        기능태그: '기획, 개발, 디자인',
+        인원수: 50
       },
       {
-        조직명: '디자인실',
-        상위조직명: '테크스타트업(전사)',
-        레벨: '실',
+        조직명: '모바일개발팀',
+        상위조직명: '제품개발본부', // 위에서 만든 조직명을 참조
+        레벨: '팀',
         유형: 'Middle',
-        미션: '사용자 경험 혁신',
-        기능태그: 'UI, UX, BX',
+        미션: '모바일 앱 고도화',
+        기능태그: 'iOS, Android',
         인원수: 10
       }
     ];
     exportToExcel(template, '조직일괄등록_템플릿');
   };
 
-  // 2. 파일 선택 트리거
   const handleUploadClick = () => {
     fileInputRef.current?.click();
   };
 
-  // 3. 파일 업로드 및 데이터 처리
+  // 레벨 정렬을 위한 우선순위 맵
+  const levelPriority: Record<string, number> = {
+    '전사': 0,
+    '부문': 1,
+    '본부': 2,
+    '실': 3,
+    '팀': 4
+  };
+
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -159,40 +164,91 @@ export default function OrganizationPage() {
     setIsUploading(true);
     try {
       const jsonData = await readExcel(file);
-      console.log('Parsed Excel:', jsonData);
-
-      // (1) 회사 ID 가져오기 (현재 조직들의 회사 ID 사용)
       const companyId = organizations[0]?.companyId;
       if (!companyId) throw new Error('기준 회사 정보를 찾을 수 없습니다.');
 
-      // (2) 데이터 변환 및 부모 조직 연결
-      // 주의: 부모 조직 ID를 찾기 위해 이름 매핑을 시도합니다.
-      // 실제로는 더 복잡한 로직(부모가 엑셀 안에 있는 경우 등)이 필요하지만, 
-      // 여기서는 "이미 존재하는 조직" 또는 "루트"만 처리합니다.
+      // 1. 유효성 검사 (Validation)
+      const allowedTypes = ['Front', 'Middle', 'Back'];
+      const errors: string[] = [];
       
-      const newOrgs = jsonData.map((row: any) => {
-        // 상위 조직 찾기
-        const parentName = row['상위조직명'];
-        const parent = organizations.find(o => o.name === parentName);
-        
-        return {
-          company_id: companyId,
-          name: row['조직명'],
-          level: row['레벨'] || '팀',
-          parent_org_id: parent ? parent.id : null, // 부모 못 찾으면 루트가 됨 (주의)
-          org_type: row['유형'] || 'Middle',
-          mission: row['미션'] || '',
-          function_tags: row['기능태그'] ? row['기능태그'].split(',').map((t:string) => t.trim()) : [],
-          headcount: row['인원수'] || 0,
-          sort_order: 99
-        };
+      jsonData.forEach((row: any, index) => {
+        if (row['유형'] && !allowedTypes.includes(row['유형'])) {
+          errors.push(`${index + 2}행: 유형 '${row['유형']}'은(는) 유효하지 않습니다. (Front, Middle, Back 중 하나여야 함)`);
+        }
+        if (!row['조직명']) {
+          errors.push(`${index + 2}행: 조직명이 비어있습니다.`);
+        }
       });
 
-      // (3) Supabase Insert
-      const { error } = await supabase.from('organizations').insert(newOrgs);
-      if (error) throw error;
+      if (errors.length > 0) {
+        alert(`❌ 다음 오류를 수정하고 다시 업로드해주세요:\n\n${errors.slice(0, 5).join('\n')}${errors.length > 5 ? '\n...' : ''}`);
+        setIsUploading(false);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+        return;
+      }
 
-      alert(`✅ ${newOrgs.length}개 조직이 성공적으로 업로드되었습니다!`);
+      // 2. 레벨 순서대로 정렬 (상위 조직 먼저 생성하기 위해)
+      const sortedRows = jsonData.sort((a: any, b: any) => {
+        const priorityA = levelPriority[a['레벨']] ?? 99;
+        const priorityB = levelPriority[b['레벨']] ?? 99;
+        return priorityA - priorityB;
+      });
+
+      // 3. 순차적 처리 (부모 조직 ID 매핑을 위해)
+      // 기존 조직 맵 생성 (이름 -> ID)
+      const orgNameMap = new Map<string, string>();
+      organizations.forEach(org => orgNameMap.set(org.name, org.id));
+
+      let successCount = 0;
+
+      for (const row of sortedRows) {
+        const orgName = row['조직명'];
+        
+        // 이미 존재하면 ID만 맵에 업데이트하고 스킵 (중복 방지)
+        if (orgNameMap.has(orgName)) {
+          console.log(`Skip existing: ${orgName}`);
+          continue;
+        }
+
+        // 부모 조직 ID 찾기 (기존 DB 또는 방금 맵에 추가된 조직에서 검색)
+        const parentName = row['상위조직명'];
+        let parentId = null;
+        
+        if (parentName) {
+          parentId = orgNameMap.get(parentName) || null;
+          if (!parentId) {
+            console.warn(`Parent not found for ${orgName}: ${parentName}`);
+            // 부모를 못 찾으면 루트로 둘지, 에러를 낼지 결정. 여기서는 루트로 둠.
+          }
+        }
+
+        // DB Insert
+        const { data, error } = await supabase
+          .from('organizations')
+          .insert({
+            company_id: companyId,
+            name: orgName,
+            level: row['레벨'] || '팀',
+            parent_org_id: parentId,
+            org_type: row['유형'] || 'Middle',
+            mission: row['미션'] || '',
+            function_tags: row['기능태그'] ? row['기능태그'].split(',').map((t:string) => t.trim()) : [],
+            headcount: row['인원수'] || 0,
+            sort_order: 99
+          })
+          .select()
+          .single();
+
+        if (error) {
+          console.error(`Failed to insert ${orgName}:`, error);
+        } else if (data) {
+          // 성공 시 맵에 추가 (다음 하위 조직이 이 ID를 참조할 수 있게 됨)
+          orgNameMap.set(data.name, data.id);
+          successCount++;
+        }
+      }
+
+      alert(`✅ ${successCount}개 조직이 성공적으로 업로드되었습니다!`);
       await fetchOrganizations(companyId); // 목록 새로고침
 
     } catch (error: any) {
@@ -203,8 +259,6 @@ export default function OrganizationPage() {
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
-
-  // ------------------------------------------------------------------
 
   if (loading && organizations.length === 0) {
     return (
@@ -235,7 +289,6 @@ export default function OrganizationPage() {
           </p>
         </div>
         <div className="flex gap-2">
-          {/* [New] 숨겨진 파일 입력 */}
           <input 
             type="file" 
             ref={fileInputRef} 
