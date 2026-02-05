@@ -15,6 +15,7 @@ interface AppState {
   organizations: Organization[];
   objectives: Objective[];
   krs: DynamicKR[];
+  cfrThreads: CFRThread[]; // [New] CFR 데이터 추가
   loading: boolean;
   error: string | null;
 
@@ -39,6 +40,11 @@ interface AppState {
   updateKR: (krId: string, updates: Partial<DynamicKR>) => Promise<void>;
   deleteKR: (krId: string) => Promise<void>;
 
+  // ==================== CFR (Conversations, Feedback, Recognition) ====================
+  fetchCFRs: (krId: string) => Promise<void>; // [New]
+  addCFRThread: (cfr: Omit<CFRThread, 'id' | 'createdAt'>) => Promise<void>; // [New]
+  getCFRsByKRId: (krId: string) => CFRThread[]; // [New]
+
   // ==================== Getters ====================
   getOrgById: (orgId: string) => Organization | undefined;
   getObjectivesByOrgId: (orgId: string) => Objective[];
@@ -52,6 +58,7 @@ export const useStore = create<AppState>((set, get) => ({
   organizations: [],
   objectives: [],
   krs: [],
+  cfrThreads: [], // [New] 초기값 설정
   loading: false,
   error: null,
 
@@ -225,14 +232,7 @@ export const useStore = create<AppState>((set, get) => ({
           order: obj.sort_order
         }));
         
-        // 기존 데이터 유지하면서 새 데이터 추가 (중복 제거)
-        set(state => {
-          const existingIds = new Set(state.objectives.map(o => o.id));
-          const newObjectives = objectives.filter(o => !existingIds.has(o.id));
-          return {
-            objectives: [...state.objectives, ...newObjectives]
-          };
-        });
+        set({ objectives });
       }
     } catch (error: any) {
       console.error('❌ fetchObjectives error:', error);
@@ -387,14 +387,7 @@ export const useStore = create<AppState>((set, get) => ({
           })) : []
         }));
         
-        // 기존 데이터 유지하면서 새 데이터 추가 (중복 제거)
-        set(state => {
-          const existingIds = new Set(state.krs.map(k => k.id));
-          const newKRs = krs.filter(k => !existingIds.has(k.id));
-          return {
-            krs: [...state.krs, ...newKRs]
-          };
-        });
+        set({ krs });
       }
     } catch (error: any) {
       console.error('❌ fetchKRs error:', error);
@@ -499,6 +492,79 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
+  // ==================== CFR (Conversations, Feedback, Recognition) ====================
+  fetchCFRs: async (krId) => {
+    const { data } = await supabase
+      .from('cfr_threads')
+      .select('*')
+      .eq('kr_id', krId)
+      .order('created_at', { ascending: false });
+    
+    if (data) {
+      // 기존 CFR에 새로운 CFR 추가 (누적 방식)
+      set(state => {
+        const existingIds = new Set(state.cfrThreads.map(c => c.id));
+        const newCFRs = data
+          .filter(c => !existingIds.has(c.id))
+          .map(c => ({
+            id: c.id,
+            krId: c.kr_id,
+            type: c.type,
+            content: c.content,
+            author: c.author_name,
+            createdAt: c.created_at
+          }));
+        
+        return {
+          cfrThreads: [...state.cfrThreads, ...newCFRs]
+        };
+      });
+    }
+  },
+
+  addCFRThread: async (cfr) => {
+    try {
+      // DB에 저장
+      const { data, error } = await supabase
+        .from('cfr_threads')
+        .insert({
+          kr_id: cfr.krId,
+          type: cfr.type,
+          content: cfr.content,
+          author_name: cfr.author,
+          author_id: null  // 현재는 null, 나중에 실제 유저 ID 연결
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      // Store 업데이트
+      if (data) {
+        set(state => ({
+          cfrThreads: [...state.cfrThreads, {
+            id: data.id,
+            krId: data.kr_id,
+            type: data.type,
+            content: data.content,
+            author: data.author_name,
+            createdAt: data.created_at
+          }]
+        }));
+      }
+    } catch (error: any) {
+      console.error('❌ addCFRThread error:', error);
+      set({ error: error.message });
+    }
+  },
+
+  getCFRsByKRId: (krId) => {
+    // 최신순 정렬
+    return get().cfrThreads
+      .filter(c => c.krId === krId)
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  },
+
   // ==================== Getters ====================
   getOrgById: (orgId) => {
     return get().organizations.find(o => o.id === orgId);
@@ -514,15 +580,6 @@ export const useStore = create<AppState>((set, get) => ({
 
   getKRsByOrgId: (orgId) => {
     return get().krs.filter(k => k.orgId === orgId);
-  },
-
-  // CFR 관련 (Phase 5에서 구현 예정, 임시로 빈 배열 반환)
-  getCFRsByKRId: (krId) => {
-    return [];
-  },
-
-  addCFRThread: (thread) => {
-    console.log('CFR 추가 (미구현):', thread);
   },
 }));
 
