@@ -1,14 +1,27 @@
+// src/utils/excel.ts
 import * as XLSX from 'xlsx';
 
-// 엑셀 다운로드 (JSON -> Excel)
-export const exportToExcel = (data: any[], fileName: string, sheetName: string = 'Sheet1') => {
-  const ws = XLSX.utils.json_to_sheet(data);
+// [수정] 멀티 시트 지원을 위한 타입 정의
+type SheetData = any[] | { [sheetName: string]: any[] };
+
+export const exportToExcel = (data: SheetData, fileName: string) => {
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, sheetName);
+
+  if (Array.isArray(data)) {
+    // 1. 기존 방식: 데이터 배열 하나만 왔을 때 (Sheet1 생성)
+    const ws = XLSX.utils.json_to_sheet(data);
+    XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
+  } else {
+    // 2. 신규 방식: { 시트명: 데이터, 시트명2: 데이터2 } 형태로 왔을 때
+    Object.entries(data).forEach(([sheetName, sheetData]) => {
+      const ws = XLSX.utils.json_to_sheet(sheetData);
+      XLSX.utils.book_append_sheet(wb, ws, sheetName);
+    });
+  }
+
   XLSX.writeFile(wb, `${fileName}.xlsx`);
 };
 
-// 엑셀 읽기 (Excel -> JSON)
 export const readExcel = (file: File): Promise<any[]> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -17,7 +30,8 @@ export const readExcel = (file: File): Promise<any[]> => {
       try {
         const data = e.target?.result;
         const workbook = XLSX.read(data, { type: 'binary' });
-        const sheetName = workbook.SheetNames[0];
+        // 첫 번째 시트만 읽어서 데이터로 반환 (가이드 시트는 무시)
+        const sheetName = workbook.SheetNames[0]; 
         const sheet = workbook.Sheets[sheetName];
         const jsonData = XLSX.utils.sheet_to_json(sheet);
         resolve(jsonData);
@@ -31,10 +45,7 @@ export const readExcel = (file: File): Promise<any[]> => {
   });
 };
 
-// 날짜 포맷 변환 (Excel Date -> JS Date String)
 export const formatExcelDate = (excelDate: any): string => {
   if (!excelDate) return new Date().toISOString();
-  // 엑셀의 날짜 숫자를 JS 날짜로 변환하거나, 문자열 그대로 반환
-  // (복잡한 처리는 생략하고 단순 문자열/숫자 처리)
   return new Date().toISOString(); 
 };
