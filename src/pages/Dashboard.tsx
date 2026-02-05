@@ -2,22 +2,16 @@ import { useEffect, useState } from 'react';
 import { useStore } from '../store/useStore';
 import { getBIIColor } from '../utils/helpers';
 import { 
-  TrendingUp, Target, CheckSquare, AlertTriangle, Bot, 
-  MoreHorizontal, Calendar, ArrowUpRight, ArrowDownRight, Activity 
+  Activity, Target, Users, TrendingUp, Calendar, 
+  ChevronDown, ArrowUpRight, ArrowDownRight, MoreHorizontal 
 } from 'lucide-react';
-import { 
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
-  PieChart, Pie, Cell 
-} from 'recharts';
 
 export default function Dashboard() {
-  // 1. Store 데이터 가져오기
   const { 
     organizations, 
     objectives, 
-    krs,
-    // [Phase 5]에서 추가된 CFR 데이터가 있다면 여기서 가져옴 (현재는 mock/undefined 대비)
-    // cfrThreads, 
+    krs, 
+    fetchOrganizations, 
     fetchObjectives, 
     fetchKRs,
     loading 
@@ -25,9 +19,22 @@ export default function Dashboard() {
 
   const [selectedOrgId, setSelectedOrgId] = useState<string>('');
 
-  // 2. 초기 로딩 및 조직 선택 로직
+  // 1. 초기 데이터 로딩 (전사 조직 찾기)
   useEffect(() => {
-    // 조직이 있고 선택된 게 없으면 첫 번째 조직(전사 등) 선택
+    const initData = async () => {
+      // 회사 ID가 없으면 로직상 organizations가 비어있을 수 있음 (로그인 직후 등)
+      // 실제 앱에서는 user profile에서 company_id를 가져와야 함.
+      // 여기서는 store에 이미 로드된 organizations를 활용하거나, 없다면 fetch 시도
+      if (organizations.length === 0) {
+        // 임시: userStore에 있는 companyId나, 하드코딩된 ID 사용 필요
+        // 실제 구현 시: await fetchOrganizations(user.company_id);
+      }
+    };
+    initData();
+  }, []);
+
+  // 2. 조직 목록이 로드되면 기본값(최상위 조직) 선택
+  useEffect(() => {
     if (organizations.length > 0 && !selectedOrgId) {
       const rootOrg = organizations.find(o => !o.parentOrgId) || organizations[0];
       if (rootOrg) {
@@ -36,7 +43,7 @@ export default function Dashboard() {
     }
   }, [organizations, selectedOrgId]);
 
-  // 3. 조직 데이터 Fetch
+  // 3. 조직 선택 시 해당 조직의 OKR 데이터 가져오기
   useEffect(() => {
     if (selectedOrgId) {
       fetchObjectives(selectedOrgId);
@@ -44,82 +51,42 @@ export default function Dashboard() {
     }
   }, [selectedOrgId, fetchObjectives, fetchKRs]);
 
-  // ==================== 데이터 집계 (Real-time) ====================
+  // ==================== 통계 계산 로직 ====================
 
-  // 현재 선택된 조직 정보
-  const currentOrg = organizations.find(o => o.id === selectedOrgId);
-
-  // KR 데이터 필터링 및 진행률 계산
-  const allKRs = krs || []; // 안전장치
-  const totalProgress = allKRs.length > 0
-    ? Math.round(allKRs.reduce((sum, kr) => sum + (kr.progressPct || 0), 0) / allKRs.length)
+  // (1) 전체 진척률 계산
+  const totalProgress = krs.length > 0
+    ? Math.round(krs.reduce((acc, kr) => acc + (kr.progressPct || 0), 0) / krs.length)
     : 0;
 
-  // 활성 목표 개수
-  const activeObjectives = objectives ? objectives.filter(obj => obj.status === 'active' || obj.status === 'agreed') : [];
-
-  // 등급 분포 계산 (S/A/B/C/D)
-  // helper의 calculateGrade 대신 DB의 grade 값을 쓰거나 직접 계산
+  // (2) 등급 분포 계산 (S/A/B/C/D)
   const gradeDistribution = {
-    S: allKRs.filter(kr => kr.grade === 'S').length,
-    A: allKRs.filter(kr => kr.grade === 'A').length,
-    B: allKRs.filter(kr => kr.grade === 'B').length,
-    C: allKRs.filter(kr => kr.grade === 'C').length,
-    D: allKRs.filter(kr => kr.grade === 'D' || !kr.grade).length, // 등급 없으면 D로 간주
+    S: krs.filter(kr => (kr.grade || 'D') === 'S').length,
+    A: krs.filter(kr => (kr.grade || 'D') === 'A').length,
+    B: krs.filter(kr => (kr.grade || 'D') === 'B').length,
+    C: krs.filter(kr => (kr.grade || 'D') === 'C').length,
+    D: krs.filter(kr => (kr.grade || 'D') === 'D').length,
   };
 
-  // 차트용 데이터 변환
-  const gradeChartData = [
-    { name: 'S', value: gradeDistribution.S, color: '#2563EB' },
-    { name: 'A', value: gradeDistribution.A, color: '#059669' },
-    { name: 'B', value: gradeDistribution.B, color: '#65A30D' },
-    { name: 'C', value: gradeDistribution.C, color: '#F97316' },
-    { name: 'D', value: gradeDistribution.D, color: '#DC2626' }
-  ];
-
-  // 주의 KR (C, D 등급)
-  const warningKRs = allKRs.filter(kr => kr.grade === 'C' || kr.grade === 'D');
-
-  // BII 통계 (AI 인사이트용 등으로 활용 가능)
+  // (3) BII 비중 계산
   const biiStats = {
     Build: objectives.filter(o => o.biiType === 'Build').length,
     Innovate: objectives.filter(o => o.biiType === 'Innovate').length,
     Improve: objectives.filter(o => o.biiType === 'Improve').length,
   };
 
-  // [Mock Data] 조직별 진행률 (DB 구조상 복잡하여 일단 하드코딩 유지, 추후 교체)
-  const orgProgressMock = [
-    { name: '마케팅', S: 0, A: 1, B: 3, C: 2, D: 0, total: 72 },
-    { name: '영업', S: 1, A: 2, B: 2, C: 0, D: 0, total: 85 },
-    { name: '생산', S: 0, A: 1, B: 3, C: 1, D: 0, total: 68 },
-    { name: 'R&D', S: 1, A: 3, B: 1, C: 0, D: 0, total: 88 },
-    { name: '지원', S: 0, A: 2, B: 2, C: 1, D: 0, total: 75 }
-  ];
-
-  // [Mock Data] 체크인율 (추후 checkins 테이블 연동 필요)
-  const checkinRate = 85;
-
-  // [Mock Data] 활동 피드 (CFR 연동 전까지 임시 데이터 사용)
-  const activityFeedMock = [
-    { id: 1, user: '김철수', message: '영업이익 목표 달성률 105% 기록', timestamp: '10분 전' },
-    { id: 2, user: '이영희', message: '신규 KR "고객 만족도" 등록', timestamp: '1시간 전' },
-    { id: 3, user: '박민수', message: '마케팅 캠페인 결과 리포트 업로드', timestamp: '2시간 전' },
-  ];
-  // 실제 CFR 데이터가 있다면 그것을 우선 사용
-  // const feed = useStore(state => state.cfrThreads) || activityFeedMock; 
-  const feed = activityFeedMock; 
+  const currentOrg = organizations.find(o => o.id === selectedOrgId);
 
   return (
-    <div className="p-6 space-y-6 max-w-7xl mx-auto">
-      
-      {/* 헤더 영역 (조직 선택 포함) */}
-      <div className="flex items-center justify-between">
+    <div className="p-6 max-w-7xl mx-auto">
+      {/* 헤더 */}
+      <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">대시보드</h1>
           <p className="text-slate-600 mt-1">
-            {currentOrg ? `${currentOrg.name}의 성과 현황입니다.` : '데이터를 불러오는 중...'}
+            {currentOrg ? `${currentOrg.name}의 성과 현황입니다.` : '조직 데이터를 불러오는 중...'}
           </p>
         </div>
+        
         <div className="flex gap-3">
           <select 
             className="px-4 py-2 border border-slate-300 rounded-lg bg-white text-sm font-medium focus:ring-2 focus:ring-blue-500 outline-none"
@@ -137,220 +104,192 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* 1. 상단 핵심 지표 카드 (KPI Cards) */}
-      <div className="grid grid-cols-4 gap-6">
-        
-        {/* 전체 진행률 */}
-        <div className="bg-white rounded-xl border border-slate-200 p-6">
+      {/* 1. 핵심 지표 카드 */}
+      <div className="grid grid-cols-4 gap-6 mb-8">
+        <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
           <div className="flex items-center justify-between mb-4">
-            <span className="text-sm font-medium text-slate-600">전체 진행률</span>
-            <TrendingUp className="w-5 h-5 text-blue-600" />
-          </div>
-          <div className="flex items-end gap-2">
-            <span className="text-4xl font-bold text-slate-900">{totalProgress}%</span>
-            {/* 증감률은 히스토리 데이터가 필요하므로 임시값 */}
-            <span className="text-sm text-green-600 font-medium mb-1 flex items-center">
-              <ArrowUpRight className="w-3 h-3 mr-0.5" /> 4%p
+            <div className="p-2 bg-blue-50 rounded-lg">
+              <Activity className="w-6 h-6 text-blue-600" />
+            </div>
+            <span className={`flex items-center text-sm font-medium ${totalProgress >= 80 ? 'text-green-600' : 'text-slate-600'}`}>
+              {totalProgress >= 80 ? <ArrowUpRight className="w-4 h-4 mr-1" /> : <ArrowDownRight className="w-4 h-4 mr-1" />}
+              {totalProgress}%
             </span>
           </div>
-          <div className="mt-3 h-2 bg-slate-200 rounded-full overflow-hidden">
-            <div
-              className={`h-full rounded-full transition-all duration-500 ${totalProgress >= 80 ? 'bg-green-600' : 'bg-blue-600'}`}
-              style={{ width: `${totalProgress}%` }}
-            />
-          </div>
+          <div className="text-2xl font-bold text-slate-900">{totalProgress}%</div>
+          <div className="text-sm text-slate-500 mt-1">평균 진척률</div>
         </div>
 
-        {/* OKR 현황 */}
-        <div className="bg-white rounded-xl border border-slate-200 p-6">
+        <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
           <div className="flex items-center justify-between mb-4">
-            <span className="text-sm font-medium text-slate-600">OKR 현황</span>
-            <Target className="w-5 h-5 text-violet-600" />
-          </div>
-          <div className="space-y-2">
-            <div className="text-2xl font-bold text-slate-900">
-              목표 {activeObjectives.length}개 <span className="text-base font-normal text-slate-500">/ KR {allKRs.length}개</span>
+            <div className="p-2 bg-violet-50 rounded-lg">
+              <Target className="w-6 h-6 text-violet-600" />
             </div>
-            <div className="flex gap-2 flex-wrap mt-2">
-              <span className="px-2 py-1 bg-violet-100 text-violet-700 text-xs rounded-full font-medium">
-                Build {biiStats.Build}
-              </span>
-              <span className="px-2 py-1 bg-blue-100 text-blue-700 text-xs rounded-full font-medium">
-                Innovate {biiStats.Innovate}
-              </span>
-              <span className="px-2 py-1 bg-green-100 text-green-700 text-xs rounded-full font-medium">
-                Improve {biiStats.Improve}
-              </span>
-            </div>
+            <span className="text-sm font-medium text-slate-600">{objectives.length}건</span>
           </div>
+          <div className="text-2xl font-bold text-slate-900">{objectives.length}</div>
+          <div className="text-sm text-slate-500 mt-1">수립된 목표</div>
         </div>
 
-        {/* 체크인 현황 (Mock) */}
-        <div className="bg-white rounded-xl border border-slate-200 p-6">
+        <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
           <div className="flex items-center justify-between mb-4">
-            <span className="text-sm font-medium text-slate-600">체크인 현황</span>
-            <CheckSquare className="w-5 h-5 text-emerald-600" />
-          </div>
-          <div className="space-y-2">
-            <div className="text-2xl font-bold text-slate-900">이번 달 {checkinRate}%</div>
-            <div className="h-12 mt-2">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={[
-                  { name: 'M', rate: 90 }, { name: 'S', rate: 85 }, 
-                  { name: 'P', rate: 80 }, { name: 'R', rate: 88 }, { name: 'Sup', rate: 82 }
-                ]}>
-                  <Bar dataKey="rate" fill="#10B981" radius={[2, 2, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
+            <div className="p-2 bg-green-50 rounded-lg">
+              <TrendingUp className="w-6 h-6 text-green-600" />
             </div>
+            <span className="text-sm font-medium text-green-600">{krs.length}건</span>
           </div>
+          <div className="text-2xl font-bold text-slate-900">{krs.length}</div>
+          <div className="text-sm text-slate-500 mt-1">관리 중인 KR</div>
         </div>
 
-        {/* 주의 KR */}
-        <div className="bg-white rounded-xl border border-slate-200 p-6">
+        <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
           <div className="flex items-center justify-between mb-4">
-            <span className="text-sm font-medium text-slate-600">주의 KR</span>
-            <AlertTriangle className="w-5 h-5 text-orange-600" />
-          </div>
-          <div className="space-y-2">
-            <div className="text-2xl font-bold text-red-600">{warningKRs.length}개 <span className="text-sm text-slate-500 font-normal">위험</span></div>
-            <div className="space-y-1 mt-2">
-              {warningKRs.length > 0 ? warningKRs.slice(0, 2).map(kr => (
-                <div key={kr.id} className="flex items-center gap-2">
-                  <div className="w-1.5 h-1.5 bg-red-500 rounded-full flex-shrink-0" />
-                  <span className="text-xs text-slate-700 truncate">{kr.name}</span>
-                </div>
-              )) : (
-                <div className="text-xs text-slate-400">모든 KR이 순항 중입니다.</div>
-              )}
+            <div className="p-2 bg-orange-50 rounded-lg">
+              <Users className="w-6 h-6 text-orange-600" />
             </div>
+            <span className="text-sm font-medium text-slate-600">{currentOrg?.headcount || 0}명</span>
           </div>
+          <div className="text-2xl font-bold text-slate-900">{currentOrg?.headcount || 0}</div>
+          <div className="text-sm text-slate-500 mt-1">구성원</div>
         </div>
       </div>
 
-      {/* 2. 중간 차트 섹션 */}
-      <div className="grid grid-cols-3 gap-6">
+      {/* 2. 상세 차트 영역 */}
+      <div className="grid grid-cols-3 gap-6 mb-8">
         
-        {/* 조직별 진행률 (Bar Chart) */}
-        <div className="col-span-2 bg-white rounded-xl border border-slate-200 p-6">
-          <h2 className="text-lg font-semibold text-slate-900 mb-4">조직별 진행률 (예시)</h2>
-          <ResponsiveContainer width="100%" height={280}>
-            <BarChart data={orgProgressMock} layout="vertical" margin={{ left: 40, right: 20 }}>
-              <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-              <XAxis type="number" domain={[0, 100]} hide />
-              <YAxis type="category" dataKey="name" width={60} tick={{ fontSize: 12 }} />
-              <Tooltip cursor={{ fill: 'transparent' }} />
-              {/* 스택형 바 차트 */}
-              <Bar dataKey="S" stackId="a" fill="#2563EB" name="S등급" />
-              <Bar dataKey="A" stackId="a" fill="#059669" name="A등급" />
-              <Bar dataKey="B" stackId="a" fill="#65A30D" name="B등급" />
-              <Bar dataKey="C" stackId="a" fill="#F97316" name="C등급" />
-              <Bar dataKey="D" stackId="a" fill="#DC2626" name="D등급" />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-
-        {/* 등급 분포 (Pie Chart) */}
-        <div className="bg-white rounded-xl border border-slate-200 p-6">
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-lg font-semibold text-slate-900">등급 분포</h2>
-            <MoreHorizontal className="w-5 h-5 text-slate-400 cursor-pointer" />
+        {/* (1) 등급 분포 */}
+        <div className="col-span-2 bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+          <div className="flex items-center justify-between mb-6">
+            <h3 className="font-bold text-slate-900">KR 등급 분포</h3>
+            <button className="text-slate-400 hover:text-slate-600">
+              <MoreHorizontal className="w-5 h-5" />
+            </button>
           </div>
           
-          <ResponsiveContainer width="100%" height={200}>
-            <PieChart>
-              <Pie
-                data={gradeChartData}
-                cx="50%"
-                cy="50%"
-                innerRadius={60}
-                outerRadius={80}
-                paddingAngle={2}
-                dataKey="value"
-              >
-                {gradeChartData.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={entry.color} />
-                ))}
-              </Pie>
-              <Tooltip />
-            </PieChart>
-          </ResponsiveContainer>
+          <div className="grid grid-cols-5 gap-4 items-end h-48">
+            {Object.entries(gradeDistribution).map(([grade, count]) => {
+              const height = krs.length > 0 ? (count / krs.length) * 100 : 0;
+              let color = 'bg-slate-300';
+              if (grade === 'S') color = 'bg-blue-500';
+              if (grade === 'A') color = 'bg-green-500';
+              if (grade === 'B') color = 'bg-lime-500';
+              if (grade === 'C') color = 'bg-yellow-400';
+              if (grade === 'D') color = 'bg-red-400';
 
-          <div className="mt-4 space-y-2">
-            {gradeChartData.map(item => (
-              <div key={item.name} className="flex items-center justify-between text-sm">
-                <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 rounded-full" style={{ backgroundColor: item.color }} />
-                  <span className="text-slate-600">{item.name}등급</span>
+              return (
+                <div key={grade} className="flex flex-col items-center gap-2 h-full justify-end">
+                  <div className="text-sm font-bold text-slate-700">{count}</div>
+                  <div 
+                    className={`w-full rounded-t-lg transition-all duration-500 ${color}`}
+                    style={{ height: `${Math.max(height, 5)}%` }} // 최소 높이 5%
+                  />
+                  <div className="text-sm font-medium text-slate-600">{grade}등급</div>
                 </div>
-                <span className="font-medium text-slate-900">{item.value}개</span>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* (2) BII Balance */}
+        <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+          <h3 className="font-bold text-slate-900 mb-6">전략 유형 (BII)</h3>
+          
+          <div className="space-y-6">
+            <div>
+              <div className="flex justify-between text-sm mb-2">
+                <span className="font-medium text-slate-700">Build (기반구축)</span>
+                <span className="text-slate-500">{biiStats.Build}건</span>
               </div>
-            ))}
+              <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                <div 
+                  className="h-full bg-violet-500 rounded-full transition-all duration-500"
+                  style={{ width: `${objectives.length > 0 ? (biiStats.Build / objectives.length) * 100 : 0}%` }}
+                />
+              </div>
+            </div>
+
+            <div>
+              <div className="flex justify-between text-sm mb-2">
+                <span className="font-medium text-slate-700">Innovate (혁신)</span>
+                <span className="text-slate-500">{biiStats.Innovate}건</span>
+              </div>
+              <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                <div 
+                  className="h-full bg-blue-500 rounded-full transition-all duration-500"
+                  style={{ width: `${objectives.length > 0 ? (biiStats.Innovate / objectives.length) * 100 : 0}%` }}
+                />
+              </div>
+            </div>
+
+            <div>
+              <div className="flex justify-between text-sm mb-2">
+                <span className="font-medium text-slate-700">Improve (개선)</span>
+                <span className="text-slate-500">{biiStats.Improve}건</span>
+              </div>
+              <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                <div 
+                  className="h-full bg-green-500 rounded-full transition-all duration-500"
+                  style={{ width: `${objectives.length > 0 ? (biiStats.Improve / objectives.length) * 100 : 0}%` }}
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-8 pt-6 border-t border-slate-100 text-center">
+            <div className="text-xs text-slate-500 mb-1">총 목표 수</div>
+            <div className="text-3xl font-bold text-slate-900">{objectives.length}</div>
           </div>
         </div>
       </div>
 
-      {/* 3. 하단 피드 및 AI 인사이트 */}
-      <div className="grid grid-cols-3 gap-6">
-        
-        {/* 최근 활동 피드 */}
-        <div className="col-span-2 bg-white rounded-xl border border-slate-200 p-6">
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-lg font-semibold text-slate-900">최근 활동 피드</h2>
-            <button className="text-sm text-blue-600 hover:text-blue-700 font-medium">더보기 →</button>
-          </div>
-          
-          <div className="space-y-4">
-            {feed.length > 0 ? (
-              feed.slice(0, 5).map((activity, idx) => (
-                <div key={idx} className="flex items-start gap-3 pb-3 border-b border-slate-50 last:border-0 last:pb-0">
-                  <div className="w-8 h-8 bg-slate-100 rounded-full flex items-center justify-center flex-shrink-0 text-slate-600 font-medium text-xs">
-                    {activity.user[0]}
+      {/* 3. 목표 목록 요약 (Recent Objectives) */}
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="p-6 border-b border-slate-100 flex justify-between items-center">
+          <h3 className="font-bold text-slate-900">목표 달성 현황</h3>
+          <button className="text-sm text-blue-600 font-medium hover:text-blue-700">전체보기</button>
+        </div>
+        <div className="divide-y divide-slate-100">
+          {objectives.length === 0 ? (
+            <div className="p-8 text-center text-slate-500">등록된 목표가 없습니다.</div>
+          ) : (
+            objectives.slice(0, 5).map(obj => {
+              const bii = getBIIColor(obj.biiType);
+              // 해당 목표의 KR 평균 진척률
+              const myKRs = krs.filter(k => k.objectiveId === obj.id);
+              const progress = myKRs.length > 0 
+                ? Math.round(myKRs.reduce((sum, k) => sum + (k.progressPct || 0), 0) / myKRs.length)
+                : 0;
+
+              return (
+                <div key={obj.id} className="p-4 flex items-center justify-between hover:bg-slate-50 transition-colors">
+                  <div className="flex items-center gap-4">
+                    <span className={`px-2 py-1 rounded text-xs font-medium ${bii.bg} ${bii.text} w-16 text-center`}>
+                      {obj.biiType}
+                    </span>
+                    <div>
+                      <div className="font-medium text-slate-900">{obj.name}</div>
+                      <div className="text-xs text-slate-500 mt-0.5">{myKRs.length} Key Results</div>
+                    </div>
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm text-slate-700">
-                      <span className="font-semibold text-slate-900">{activity.user}</span>
-                      <span className="mx-1">·</span>
-                      {activity.message}
-                    </p>
-                    <span className="text-xs text-slate-400 mt-0.5 block">{activity.timestamp}</span>
+                  <div className="flex items-center gap-4">
+                    <div className="w-32">
+                      <div className="flex justify-between text-xs mb-1">
+                        <span className="text-slate-600">진행률</span>
+                        <span className="font-bold text-slate-900">{progress}%</span>
+                      </div>
+                      <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                        <div 
+                          className={`h-full rounded-full ${progress >= 100 ? 'bg-green-500' : 'bg-blue-500'}`}
+                          style={{ width: `${progress}%` }}
+                        />
+                      </div>
+                    </div>
+                    <ChevronDown className="w-4 h-4 text-slate-400" />
                   </div>
                 </div>
-              ))
-            ) : (
-              <div className="text-center text-slate-500 py-4">최근 활동이 없습니다.</div>
-            )}
-          </div>
-        </div>
-
-        {/* AI 인사이트 */}
-        <div className="bg-gradient-to-br from-blue-50 to-violet-50 rounded-xl border border-blue-200 p-6">
-          <div className="flex items-center gap-2 mb-4">
-            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center shadow-sm">
-              <Bot className="w-5 h-5 text-white" />
-            </div>
-            <h2 className="text-lg font-semibold text-slate-900">AI 인사이트</h2>
-          </div>
-          <div className="space-y-3">
-            <div className="bg-white/60 backdrop-blur-sm rounded-lg p-3 border border-blue-100 shadow-sm">
-              <p className="text-sm text-slate-700 leading-relaxed">
-                📢 <span className="font-semibold text-blue-700">영업이익률</span>이 목표 대비 8%p 하회하고 있습니다. 원가 구조 점검을 권장합니다.
-              </p>
-            </div>
-            <div className="bg-white/60 backdrop-blur-sm rounded-lg p-3 border border-blue-100 shadow-sm">
-              <p className="text-sm text-slate-700 leading-relaxed">
-                ⚠️ <span className="font-semibold text-orange-600">교육이수율</span>이 4개 팀에서 지연되고 있습니다. 집중 관리가 필요합니다.
-              </p>
-            </div>
-            <div className="bg-white/60 backdrop-blur-sm rounded-lg p-3 border border-blue-100 shadow-sm">
-              <p className="text-sm text-slate-700 leading-relaxed">
-                🎉 <span className="font-semibold text-green-600">마케팅본부</span>의 매출채권회전일이 목표를 조기 달성했습니다! 
-              </p>
-            </div>
-          </div>
-          <button className="w-full mt-4 py-2 bg-white border border-blue-200 text-blue-600 text-sm font-medium rounded-lg hover:bg-blue-50 transition-colors shadow-sm">
-            AI 리포트 전체보기
-          </button>
+              );
+            })
+          )}
         </div>
       </div>
     </div>
