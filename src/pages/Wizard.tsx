@@ -694,6 +694,7 @@ export default function Wizard() {
                         {selectedObjectiveTab === obj.id ? '●' : '○'}
                       </span>
                     </div>
+                    {/* [수정됨] 탭에 목표 이름 추가 */}
                     <div className={`text-xs mt-1 ${
                       selectedObjectiveTab === obj.id ? 'text-blue-600' : 'text-slate-500'
                     }`}>
