@@ -567,4 +567,4 @@ export function getRoleLevelName(level: number): string {
 export function isPermissionExpired(expiresAt?: string): boolean {
   if (!expiresAt) return false;
   return new Date(expiresAt) < new Date();
-}
+} 
