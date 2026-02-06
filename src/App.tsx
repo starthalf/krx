@@ -11,6 +11,7 @@ import Organization from './pages/Organization';
 import KPIPool from './pages/KPIPool';
 import Wizard from './pages/Wizard';
 import AdminSettings from './pages/AdminSettings';
+import OnboardingWizard from './pages/OnboardingWizard';
 
 function App() {
   return (
@@ -19,6 +20,16 @@ function App() {
         <Routes>
           {/* 로그인 페이지 (인증 불필요) */}
           <Route path="/login" element={<Login />} />
+          
+          {/* 온보딩 (인증 필요, Layout 없음) */}
+          <Route
+            path="/onboarding"
+            element={
+              <ProtectedRoute>
+                <OnboardingWizard />
+              </ProtectedRoute>
+            }
+          />
           
           {/* 인증 필요한 페이지들 */}
           <Route
