@@ -15,7 +15,8 @@ interface AppState {
   organizations: Organization[];
   objectives: Objective[];
   krs: DynamicKR[];
-  cfrThreads: CFRThread[]; // [New] CFR 데이터 추가
+  cfrThreads: CFRThread[];
+  dashboardStats: any[]; // [New] 대시보드 통계 데이터
   loading: boolean;
   error: string | null;
 
@@ -41,9 +42,12 @@ interface AppState {
   deleteKR: (krId: string) => Promise<void>;
 
   // ==================== CFR (Conversations, Feedback, Recognition) ====================
-  fetchCFRs: (krId: string) => Promise<void>; // [New]
-  addCFRThread: (cfr: Omit<CFRThread, 'id' | 'createdAt'>) => Promise<void>; // [New]
-  getCFRsByKRId: (krId: string) => CFRThread[]; // [New]
+  fetchCFRs: (krId: string) => Promise<void>;
+  addCFRThread: (cfr: Omit<CFRThread, 'id' | 'createdAt'>) => Promise<void>;
+  getCFRsByKRId: (krId: string) => CFRThread[];
+
+  // ==================== Dashboard ====================
+  fetchDashboardStats: (companyId: string) => Promise<void>; // [New] 대시보드 통계 불러오기
 
   // ==================== Getters ====================
   getOrgById: (orgId: string) => Organization | undefined;
@@ -58,7 +62,8 @@ export const useStore = create<AppState>((set, get) => ({
   organizations: [],
   objectives: [],
   krs: [],
-  cfrThreads: [], // [New] 초기값 설정
+  cfrThreads: [],
+  dashboardStats: [], // [New] 초기값
   loading: false,
   error: null,
 
@@ -563,6 +568,23 @@ export const useStore = create<AppState>((set, get) => ({
     return get().cfrThreads
       .filter(c => c.krId === krId)
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  },
+
+  // ==================== Dashboard ====================
+  // [New] 대시보드 통계 가져오기 구현
+  fetchDashboardStats: async (companyId) => {
+    try {
+      const { data, error } = await supabase.rpc('get_org_stats', { 
+        target_company_id: companyId 
+      });
+      
+      if (error) throw error;
+      
+      set({ dashboardStats: data || [] });
+    } catch (error) {
+      console.error('Dashboard stats fetch error:', error);
+      set({ dashboardStats: [] });
+    }
   },
 
   // ==================== Getters ====================
