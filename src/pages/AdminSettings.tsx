@@ -1,18 +1,20 @@
 // src/pages/AdminSettings.tsx
 import { useState } from 'react';
-import { Shield, Users, Layers, Lock, Settings as SettingsIcon, ChevronRight, Building2 } from 'lucide-react';
+import { Shield, Users, Layers, Lock, Settings as SettingsIcon, ChevronRight, Building2, Mail } from 'lucide-react';
 import UserRolesManager from '../components/admin/UserRolesManager';
 import OrgStructureSettings from '../components/admin/OrgStructureSettings';
 import RolePermissionsManager from '../components/admin/RolePermissionsManager';
 import CompanyManagement from '../components/admin/CompanyManagement';
+import UserInvitation from '../components/admin/UserInvitation';
 
-type TabType = 'companies' | 'users' | 'roles' | 'structure' | 'permissions';
+type TabType = 'companies' | 'invite' | 'users' | 'roles' | 'structure' | 'permissions';
 
 export default function AdminSettings() {
   const [activeTab, setActiveTab] = useState<TabType>('companies');
 
   const tabs = [
     { id: 'companies' as TabType, name: '회사 관리', icon: Building2, description: '등록된 회사 목록 및 관리 (Super Admin)' },
+    { id: 'invite' as TabType, name: '사용자 초대', icon: Mail, description: '새로운 팀원 초대 및 초대 관리' },
     { id: 'users' as TabType, name: '사용자 관리', icon: Users, description: '사용자별 역할 및 권한 할당' },
     { id: 'roles' as TabType, name: '역할 관리', icon: Shield, description: '역할별 권한 설정 및 수정' },
     { id: 'structure' as TabType, name: '조직 구조', icon: Layers, description: '조직 계층 템플릿 설정' },
@@ -75,6 +77,7 @@ export default function AdminSettings() {
           <div className="lg:col-span-3">
             <div className="bg-white rounded-xl border border-slate-200 p-6">
               {activeTab === 'companies' && <CompanyManagement />}
+              {activeTab === 'invite' && <UserInvitation />}
               {activeTab === 'users' && <UserManagement />}
               {activeTab === 'roles' && <RoleManagement />}
               {activeTab === 'structure' && <StructureManagement />}
