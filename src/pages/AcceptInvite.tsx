@@ -139,20 +139,14 @@ export default function AcceptInvite() {
         throw new Error(data.error || '초대 수락에 실패했습니다');
       }
 
-      // 온보딩 필요 여부 확인
-      const { data: profile } = await supabase
+      // 초대받은 사용자는 온보딩 스킵 (이미 회사가 설정되어 있으므로)
+      await supabase
         .from('profiles')
-        .select('onboarding_completed')
-        .eq('id', user.id)
-        .single();
+        .update({ onboarding_completed: true })
+        .eq('id', user.id);
 
-      if (profile?.onboarding_completed) {
-        // 이미 온보딩 완료 → 대시보드로
-        navigate('/dashboard');
-      } else {
-        // 온보딩 필요 → 온보딩으로
-        navigate('/onboarding');
-      }
+      // 바로 대시보드로
+      navigate('/dashboard');
     } catch (err) {
       console.error('Failed to accept invitation:', err);
       alert('초대 수락 중 오류가 발생했습니다: ' + (err as Error).message);
