@@ -389,4 +389,4 @@ function AddCompanyModal({ onClose, onSuccess }: AddCompanyModalProps) {
       </div>
     </div>
   );
-}
+} 
