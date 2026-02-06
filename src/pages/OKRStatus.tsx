@@ -3,7 +3,8 @@ import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useStore } from '../store/useStore';
 import { getBIIColor } from '../utils/helpers';
-import { ChevronRight, Target, TrendingUp } from 'lucide-react';
+import { ChevronRight, Target, TrendingUp, Edit, Trash2, Lock } from 'lucide-react';
+import { getMyRoleLevel, checkCanManageOrg, checkPermission } from '../lib/permissions';
 
 type ViewMode = 'company' | 'division' | 'team';
 
@@ -19,10 +20,41 @@ export default function OKRStatus() {
     fetchKRs 
   } = useStore();
 
-  // URL 기반 뷰 모드 결정
   const [viewMode, setViewMode] = useState<ViewMode>('company');
   const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null);
+  
+  // 권한 관련
+  const [roleLevel, setRoleLevel] = useState<number>(0);
+  const [canManageCurrentOrg, setCanManageCurrentOrg] = useState<boolean>(false);
+  const [canEditOKR, setCanEditOKR] = useState<boolean>(false);
 
+  // 권한 체크
+  useEffect(() => {
+    const checkPermissions = async () => {
+      const level = await getMyRoleLevel();
+      setRoleLevel(level);
+    };
+    checkPermissions();
+  }, []);
+
+  // 현재 조직 관리 권한 확인
+  useEffect(() => {
+    const checkOrgPermission = async () => {
+      if (selectedOrgId) {
+        const canManage = await checkCanManageOrg(selectedOrgId);
+        setCanManageCurrentOrg(canManage);
+        
+        // OKR 수정 권한 확인
+        const canEdit = await checkPermission('okr.edit.team', selectedOrgId) || 
+                        await checkPermission('okr.edit.division', selectedOrgId) ||
+                        canManage;
+        setCanEditOKR(canEdit);
+      }
+    };
+    checkOrgPermission();
+  }, [selectedOrgId]);
+
+  // URL 기반 뷰 모드 결정
   useEffect(() => {
     if (location.pathname.includes('/okr/company')) {
       setViewMode('company');
@@ -33,20 +65,14 @@ export default function OKRStatus() {
     }
   }, [location.pathname]);
 
-  // 전사 조직 찾기
   const companyOrg = organizations.find(o => o.level === '전사');
-  
-  // 본부 조직들
   const divisions = organizations.filter(o => 
     o.level === '본부' && o.parentOrgId === companyOrg?.id
   );
-
-  // 선택된 본부의 팀들
   const teams = selectedOrgId 
     ? organizations.filter(o => o.level === '팀' && o.parentOrgId === selectedOrgId)
     : [];
 
-  // 조직별 통계 계산
   const getOrgStats = (orgId: string) => {
     const orgObjs = objectives.filter(o => o.orgId === orgId);
     const orgKRs = krs.filter(k => k.orgId === orgId);
@@ -62,7 +88,7 @@ export default function OKRStatus() {
     };
   };
 
-  // 목표 카드 컴포넌트
+  // 목표 카드에 수정/삭제 버튼 추가
   const ObjectiveCard = ({ objective, level }: { objective: any; level: number }) => {
     const objectiveKRs = krs.filter(k => k.objectiveId === objective.id);
     const progress = objectiveKRs.length > 0
@@ -83,21 +109,59 @@ export default function OKRStatus() {
                 {objective.biiType}
               </span>
               <span className="text-xs text-slate-500">{objectiveKRs.length} KRs</span>
+              
+              {/* 권한 없으면 잠금 아이콘 */}
+              {!canEditOKR && (
+                <div className="flex items-center gap-1 text-xs text-slate-400">
+                  <Lock className="w-3 h-3" />
+                  <span>조회 전용</span>
+                </div>
+              )}
             </div>
             <h3 className="font-semibold text-slate-900 mb-1">{objective.name}</h3>
           </div>
-          <div className="text-right ml-4">
-            <div className={`text-2xl font-bold ${
-              progress >= 100 ? 'text-green-600' :
-              progress >= 70 ? 'text-blue-600' :
-              progress >= 40 ? 'text-yellow-600' : 'text-red-600'
-            }`}>
-              {progress}%
+          
+          <div className="flex items-center gap-2 ml-4">
+            {/* 수정/삭제 버튼 - 권한 있을 때만 */}
+            {canEditOKR && (
+              <div className="flex gap-1">
+                <button 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    navigate(`/wizard/${objective.orgId}?edit=${objective.id}`);
+                  }}
+                  className="p-1.5 hover:bg-blue-50 rounded text-blue-600"
+                  title="수정"
+                >
+                  <Edit className="w-4 h-4" />
+                </button>
+                <button 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (confirm('정말 삭제하시겠습니까?')) {
+                      // 삭제 로직
+                    }
+                  }}
+                  className="p-1.5 hover:bg-red-50 rounded text-red-600"
+                  title="삭제"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+            
+            <div className="text-right">
+              <div className={`text-2xl font-bold ${
+                progress >= 100 ? 'text-green-600' :
+                progress >= 70 ? 'text-blue-600' :
+                progress >= 40 ? 'text-yellow-600' : 'text-red-600'
+              }`}>
+                {progress}%
+              </div>
             </div>
           </div>
         </div>
         
-        {/* 진행률 바 */}
         <div className="mt-3">
           <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
             <div
@@ -114,7 +178,6 @@ export default function OKRStatus() {
     );
   };
 
-  // 조직 카드 컴포넌트
   const OrganizationCard = ({ org, onClick }: { org: any; onClick?: () => void }) => {
     const stats = getOrgStats(org.id);
 
@@ -160,13 +223,11 @@ export default function OKRStatus() {
     );
   };
 
-  // 전사 뷰 데이터 로딩
+  // 데이터 로딩 로직들...
   useEffect(() => {
     if (viewMode === 'company' && companyOrg) {
       fetchObjectives(companyOrg.id);
       fetchKRs(companyOrg.id);
-      
-      // 본부별 데이터도 로딩
       divisions.forEach(div => {
         fetchObjectives(div.id);
         fetchKRs(div.id);
@@ -174,13 +235,10 @@ export default function OKRStatus() {
     }
   }, [viewMode, companyOrg, divisions.length]);
 
-  // 본부 뷰 데이터 로딩
   useEffect(() => {
     if (viewMode === 'division' && selectedOrgId) {
       fetchObjectives(selectedOrgId);
       fetchKRs(selectedOrgId);
-      
-      // 팀 데이터도 로딩
       const divTeams = organizations.filter(o => o.level === '팀' && o.parentOrgId === selectedOrgId);
       divTeams.forEach(team => {
         fetchObjectives(team.id);
@@ -189,7 +247,6 @@ export default function OKRStatus() {
     }
   }, [viewMode, selectedOrgId]);
 
-  // 팀 뷰 데이터 로딩
   useEffect(() => {
     if (viewMode === 'team' && selectedOrgId) {
       fetchObjectives(selectedOrgId);
@@ -197,10 +254,8 @@ export default function OKRStatus() {
     }
   }, [viewMode, selectedOrgId]);
 
-  // 본부 뷰: 자동 선택
   useEffect(() => {
     if (viewMode === 'division') {
-      // 현재 선택된 조직이 본부가 아니거나 없으면 첫 번째 본부 선택
       const currentOrg = organizations.find(o => o.id === selectedOrgId);
       if (!currentOrg || currentOrg.level !== '본부') {
         if (divisions.length > 0) {
@@ -210,11 +265,9 @@ export default function OKRStatus() {
     }
   }, [viewMode, divisions.length]);
 
-  // 팀 뷰: 자동 선택
   useEffect(() => {
     if (viewMode === 'team') {
       const allTeams = organizations.filter(o => o.level === '팀');
-      // 현재 선택된 조직이 팀이 아니거나 없으면 첫 번째 팀 선택
       const currentOrg = organizations.find(o => o.id === selectedOrgId);
       if (!currentOrg || currentOrg.level !== '팀') {
         if (allTeams.length > 0) {
@@ -224,7 +277,6 @@ export default function OKRStatus() {
     }
   }, [viewMode, organizations.length]);
 
-  // 뷰 모드별 렌더링
   const renderCompanyView = () => {
     if (!companyOrg) {
       return (
@@ -238,10 +290,8 @@ export default function OKRStatus() {
 
     return (
       <div className="space-y-8">
-        {/* 전사 카드 */}
         <OrganizationCard org={companyOrg} />
 
-        {/* 전사 목표들 */}
         {companyObjectives.length > 0 && (
           <div className="space-y-4">
             <h3 className="text-lg font-semibold text-slate-900 flex items-center gap-2">
@@ -254,7 +304,6 @@ export default function OKRStatus() {
           </div>
         )}
 
-        {/* 본부 카드들 */}
         <div className="space-y-4">
           <h3 className="text-lg font-semibold text-slate-900 flex items-center gap-2">
             <TrendingUp className="w-5 h-5" />
@@ -289,7 +338,6 @@ export default function OKRStatus() {
 
     return (
       <div className="space-y-8">
-        {/* 본부 선택 드롭다운 */}
         <select 
           value={selectedOrgId}
           onChange={(e) => setSelectedOrgId(e.target.value)}
@@ -300,10 +348,8 @@ export default function OKRStatus() {
           ))}
         </select>
 
-        {/* 본부 카드 */}
         <OrganizationCard org={selectedDiv} />
 
-        {/* 본부 목표들 */}
         {divObjectives.length > 0 && (
           <div className="space-y-4">
             <h3 className="text-lg font-semibold text-slate-900 flex items-center gap-2">
@@ -316,7 +362,6 @@ export default function OKRStatus() {
           </div>
         )}
 
-        {/* 팀 카드들 */}
         {teams.length > 0 && (
           <div className="space-y-4">
             <h3 className="text-lg font-semibold text-slate-900 flex items-center gap-2">
@@ -354,7 +399,6 @@ export default function OKRStatus() {
 
     return (
       <div className="space-y-8">
-        {/* 팀 선택 드롭다운 */}
         <select 
           value={selectedOrgId}
           onChange={(e) => setSelectedOrgId(e.target.value)}
@@ -365,22 +409,32 @@ export default function OKRStatus() {
           ))}
         </select>
 
-        {/* 팀 카드 */}
         <OrganizationCard org={selectedTeam} />
 
-        {/* 팀 목표들 */}
         {teamObjectives.length > 0 ? (
           <div className="space-y-4">
-            <h3 className="text-lg font-semibold text-slate-900 flex items-center gap-2">
-              <Target className="w-5 h-5" />
-              팀 목표 및 KR
-            </h3>
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-slate-900 flex items-center gap-2">
+                <Target className="w-5 h-5" />
+                팀 목표 및 KR
+              </h3>
+              
+              {/* 목표 수립 버튼 - 권한 있을 때만 */}
+              {canManageCurrentOrg && (
+                <button
+                  onClick={() => navigate(`/wizard/${selectedOrgId}`)}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium text-sm"
+                >
+                  + 목표 추가
+                </button>
+              )}
+            </div>
+            
             {teamObjectives.map(obj => {
               const objKRs = krs.filter(k => k.objectiveId === obj.id);
               return (
                 <div key={obj.id} className="space-y-3">
                   <ObjectiveCard objective={obj} level={0} />
-                  {/* KR 간략 표시 */}
                   {objKRs.map(kr => (
                     <div 
                       key={kr.id} 
@@ -413,12 +467,20 @@ export default function OKRStatus() {
         ) : (
           <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-10 text-center">
             <p className="text-yellow-800 mb-2">아직 설정된 목표가 없습니다</p>
-            <button
-              onClick={() => navigate(`/wizard/${selectedOrgId}`)}
-              className="mt-4 px-6 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition-colors"
-            >
-              목표 수립하기
-            </button>
+            
+            {/* 목표 수립 버튼 - 권한 있을 때만 */}
+            {canManageCurrentOrg ? (
+              <button
+                onClick={() => navigate(`/wizard/${selectedOrgId}`)}
+                className="mt-4 px-6 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition-colors"
+              >
+                목표 수립하기
+              </button>
+            ) : (
+              <p className="text-sm text-yellow-700 mt-2">
+                목표 수립 권한이 없습니다. 팀장에게 문의하세요.
+              </p>
+            )}
           </div>
         )}
       </div>
@@ -427,7 +489,6 @@ export default function OKRStatus() {
 
   return (
     <div className="p-6">
-      {/* 헤더 */}
       <div className="mb-6">
         <div className="text-sm text-slate-500 mb-1">목표 현황</div>
         <div className="flex items-center justify-between">
@@ -437,7 +498,6 @@ export default function OKRStatus() {
             {viewMode === 'team' && '팀별 OKR'}
           </h1>
           
-          {/* 뷰 전환 탭 */}
           <div className="flex gap-2">
             <button
               onClick={() => navigate('/okr/company')}
@@ -473,7 +533,6 @@ export default function OKRStatus() {
         </div>
       </div>
 
-      {/* 뷰 모드별 컨텐츠 */}
       {viewMode === 'company' && renderCompanyView()}
       {viewMode === 'division' && renderDivisionView()}
       {viewMode === 'team' && renderTeamView()}
