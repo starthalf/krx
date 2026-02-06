@@ -1,11 +1,12 @@
 // src/pages/Login.tsx
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { Target, Mail, Lock, User, Loader2, AlertCircle } from 'lucide-react';
 
 export default function Login() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { signIn, signUp } = useAuth();
 
   const [isSignUp, setIsSignUp] = useState(false);
@@ -16,6 +17,9 @@ export default function Login() {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
+  // 초대 토큰이 있으면 안내 메시지 표시
+  const inviteToken = searchParams.get('invite');
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -24,25 +28,17 @@ export default function Login() {
 
     try {
       if (isSignUp) {
-        // 회원가입
+        // 회원가입 - 초대 기반만 허용
         if (!fullName.trim()) {
           setError('이름을 입력해주세요.');
           setLoading(false);
           return;
         }
 
-        const { error: signUpError } = await signUp(email, password, fullName);
-        
-        if (signUpError) {
-          if (signUpError.message.includes('already registered')) {
-            setError('이미 가입된 이메일입니다.');
-          } else {
-            setError(signUpError.message);
-          }
-        } else {
-          setMessage('가입 완료! 이메일을 확인해주세요. (또는 바로 로그인 시도)');
-          setIsSignUp(false);
-        }
+        // 초대 기반 시스템 안내
+        setError('⚠️ OKRio는 초대를 통해서만 가입할 수 있습니다.\n\n관리자에게 초대 링크를 요청하세요.');
+        setLoading(false);
+        return;
       } else {
         // 로그인
         const { error: signInError } = await signIn(email, password);
@@ -54,7 +50,12 @@ export default function Login() {
             setError(signInError.message);
           }
         } else {
-          navigate('/');
+          // 초대 토큰이 있으면 초대 수락 페이지로
+          if (inviteToken) {
+            navigate(`/accept-invite/${inviteToken}`);
+          } else {
+            navigate('/');
+          }
         }
       }
     } catch (err) {
@@ -109,6 +110,16 @@ export default function Login() {
           <p className="text-slate-600 mt-2">AI 기반 OKR 목표 관리 시스템</p>
         </div>
 
+        {/* 초대 링크로 온 경우 안내 */}
+        {inviteToken && (
+          <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+            <p className="text-sm text-blue-800">
+              <strong>💌 초대를 받으셨습니다!</strong><br />
+              로그인하여 초대를 수락하세요.
+            </p>
+          </div>
+        )}
+
         {/* 로그인 카드 */}
         <div className="bg-white rounded-2xl shadow-xl border border-slate-200 p-8">
           <h2 className="text-xl font-semibold text-slate-900 mb-6">
@@ -117,9 +128,9 @@ export default function Login() {
 
           {/* 에러 메시지 */}
           {error && (
-            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-center gap-2 text-red-700 text-sm">
-              <AlertCircle className="w-4 h-4 flex-shrink-0" />
-              {error}
+            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-start gap-2 text-red-700 text-sm">
+              <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+              <div className="whitespace-pre-line">{error}</div>
             </div>
           )}
 
@@ -246,17 +257,15 @@ export default function Login() {
               </>
             ) : (
               <>
-                계정이 없으신가요?{' '}
+                초대를 받으셨나요?{' '}
                 <button
                   type="button"
                   onClick={() => {
-                    setIsSignUp(true);
-                    setError(null);
-                    setMessage(null);
+                    setError('초대 링크를 통해 가입해주세요.\n\n관리자에게 초대 링크를 요청하세요.');
                   }}
                   className="text-blue-600 font-medium hover:underline"
                 >
-                  회원가입
+                  회원가입 안내
                 </button>
               </>
             )}
