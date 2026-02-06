@@ -4,45 +4,86 @@ import { useStore } from '../store/useStore';
 import { getBIIColor } from '../utils/helpers';
 import { 
   TrendingUp, Target, CheckSquare, AlertTriangle, Bot, 
-  MoreHorizontal, Calendar, ArrowUpRight, Trophy, AlertCircle, Activity
+  MoreHorizontal, Calendar, ArrowUpRight, Trophy, AlertCircle, Activity,
+  Settings, Shield
 } from 'lucide-react';
 import { 
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer 
 } from 'recharts';
+import { getMyRoleLevel, checkCanManageOrg } from '../lib/permissions';
 
 export default function Dashboard() {
   const { 
     organizations, 
     objectives, 
     krs,
-    dashboardStats, // [New] 추가
+    dashboardStats,
     fetchObjectives, 
     fetchKRs,
-    fetchDashboardStats, // [New] 추가
+    fetchDashboardStats,
     loading 
   } = useStore();
 
   const [selectedOrgId, setSelectedOrgId] = useState<string>('');
+  
+  // 권한 관련 state
+  const [roleLevel, setRoleLevel] = useState<number>(0);
+  const [managableOrgs, setManagableOrgs] = useState<string[]>([]);
+  const [permissionsLoading, setPermissionsLoading] = useState(true);
 
-  // 1. 초기 데이터 로딩 및 조직 선택
+  // 1. 권한 체크
   useEffect(() => {
+    const checkPermissions = async () => {
+      try {
+        setPermissionsLoading(true);
+        
+        // 내 역할 레벨 가져오기
+        const level = await getMyRoleLevel();
+        setRoleLevel(level);
+
+        // 관리 가능한 조직 목록 확인
+        const managable: string[] = [];
+        for (const org of organizations) {
+          const canManage = await checkCanManageOrg(org.id);
+          if (canManage) {
+            managable.push(org.id);
+          }
+        }
+        setManagableOrgs(managable);
+      } catch (error) {
+        console.error('Failed to check permissions:', error);
+      } finally {
+        setPermissionsLoading(false);
+      }
+    };
+
     if (organizations.length > 0) {
-      // (1) 선택된 조직이 없으면 기본값 설정
+      checkPermissions();
+    }
+  }, [organizations]);
+
+  // 2. 초기 데이터 로딩 및 조직 선택
+  useEffect(() => {
+    if (organizations.length > 0 && !permissionsLoading) {
       if (!selectedOrgId) {
-        const rootOrg = organizations.find(o => !o.parentOrgId) || organizations[0];
-        if (rootOrg) setSelectedOrgId(rootOrg.id);
+        let defaultOrg;
+        if (managableOrgs.length > 0) {
+          defaultOrg = organizations.find(o => o.id === managableOrgs[0]);
+        }
+        if (!defaultOrg) {
+          defaultOrg = organizations.find(o => !o.parentOrgId) || organizations[0];
+        }
+        if (defaultOrg) setSelectedOrgId(defaultOrg.id);
       }
 
-      // (2) 대시보드 통계(전체 조직 비교 데이터) 불러오기
-      // 편의상 첫 번째 조직의 companyId를 사용 (실제로는 auth user의 company_id)
       const companyId = organizations[0].companyId;
       if (companyId) {
         fetchDashboardStats(companyId);
       }
     }
-  }, [organizations, selectedOrgId, fetchDashboardStats]);
+  }, [organizations, selectedOrgId, managableOrgs, permissionsLoading, fetchDashboardStats]);
 
-  // 2. 선택된 조직의 상세 데이터 로딩
+  // 3. 선택된 조직의 상세 데이터 로딩
   useEffect(() => {
     if (selectedOrgId) {
       fetchObjectives(selectedOrgId);
@@ -50,11 +91,8 @@ export default function Dashboard() {
     }
   }, [selectedOrgId, fetchObjectives, fetchKRs]);
 
-  // ==================== 데이터 집계 (단일 조직) ====================
-
+  // 데이터 집계
   const currentOrg = organizations.find(o => o.id === selectedOrgId);
-  
-  // 데이터가 없을 때를 대비한 안전장치
   const allKRs = krs || []; 
   const currentObjectives = objectives || [];
 
@@ -64,7 +102,6 @@ export default function Dashboard() {
 
   const activeObjectives = currentObjectives.filter(obj => obj.status === 'active' || obj.status === 'agreed');
 
-  // 등급 분포 (현재 선택된 조직)
   const gradeDistribution = {
     S: allKRs.filter(kr => kr.grade === 'S').length,
     A: allKRs.filter(kr => kr.grade === 'A').length,
@@ -74,11 +111,11 @@ export default function Dashboard() {
   };
 
   const gradeChartData = [
-    { name: 'S', value: gradeDistribution.S, color: '#3B82F6' }, // Blue-500
-    { name: 'A', value: gradeDistribution.A, color: '#10B981' }, // Emerald-500
-    { name: 'B', value: gradeDistribution.B, color: '#84CC16' }, // Lime-500
-    { name: 'C', value: gradeDistribution.C, color: '#F59E0B' }, // Amber-500
-    { name: 'D', value: gradeDistribution.D, color: '#EF4444' }  // Red-500
+    { name: 'S', value: gradeDistribution.S, color: '#3B82F6' },
+    { name: 'A', value: gradeDistribution.A, color: '#10B981' },
+    { name: 'B', value: gradeDistribution.B, color: '#84CC16' },
+    { name: 'C', value: gradeDistribution.C, color: '#F59E0B' },
+    { name: 'D', value: gradeDistribution.D, color: '#EF4444' }
   ];
 
   const warningKRs = allKRs.filter(kr => kr.grade === 'C' || kr.grade === 'D');
@@ -89,37 +126,24 @@ export default function Dashboard() {
     Improve: currentObjectives.filter(o => o.biiType === 'Improve').length,
   };
 
-  // ==================== 데이터 집계 (전체 조직 비교) ====================
-
-  // DB에서 가져온 dashboardStats를 UI용으로 가공
   const orgProgressList = (dashboardStats || []).map((org: any) => {
     const totalCount = org.kr_count || 0;
-    
-    // 점수 환산 로직 (S:120, A:110, B:100, C:80, D:50)
     const weightedScore = totalCount === 0 ? 0 : Math.round(
       ((org.grade_s * 120) + (org.grade_a * 110) + (org.grade_b * 100) + (org.grade_c * 80) + (org.grade_d * 50)) / totalCount
     );
     
-    // 상태 라벨링
     let status = { label: '순항', color: 'text-green-600', bg: 'bg-green-100' };
     if (weightedScore >= 110) status = { label: '탁월', color: 'text-blue-600', bg: 'bg-blue-100' };
     else if (weightedScore < 90) status = { label: '주의', color: 'text-orange-600', bg: 'bg-orange-100' };
     if (weightedScore < 70) status = { label: '위험', color: 'text-red-600', bg: 'bg-red-100' };
 
     return { 
-      name: org.name, 
-      score: weightedScore, 
-      status,
-      S: org.grade_s || 0, 
-      A: org.grade_a || 0, 
-      B: org.grade_b || 0, 
-      C: org.grade_c || 0, 
-      D: org.grade_d || 0,
-      total: totalCount
+      name: org.name, score: weightedScore, status,
+      S: org.grade_s || 0, A: org.grade_a || 0, B: org.grade_b || 0, 
+      C: org.grade_c || 0, D: org.grade_d || 0, total: totalCount
     };
-  }).sort((a: any, b: any) => b.score - a.score); // 점수 높은 순 정렬
+  }).sort((a: any, b: any) => b.score - a.score);
 
-  // [Mock Data] 체크인율 & 피드 (추후 연동)
   const checkinRate = 85;
   const feed = [
     { id: 1, user: '김철수', message: '영업이익 목표 달성률 105% 기록', timestamp: '10분 전' },
@@ -127,12 +151,47 @@ export default function Dashboard() {
     { id: 3, user: '박민수', message: '마케팅 캠페인 결과 리포트 업로드', timestamp: '2시간 전' },
   ];
 
+  const selectableOrgs = roleLevel >= 90 
+    ? organizations 
+    : organizations.filter(o => managableOrgs.includes(o.id) || managableOrgs.length === 0);
+
+  if (permissionsLoading) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-slate-600">권한을 확인하는 중...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
       {/* 헤더 */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">대시보드</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-bold text-slate-900">대시보드</h1>
+            
+            {/* 역할 배지 */}
+            {roleLevel >= 90 && (
+              <span className="px-3 py-1 bg-purple-100 text-purple-700 text-xs font-semibold rounded-full flex items-center gap-1">
+                <Shield className="w-3 h-3" />
+                관리자
+              </span>
+            )}
+            {roleLevel >= 70 && roleLevel < 90 && (
+              <span className="px-3 py-1 bg-blue-100 text-blue-700 text-xs font-semibold rounded-full">
+                본부장
+              </span>
+            )}
+            {roleLevel >= 50 && roleLevel < 70 && (
+              <span className="px-3 py-1 bg-green-100 text-green-700 text-xs font-semibold rounded-full">
+                팀장
+              </span>
+            )}
+          </div>
           <p className="text-slate-600 mt-1">
             {currentOrg ? `${currentOrg.name}의 성과 현황입니다.` : '데이터를 불러오는 중...'}
           </p>
@@ -143,7 +202,7 @@ export default function Dashboard() {
             value={selectedOrgId}
             onChange={(e) => setSelectedOrgId(e.target.value)}
           >
-            {organizations.map(org => (
+            {selectableOrgs.map(org => (
               <option key={org.id} value={org.id}>{org.name}</option>
             ))}
           </select>
@@ -151,12 +210,22 @@ export default function Dashboard() {
             <Calendar className="w-4 h-4" />
             2025년 1분기
           </button>
+          
+          {/* 관리자 설정 버튼 */}
+          {roleLevel >= 90 && (
+            <button 
+              onClick={() => window.location.href = '/admin/settings'}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 flex items-center gap-2"
+            >
+              <Settings className="w-4 h-4" />
+              관리자 설정
+            </button>
+          )}
         </div>
       </div>
 
-      {/* 1. 상단 KPI 카드 */}
+      {/* KPI 카드들 */}
       <div className="grid grid-cols-4 gap-6">
-        {/* 전체 진행률 */}
         <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
           <div className="flex items-center justify-between mb-4">
             <span className="text-sm font-medium text-slate-600">전체 진행률</span>
@@ -178,7 +247,6 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* OKR 현황 */}
         <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
           <div className="flex items-center justify-between mb-4">
             <span className="text-sm font-medium text-slate-600">OKR 현황</span>
@@ -198,7 +266,6 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* 체크인 현황 */}
         <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
           <div className="flex items-center justify-between mb-4">
             <span className="text-sm font-medium text-slate-600">체크인 현황</span>
@@ -218,7 +285,6 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* 주의 KR */}
         <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
           <div className="flex items-center justify-between mb-4">
             <span className="text-sm font-medium text-slate-600">주의 필요</span>
@@ -242,10 +308,8 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* 2. 메인 차트 영역 */}
+      {/* 차트 영역 - 나머지 기존 코드 그대로 유지... */}
       <div className="grid grid-cols-3 gap-6">
-        
-        {/* 조직별 성과 현황 (개선된 UI) */}
         <div className="col-span-2 bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-lg font-bold text-slate-900">조직별 성과 현황</h2>
@@ -253,16 +317,14 @@ export default function Dashboard() {
           </div>
           
           {orgProgressList.length === 0 ? (
-            <div className="text-center py-10 text-slate-500">
-              데이터를 불러오는 중이거나 데이터가 없습니다.
-            </div>
+            <div className="text-center py-10 text-slate-500">데이터를 불러오는 중...</div>
           ) : (
             <div className="space-y-5">
               {orgProgressList.map((org: any) => (
                 <div key={org.name}>
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-3">
-                      <span className="text-sm font-semibold text-slate-900 min-w-[80px] truncate max-w-[150px]">{org.name}</span>
+                      <span className="text-sm font-semibold text-slate-900">{org.name}</span>
                       <span className={`px-2 py-0.5 rounded text-xs font-medium ${org.status.bg} ${org.status.color}`}>
                         {org.status.label}
                       </span>
@@ -272,16 +334,14 @@ export default function Dashboard() {
                       <span className="text-xs text-slate-500">({org.total}개 KR)</span>
                     </div>
                   </div>
-                  
-                  {/* 커스텀 프로그레스 바 (등급별 비중) */}
                   <div className="w-full h-3 bg-slate-100 rounded-full overflow-hidden flex">
                     {org.total > 0 && (
                       <>
-                        <div className="h-full bg-blue-500 transition-all duration-500" style={{ width: `${(org.S / org.total) * 100}%` }} title={`S등급: ${org.S}개`} />
-                        <div className="h-full bg-green-500 transition-all duration-500" style={{ width: `${(org.A / org.total) * 100}%` }} title={`A등급: ${org.A}개`} />
-                        <div className="h-full bg-lime-500 transition-all duration-500" style={{ width: `${(org.B / org.total) * 100}%` }} title={`B등급: ${org.B}개`} />
-                        <div className="h-full bg-yellow-400 transition-all duration-500" style={{ width: `${(org.C / org.total) * 100}%` }} title={`C등급: ${org.C}개`} />
-                        <div className="h-full bg-red-400 transition-all duration-500" style={{ width: `${(org.D / org.total) * 100}%` }} title={`D등급: ${org.D}개`} />
+                        <div className="h-full bg-blue-500" style={{ width: `${(org.S / org.total) * 100}%` }} />
+                        <div className="h-full bg-green-500" style={{ width: `${(org.A / org.total) * 100}%` }} />
+                        <div className="h-full bg-lime-500" style={{ width: `${(org.B / org.total) * 100}%` }} />
+                        <div className="h-full bg-yellow-400" style={{ width: `${(org.C / org.total) * 100}%` }} />
+                        <div className="h-full bg-red-400" style={{ width: `${(org.D / org.total) * 100}%` }} />
                       </>
                     )}
                   </div>
@@ -291,34 +351,21 @@ export default function Dashboard() {
           )}
         </div>
 
-        {/* 등급 분포 (Pie Chart) */}
         <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm flex flex-col">
           <div className="flex justify-between items-center mb-4">
-            <h2 className="text-lg font-bold text-slate-900">선택 조직 등급 분포</h2>
+            <h2 className="text-lg font-bold text-slate-900">등급 분포</h2>
             <MoreHorizontal className="w-5 h-5 text-slate-400 cursor-pointer" />
           </div>
-          
           <div className="flex-1 min-h-[200px]">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
-                <Pie
-                  data={gradeChartData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={80}
-                  paddingAngle={2}
-                  dataKey="value"
-                >
-                  {gradeChartData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} />
-                  ))}
+                <Pie data={gradeChartData} cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={2} dataKey="value">
+                  {gradeChartData.map((entry, index) => (<Cell key={`cell-${index}`} fill={entry.color} />))}
                 </Pie>
                 <Tooltip />
               </PieChart>
             </ResponsiveContainer>
           </div>
-
           <div className="grid grid-cols-2 gap-2 mt-4">
             {gradeChartData.map(item => (
               <div key={item.name} className="flex items-center justify-between text-sm p-2 bg-slate-50 rounded-lg">
@@ -333,9 +380,8 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* 3. 하단 피드 및 인사이트 */}
+      {/* 피드 및 AI 인사이트 */}
       <div className="grid grid-cols-3 gap-6">
-        {/* 최근 활동 */}
         <div className="col-span-2 bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
           <h2 className="text-lg font-bold text-slate-900 mb-4">최근 활동 피드</h2>
           <div className="space-y-4">
@@ -355,42 +401,54 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* AI 인사이트 */}
-        <div className="bg-gradient-to-br from-indigo-50 to-blue-50 rounded-xl border border-indigo-100 p-6 shadow-sm">
-          <div className="flex items-center gap-2 mb-4">
-            <Bot className="w-6 h-6 text-indigo-600" />
-            <h2 className="text-lg font-bold text-indigo-900">AI 인사이트</h2>
+        {/* AI 인사이트 - 팀장 이상만 */}
+        {roleLevel >= 50 ? (
+          <div className="bg-gradient-to-br from-indigo-50 to-blue-50 rounded-xl border border-indigo-100 p-6 shadow-sm">
+            <div className="flex items-center gap-2 mb-4">
+              <Bot className="w-6 h-6 text-indigo-600" />
+              <h2 className="text-lg font-bold text-indigo-900">AI 인사이트</h2>
+            </div>
+            <div className="space-y-3">
+              <div className="bg-white p-3 rounded-lg border border-indigo-100 shadow-sm">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-orange-500 mt-0.5" />
+                  <p className="text-sm text-slate-700">
+                    <span className="font-bold">영업이익률</span>이 목표 대비 8%p 하회 중입니다.
+                  </p>
+                </div>
+              </div>
+              <div className="bg-white p-3 rounded-lg border border-indigo-100 shadow-sm">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-red-500 mt-0.5" />
+                  <p className="text-sm text-slate-700">
+                    4개 팀에서 <span className="font-bold">교육이수율</span>이 지연되고 있습니다.
+                  </p>
+                </div>
+              </div>
+              <div className="bg-white p-3 rounded-lg border border-indigo-100 shadow-sm">
+                <div className="flex items-start gap-2">
+                  <Trophy className="w-4 h-4 text-yellow-500 mt-0.5" />
+                  <p className="text-sm text-slate-700">
+                    <span className="font-bold">마케팅본부</span>의 매출채권회전일 목표가 조기 달성! 👏
+                  </p>
+                </div>
+              </div>
+            </div>
+            <button className="w-full mt-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg">
+              AI 리포트 전체보기
+            </button>
           </div>
-          <div className="space-y-3">
-            <div className="bg-white p-3 rounded-lg border border-indigo-100 shadow-sm">
-              <div className="flex items-start gap-2">
-                <AlertCircle className="w-4 h-4 text-orange-500 mt-0.5" />
-                <p className="text-sm text-slate-700">
-                  <span className="font-bold">영업이익률</span>이 목표 대비 8%p 하회 중입니다. 원가 구조 재점검이 필요해 보입니다.
-                </p>
-              </div>
-            </div>
-            <div className="bg-white p-3 rounded-lg border border-indigo-100 shadow-sm">
-              <div className="flex items-start gap-2">
-                <AlertCircle className="w-4 h-4 text-red-500 mt-0.5" />
-                <p className="text-sm text-slate-700">
-                  4개 팀에서 <span className="font-bold">교육이수율</span>이 지연되고 있습니다.
-                </p>
-              </div>
-            </div>
-            <div className="bg-white p-3 rounded-lg border border-indigo-100 shadow-sm">
-              <div className="flex items-start gap-2">
-                <Trophy className="w-4 h-4 text-yellow-500 mt-0.5" />
-                <p className="text-sm text-slate-700">
-                  <span className="font-bold">마케팅본부</span>의 매출채권회전일 목표가 조기 달성되었습니다! 👏
-                </p>
-              </div>
+        ) : (
+          <div className="bg-slate-50 rounded-xl border border-slate-200 p-6">
+            <div className="text-center py-8">
+              <Activity className="w-12 h-12 text-slate-400 mx-auto mb-3" />
+              <h3 className="text-sm font-semibold text-slate-700 mb-2">팀원 모드</h3>
+              <p className="text-xs text-slate-500">
+                AI 인사이트는 팀장 이상에게만 제공됩니다.
+              </p>
             </div>
           </div>
-          <button className="w-full mt-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition-colors shadow-sm">
-            AI 리포트 전체보기
-          </button>
-        </div>
+        )}
       </div>
     </div>
   );
