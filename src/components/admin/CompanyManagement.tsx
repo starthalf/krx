@@ -21,6 +21,7 @@ export default function CompanyManagement() {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [recentInviteLink, setRecentInviteLink] = useState<string | null>(null);
 
   // 회사 목록 로딩
   useEffect(() => {
@@ -228,6 +229,7 @@ function AddCompanyModal({ onClose, onSuccess }: AddCompanyModalProps) {
     adminName: ''
   });
   const [loading, setLoading] = useState(false);
+  const [inviteLink, setInviteLink] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -278,7 +280,10 @@ function AddCompanyModal({ onClose, onSuccess }: AddCompanyModalProps) {
 
       if (inviteError) throw inviteError;
 
-      alert(`회사가 생성되었습니다!\n초대 링크: ${window.location.origin}/accept-invite/${invitationToken}`);
+      // 초대 링크 저장 (모달에 표시)
+      const link = `${window.location.origin}/accept-invite/${invitationToken}`;
+      setInviteLink(link);
+      
       onSuccess();
     } catch (error) {
       console.error('Failed to create company:', error);
@@ -288,12 +293,26 @@ function AddCompanyModal({ onClose, onSuccess }: AddCompanyModalProps) {
     }
   };
 
+  const copyToClipboard = async () => {
+    if (inviteLink) {
+      await navigator.clipboard.writeText(inviteLink);
+      alert('초대 링크가 복사되었습니다!');
+    }
+  };
+
+  const handleClose = () => {
+    setInviteLink(null);
+    onClose();
+  };
+
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-xl max-w-lg w-full p-6">
-        <h3 className="text-xl font-bold text-slate-900 mb-6">새 회사 추가</h3>
+        {!inviteLink ? (
+          <>
+            <h3 className="text-xl font-bold text-slate-900 mb-6">새 회사 추가</h3>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+            <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-2">
               회사명 *
@@ -369,24 +388,70 @@ function AddCompanyModal({ onClose, onSuccess }: AddCompanyModalProps) {
             </div>
           </div>
 
-          <div className="flex gap-3 mt-6">
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors"
-            >
-              취소
-            </button>
-            <button
-              type="submit"
-              disabled={loading}
-              className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
-            >
-              {loading ? '생성 중...' : '회사 생성'}
-            </button>
-          </div>
-        </form>
+            <div className="flex gap-3 mt-6">
+              <button
+                type="button"
+                onClick={handleClose}
+                className="flex-1 px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors"
+              >
+                취소
+              </button>
+              <button
+                type="submit"
+                disabled={loading}
+                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+              >
+                {loading ? '생성 중...' : '회사 생성'}
+              </button>
+            </div>
+          </form>
+        </>
+        ) : (
+          <>
+            {/* 초대 링크 생성 완료 화면 */}
+            <div className="text-center">
+              <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <svg className="w-8 h-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+              </div>
+              
+              <h3 className="text-xl font-bold text-slate-900 mb-2">
+                회사가 생성되었습니다!
+              </h3>
+              <p className="text-sm text-slate-600 mb-6">
+                관리자에게 아래 초대 링크를 전달하세요
+              </p>
+
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 mb-4">
+                <p className="text-xs text-slate-500 mb-2">초대 링크</p>
+                <p className="text-sm text-slate-900 break-all font-mono bg-white p-2 rounded border border-slate-200">
+                  {inviteLink}
+                </p>
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={copyToClipboard}
+                  className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+                >
+                  📋 링크 복사
+                </button>
+                <button
+                  onClick={handleClose}
+                  className="flex-1 px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors font-medium"
+                >
+                  닫기
+                </button>
+              </div>
+
+              <p className="text-xs text-slate-500 mt-4">
+                💡 실제 프로덕션에서는 이메일로 자동 발송됩니다
+              </p>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
-} 
+}
