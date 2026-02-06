@@ -6,7 +6,8 @@ import {
   saveOrgLevelTemplate,
   OrgLevelTemplate 
 } from '../../lib/permissions';
-import { Layers, Plus, Trash2, Save, AlertCircle, Check } from 'lucide-react';
+import { getMyRoleLevel } from '../../lib/permissions';
+import { Layers, Plus, Trash2, Save, AlertCircle, Check, Building2 } from 'lucide-react';
 
 interface LevelInput {
   level_order: number;
@@ -15,28 +16,86 @@ interface LevelInput {
   is_required: boolean;
 }
 
+interface Company {
+  id: string;
+  name: string;
+}
+
 export default function OrgStructureSettings() {
   const { organizations } = useStore();
-  const [companyId, setCompanyId] = useState<string>('');
+  const [roleLevel, setRoleLevel] = useState<number>(0);
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [selectedCompanyId, setSelectedCompanyId] = useState<string>('');
   const [template, setTemplate] = useState<OrgLevelTemplate[]>([]);
   const [editMode, setEditMode] = useState(false);
   const [editedLevels, setEditedLevels] = useState<LevelInput[]>([]);
   const [loading, setLoading] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
+  // 역할 레벨 확인
   useEffect(() => {
-    if (organizations.length > 0) {
-      const firstOrg = organizations[0];
-      setCompanyId(firstOrg.companyId || '');
-    }
-  }, [organizations]);
+    const checkRole = async () => {
+      const level = await getMyRoleLevel();
+      setRoleLevel(level);
+    };
+    checkRole();
+  }, []);
 
+  // 회사 목록 로딩
+  useEffect(() => {
+    const loadCompanies = async () => {
+      try {
+        const { supabase } = await import('../../lib/supabase');
+        
+        if (roleLevel >= 100) {
+          // Super Admin: 모든 회사 조회
+          const { data, error } = await supabase
+            .from('companies')
+            .select('id, name')
+            .order('name');
+          
+          if (error) throw error;
+          setCompanies(data || []);
+          
+          // 첫 번째 회사 자동 선택
+          if (data && data.length > 0 && !selectedCompanyId) {
+            setSelectedCompanyId(data[0].id);
+          }
+        } else {
+          // Company Admin: 자기 회사만
+          if (organizations.length > 0) {
+            const myCompanyId = organizations[0].companyId;
+            
+            const { data, error } = await supabase
+              .from('companies')
+              .select('id, name')
+              .eq('id', myCompanyId)
+              .single();
+            
+            if (error) throw error;
+            if (data) {
+              setCompanies([data]);
+              setSelectedCompanyId(data.id);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Failed to load companies:', error);
+      }
+    };
+
+    if (roleLevel > 0) {
+      loadCompanies();
+    }
+  }, [roleLevel, organizations]);
+
+  // 템플릿 로딩 (선택된 회사 기준)
   useEffect(() => {
     const loadTemplate = async () => {
-      if (!companyId) return;
+      if (!selectedCompanyId) return;
       try {
         setLoading(true);
-        const data = await getOrgLevelTemplate(companyId);
+        const data = await getOrgLevelTemplate(selectedCompanyId);
         setTemplate(data);
         setEditedLevels(data.map(t => ({
           level_order: t.level_order,
@@ -51,7 +110,7 @@ export default function OrgStructureSettings() {
       }
     };
     loadTemplate();
-  }, [companyId]);
+  }, [selectedCompanyId]);
 
   const handleAddLevel = () => {
     const newOrder = editedLevels.length > 0 
@@ -80,8 +139,8 @@ export default function OrgStructureSettings() {
     }
     try {
       setLoading(true);
-      await saveOrgLevelTemplate(companyId, editedLevels);
-      const updated = await getOrgLevelTemplate(companyId);
+      await saveOrgLevelTemplate(selectedCompanyId, editedLevels);
+      const updated = await getOrgLevelTemplate(selectedCompanyId);
       setTemplate(updated);
       setEditMode(false);
       setSaveSuccess(true);
@@ -102,19 +161,61 @@ export default function OrgStructureSettings() {
     setEditMode(false);
   };
 
-  if (loading && template.length === 0) {
-    return <div className="flex items-center justify-center py-20">
-      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-    </div>;
-  }
-
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h2 className="text-xl font-bold text-slate-900 mb-2">조직 계층 구조 설정</h2>
-          <p className="text-sm text-slate-600">회사의 조직 계층을 정의합니다</p>
+      {/* 회사 선택 (Super Admin만) */}
+      {roleLevel >= 100 && companies.length > 1 && (
+        <div className="mb-6 p-4 bg-purple-50 border border-purple-200 rounded-lg">
+          <label className="block text-sm font-medium text-purple-900 mb-2 flex items-center gap-2">
+            <Building2 className="w-4 h-4" />
+            회사 선택 (Super Admin)
+          </label>
+          <select
+            value={selectedCompanyId}
+            onChange={(e) => {
+              setSelectedCompanyId(e.target.value);
+              setEditMode(false); // 회사 변경시 편집 모드 해제
+            }}
+            className="w-full px-4 py-2 border border-purple-300 rounded-lg bg-white focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-none"
+          >
+            <option value="">-- 회사를 선택하세요 --</option>
+            {companies.map((company) => (
+              <option key={company.id} value={company.id}>
+                {company.name}
+              </option>
+            ))}
+          </select>
+          <p className="text-xs text-purple-700 mt-2">
+            💡 각 회사마다 다른 조직 구조를 설정할 수 있습니다
+          </p>
         </div>
+      )}
+
+      {/* 현재 회사 표시 (Company Admin) */}
+      {roleLevel >= 90 && roleLevel < 100 && companies.length > 0 && (
+        <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+          <div className="flex items-center gap-2 text-blue-900">
+            <Building2 className="w-5 h-5" />
+            <span className="font-semibold">현재 회사: {companies[0].name}</span>
+          </div>
+          <p className="text-xs text-blue-700 mt-1">
+            회사 관리자는 자신의 회사 조직 구조만 수정할 수 있습니다
+          </p>
+        </div>
+      )}
+
+      {!selectedCompanyId ? (
+        <div className="text-center py-20 bg-slate-50 rounded-lg border border-slate-200">
+          <Building2 className="w-12 h-12 text-slate-400 mx-auto mb-3" />
+          <p className="text-slate-600">회사를 선택해주세요</p>
+        </div>
+      ) : (
+        <>
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h2 className="text-xl font-bold text-slate-900 mb-2">조직 계층 구조 설정</h2>
+              <p className="text-sm text-slate-600">회사의 조직 계층을 정의합니다</p>
+            </div>
         {!editMode ? (
           <button onClick={() => setEditMode(true)} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium">
             수정하기
@@ -193,12 +294,14 @@ export default function OrgStructureSettings() {
             )}
           </div>
         ))}
-        {editMode && (
-          <button onClick={handleAddLevel} className="w-full flex items-center justify-center gap-2 p-4 border-2 border-dashed border-slate-300 rounded-lg text-slate-600 hover:border-blue-400 hover:text-blue-600">
-            <Plus className="w-5 h-5" /><span className="font-medium">레벨 추가</span>
-          </button>
-        )}
-      </div>
+            {editMode && (
+              <button onClick={handleAddLevel} className="w-full flex items-center justify-center gap-2 p-4 border-2 border-dashed border-slate-300 rounded-lg text-slate-600 hover:border-blue-400 hover:text-blue-600">
+                <Plus className="w-5 h-5" /><span className="font-medium">레벨 추가</span>
+              </button>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }
