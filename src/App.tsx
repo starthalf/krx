@@ -10,6 +10,7 @@ import Checkin from './pages/Checkin';
 import Organization from './pages/Organization';
 import KPIPool from './pages/KPIPool';
 import Wizard from './pages/Wizard';
+import AdminSettings from './pages/AdminSettings';
 
 function App() {
   return (
@@ -18,7 +19,7 @@ function App() {
         <Routes>
           {/* 로그인 페이지 (인증 불필요) */}
           <Route path="/login" element={<Login />} />
-
+          
           {/* 인증 필요한 페이지들 */}
           <Route
             path="/"
@@ -52,8 +53,12 @@ function App() {
             
             {/* KPI Pool */}
             <Route path="kpi-pool" element={<KPIPool />} />
+            
+            {/* 관리자 설정 */}
+            <Route path="admin" element={<AdminSettings />} />
+            <Route path="admin/settings" element={<AdminSettings />} />
           </Route>
-
+          
           {/* 없는 경로 → 대시보드로 리다이렉트 */}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
