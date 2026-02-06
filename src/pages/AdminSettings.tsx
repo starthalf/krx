@@ -1,6 +1,9 @@
 // src/pages/AdminSettings.tsx
 import { useState } from 'react';
 import { Shield, Users, Layers, Lock, Settings as SettingsIcon, ChevronRight } from 'lucide-react';
+import UserRolesManager from '../components/admin/UserRolesManager';
+import OrgStructureSettings from '../components/admin/OrgStructureSettings';
+import RolePermissionsManager from '../components/admin/RolePermissionsManager';
 
 type TabType = 'users' | 'roles' | 'structure' | 'permissions';
 
@@ -85,207 +88,21 @@ export default function AdminSettings() {
 // 1. 사용자 관리 컴포넌트
 // ============================================
 function UserManagement() {
-  return (
-    <div>
-      <div className="mb-6">
-        <h2 className="text-xl font-bold text-slate-900 mb-2">사용자 역할 관리</h2>
-        <p className="text-sm text-slate-600">각 사용자의 역할과 권한을 관리합니다.</p>
-      </div>
-
-      <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
-        <p className="text-sm text-yellow-800">
-          🚧 <strong>준비중</strong> - UserRolesManager 컴포넌트를 여기에 통합 예정입니다.
-        </p>
-      </div>
-
-      {/* 임시 사용자 목록 */}
-      <div className="space-y-3">
-        <div className="flex items-center justify-between p-4 bg-slate-50 rounded-lg border border-slate-200">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center">
-              <span className="text-purple-600 font-bold">S</span>
-            </div>
-            <div>
-              <div className="font-semibold text-slate-900">steve</div>
-              <div className="text-xs text-slate-500">gepes88@gmail.com</div>
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <span className="px-3 py-1 bg-purple-100 text-purple-700 text-xs font-semibold rounded-full">
-              시스템 관리자
-            </span>
-            <button className="px-3 py-1.5 text-sm text-blue-600 hover:bg-blue-50 rounded">
-              수정
-            </button>
-          </div>
-        </div>
-
-        <div className="flex items-center justify-between p-4 bg-slate-50 rounded-lg border border-slate-200">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
-              <span className="text-blue-600 font-bold">김</span>
-            </div>
-            <div>
-              <div className="font-semibold text-slate-900">김테크</div>
-              <div className="text-xs text-slate-500">hcgkhlee@gmail.com</div>
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <span className="px-3 py-1 bg-blue-100 text-blue-700 text-xs font-semibold rounded-full">
-              본부장
-            </span>
-            <span className="text-xs text-slate-500">영업본부</span>
-            <button className="px-3 py-1.5 text-sm text-blue-600 hover:bg-blue-50 rounded">
-              수정
-            </button>
-          </div>
-        </div>
-
-        <div className="flex items-center justify-between p-4 bg-slate-50 rounded-lg border border-slate-200">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
-              <span className="text-green-600 font-bold">관</span>
-            </div>
-            <div>
-              <div className="font-semibold text-slate-900">관리자</div>
-              <div className="text-xs text-slate-500">demo@okrio.kr</div>
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <span className="px-3 py-1 bg-green-100 text-green-700 text-xs font-semibold rounded-full">
-              팀장
-            </span>
-            <span className="text-xs text-slate-500">B2B영업팀</span>
-            <button className="px-3 py-1.5 text-sm text-blue-600 hover:bg-blue-50 rounded">
-              수정
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+  return <UserRolesManager />;
 }
 
 // ============================================
 // 2. 역할 관리 컴포넌트
 // ============================================
 function RoleManagement() {
-  const roles = [
-    { name: 'super_admin', displayName: '시스템 관리자', level: 100, permissions: 33, color: 'purple' },
-    { name: 'company_admin', displayName: '회사 관리자', level: 90, permissions: 12, color: 'blue' },
-    { name: 'division_head', displayName: '본부장', level: 70, permissions: 10, color: 'indigo' },
-    { name: 'team_leader', displayName: '팀장', level: 50, permissions: 9, color: 'green' },
-    { name: 'team_member', displayName: '팀원', level: 30, permissions: 7, color: 'yellow' },
-    { name: 'viewer', displayName: '조회자', level: 10, permissions: 4, color: 'slate' },
-  ];
-
-  return (
-    <div>
-      <div className="mb-6">
-        <h2 className="text-xl font-bold text-slate-900 mb-2">역할별 권한 설정</h2>
-        <p className="text-sm text-slate-600">각 역할이 가진 권한을 확인하고 수정합니다.</p>
-      </div>
-
-      <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
-        <p className="text-sm text-yellow-800">
-          🚧 <strong>준비중</strong> - RolePermissionsManager 컴포넌트를 여기에 통합 예정입니다.
-        </p>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {roles.map((role) => (
-          <div key={role.name} className="bg-slate-50 rounded-lg border border-slate-200 p-4">
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-3">
-                <div className={`w-10 h-10 bg-${role.color}-100 rounded-lg flex items-center justify-center`}>
-                  <Shield className={`w-5 h-5 text-${role.color}-600`} />
-                </div>
-                <div>
-                  <div className="font-semibold text-slate-900">{role.displayName}</div>
-                  <div className="text-xs text-slate-500">레벨 {role.level}</div>
-                </div>
-              </div>
-              <button className="px-3 py-1.5 text-sm text-blue-600 hover:bg-blue-50 rounded">
-                수정
-              </button>
-            </div>
-            <div className="text-sm text-slate-600">
-              권한 {role.permissions}개 보유
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
+  return <RolePermissionsManager />;
 }
 
 // ============================================
 // 3. 조직 구조 관리 컴포넌트
 // ============================================
 function StructureManagement() {
-  return (
-    <div>
-      <div className="mb-6">
-        <h2 className="text-xl font-bold text-slate-900 mb-2">조직 계층 구조 설정</h2>
-        <p className="text-sm text-slate-600">회사의 조직 계층을 정의합니다 (전사 → 본부 → 팀 등).</p>
-      </div>
-
-      <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
-        <p className="text-sm text-yellow-800">
-          🚧 <strong>준비중</strong> - OrgStructureSettings 컴포넌트를 여기에 통합 예정입니다.
-        </p>
-      </div>
-
-      {/* 현재 구조 미리보기 */}
-      <div className="space-y-3">
-        <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg border border-slate-200">
-          <div className="w-8 h-8 bg-blue-100 rounded flex items-center justify-center text-xs font-bold text-blue-600">
-            1
-          </div>
-          <div>
-            <div className="font-semibold text-slate-900">전사</div>
-            <div className="text-xs text-slate-500">필수 레벨</div>
-          </div>
-        </div>
-        <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg border border-slate-200 ml-6">
-          <div className="w-8 h-8 bg-indigo-100 rounded flex items-center justify-center text-xs font-bold text-indigo-600">
-            2
-          </div>
-          <div>
-            <div className="font-semibold text-slate-900">본부</div>
-            <div className="text-xs text-slate-500">필수 레벨</div>
-          </div>
-        </div>
-        <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg border border-slate-200 ml-12">
-          <div className="w-8 h-8 bg-purple-100 rounded flex items-center justify-center text-xs font-bold text-purple-600">
-            3
-          </div>
-          <div>
-            <div className="font-semibold text-slate-900">실</div>
-            <div className="text-xs text-slate-500">선택 레벨</div>
-          </div>
-        </div>
-        <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg border border-slate-200 ml-12">
-          <div className="w-8 h-8 bg-green-100 rounded flex items-center justify-center text-xs font-bold text-green-600">
-            4
-          </div>
-          <div>
-            <div className="font-semibold text-slate-900">팀</div>
-            <div className="text-xs text-slate-500">필수 레벨</div>
-          </div>
-        </div>
-        <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg border border-slate-200 ml-12">
-          <div className="w-8 h-8 bg-yellow-100 rounded flex items-center justify-center text-xs font-bold text-yellow-600">
-            5
-          </div>
-          <div>
-            <div className="font-semibold text-slate-900">개인</div>
-            <div className="text-xs text-slate-500">필수 레벨</div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+  return <OrgStructureSettings />;
 }
 
 // ============================================
