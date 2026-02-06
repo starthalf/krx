@@ -271,4 +271,4 @@ export default function AcceptInvite() {
       </div>
     </div>
   );
-}
+} 
