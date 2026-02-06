@@ -38,13 +38,30 @@ export default function WithOnboardingCheck({ children }: WithOnboardingCheckPro
 
       if (error) throw error;
 
-      // 온보딩 미완료면 온보딩으로
-      if (!profile.onboarding_completed) {
+      // 온보딩이 이미 완료되었으면 렌더링
+      if (profile.onboarding_completed) {
+        setShouldRender(true);
+        return;
+      }
+
+      // 온보딩 미완료인 경우: Company Admin만 온보딩 필요
+      // 일반 팀원은 초대로 가입했으므로 온보딩 스킵
+      const { data: userRoles } = await supabase
+        .from('user_roles')
+        .select(`
+          role:roles(level)
+        `)
+        .eq('profile_id', user.id);
+
+      const isCompanyAdmin = userRoles?.some(ur => ur.role?.level >= 90);
+
+      if (isCompanyAdmin && !profile.onboarding_completed) {
+        // Company Admin이고 온보딩 미완료 → 온보딩으로
         navigate('/onboarding');
         return;
       }
 
-      // 온보딩 완료 → 렌더링 허용
+      // 일반 팀원이거나 이미 완료 → 렌더링 허용
       setShouldRender(true);
     } catch (error) {
       console.error('Onboarding check failed:', error);
