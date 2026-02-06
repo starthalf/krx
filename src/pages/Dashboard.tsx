@@ -1,9 +1,10 @@
+// src/pages/Dashboard.tsx
 import { useEffect, useState } from 'react';
 import { useStore } from '../store/useStore';
 import { getBIIColor } from '../utils/helpers';
 import { 
   TrendingUp, Target, CheckSquare, AlertTriangle, Bot, 
-  MoreHorizontal, Calendar, ArrowUpRight, Trophy, AlertCircle 
+  MoreHorizontal, Calendar, ArrowUpRight, Trophy, AlertCircle, Activity
 } from 'lucide-react';
 import { 
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer 
@@ -14,20 +15,34 @@ export default function Dashboard() {
     organizations, 
     objectives, 
     krs,
+    dashboardStats, // [New] 추가
     fetchObjectives, 
     fetchKRs,
+    fetchDashboardStats, // [New] 추가
     loading 
   } = useStore();
 
   const [selectedOrgId, setSelectedOrgId] = useState<string>('');
 
+  // 1. 초기 데이터 로딩 및 조직 선택
   useEffect(() => {
-    if (organizations.length > 0 && !selectedOrgId) {
-      const rootOrg = organizations.find(o => !o.parentOrgId) || organizations[0];
-      if (rootOrg) setSelectedOrgId(rootOrg.id);
-    }
-  }, [organizations, selectedOrgId]);
+    if (organizations.length > 0) {
+      // (1) 선택된 조직이 없으면 기본값 설정
+      if (!selectedOrgId) {
+        const rootOrg = organizations.find(o => !o.parentOrgId) || organizations[0];
+        if (rootOrg) setSelectedOrgId(rootOrg.id);
+      }
 
+      // (2) 대시보드 통계(전체 조직 비교 데이터) 불러오기
+      // 편의상 첫 번째 조직의 companyId를 사용 (실제로는 auth user의 company_id)
+      const companyId = organizations[0].companyId;
+      if (companyId) {
+        fetchDashboardStats(companyId);
+      }
+    }
+  }, [organizations, selectedOrgId, fetchDashboardStats]);
+
+  // 2. 선택된 조직의 상세 데이터 로딩
   useEffect(() => {
     if (selectedOrgId) {
       fetchObjectives(selectedOrgId);
@@ -35,17 +50,21 @@ export default function Dashboard() {
     }
   }, [selectedOrgId, fetchObjectives, fetchKRs]);
 
-  // ==================== 데이터 집계 ====================
+  // ==================== 데이터 집계 (단일 조직) ====================
 
   const currentOrg = organizations.find(o => o.id === selectedOrgId);
-  const allKRs = krs || [];
   
+  // 데이터가 없을 때를 대비한 안전장치
+  const allKRs = krs || []; 
+  const currentObjectives = objectives || [];
+
   const totalProgress = allKRs.length > 0
     ? Math.round(allKRs.reduce((sum, kr) => sum + (kr.progressPct || 0), 0) / allKRs.length)
     : 0;
 
-  const activeObjectives = objectives ? objectives.filter(obj => obj.status === 'active' || obj.status === 'agreed') : [];
+  const activeObjectives = currentObjectives.filter(obj => obj.status === 'active' || obj.status === 'agreed');
 
+  // 등급 분포 (현재 선택된 조직)
   const gradeDistribution = {
     S: allKRs.filter(kr => kr.grade === 'S').length,
     A: allKRs.filter(kr => kr.grade === 'A').length,
@@ -65,37 +84,42 @@ export default function Dashboard() {
   const warningKRs = allKRs.filter(kr => kr.grade === 'C' || kr.grade === 'D');
 
   const biiStats = {
-    Build: objectives.filter(o => o.biiType === 'Build').length,
-    Innovate: objectives.filter(o => o.biiType === 'Innovate').length,
-    Improve: objectives.filter(o => o.biiType === 'Improve').length,
+    Build: currentObjectives.filter(o => o.biiType === 'Build').length,
+    Innovate: currentObjectives.filter(o => o.biiType === 'Innovate').length,
+    Improve: currentObjectives.filter(o => o.biiType === 'Improve').length,
   };
 
-  // [UI 개선] 조직별 진행률 데이터 (가중치 계산 로직 포함)
-  // 실제로는 DB에서 가져와야 하지만, 현재는 Mock 데이터를 UI에 맞게 가공
-  const orgProgressRaw = [
-    { name: '마케팅본부', S: 0, A: 1, B: 3, C: 2, D: 0 },
-    { name: '영업본부', S: 1, A: 2, B: 2, C: 0, D: 0 },
-    { name: '생산본부', S: 0, A: 1, B: 3, C: 1, D: 0 },
-    { name: 'R&D본부', S: 1, A: 3, B: 1, C: 0, D: 0 },
-    { name: '경영지원실', S: 0, A: 2, B: 2, C: 1, D: 0 }
-  ];
+  // ==================== 데이터 집계 (전체 조직 비교) ====================
 
-  // 점수 환산 로직 (S:120, A:110, B:100, C:80, D:50)
-  const orgProgressList = orgProgressRaw.map(org => {
-    const totalCount = org.S + org.A + org.B + org.C + org.D;
+  // DB에서 가져온 dashboardStats를 UI용으로 가공
+  const orgProgressList = (dashboardStats || []).map((org: any) => {
+    const totalCount = org.kr_count || 0;
+    
+    // 점수 환산 로직 (S:120, A:110, B:100, C:80, D:50)
     const weightedScore = totalCount === 0 ? 0 : Math.round(
-      ((org.S * 120) + (org.A * 110) + (org.B * 100) + (org.C * 80) + (org.D * 50)) / totalCount
+      ((org.grade_s * 120) + (org.grade_a * 110) + (org.grade_b * 100) + (org.grade_c * 80) + (org.grade_d * 50)) / totalCount
     );
     
-    // 상태 결정
+    // 상태 라벨링
     let status = { label: '순항', color: 'text-green-600', bg: 'bg-green-100' };
     if (weightedScore >= 110) status = { label: '탁월', color: 'text-blue-600', bg: 'bg-blue-100' };
     else if (weightedScore < 90) status = { label: '주의', color: 'text-orange-600', bg: 'bg-orange-100' };
     if (weightedScore < 70) status = { label: '위험', color: 'text-red-600', bg: 'bg-red-100' };
 
-    return { ...org, score: weightedScore, status };
-  }).sort((a, b) => b.score - a.score); // 점수 높은 순 정렬
+    return { 
+      name: org.name, 
+      score: weightedScore, 
+      status,
+      S: org.grade_s || 0, 
+      A: org.grade_a || 0, 
+      B: org.grade_b || 0, 
+      C: org.grade_c || 0, 
+      D: org.grade_d || 0,
+      total: totalCount
+    };
+  }).sort((a: any, b: any) => b.score - a.score); // 점수 높은 순 정렬
 
+  // [Mock Data] 체크인율 & 피드 (추후 연동)
   const checkinRate = 85;
   const feed = [
     { id: 1, user: '김철수', message: '영업이익 목표 달성률 105% 기록', timestamp: '10분 전' },
@@ -207,7 +231,7 @@ export default function Dashboard() {
             <div className="mt-3 space-y-2">
               {warningKRs.length > 0 ? warningKRs.slice(0, 2).map(kr => (
                 <div key={kr.id} className="flex items-center gap-2 text-sm text-slate-700">
-                  <span className="w-2 h-2 rounded-full bg-red-500"></span>
+                  <span className="w-2 h-2 rounded-full bg-red-500 flex-shrink-0"></span>
                   <span className="truncate flex-1">{kr.name}</span>
                 </div>
               )) : (
@@ -221,46 +245,56 @@ export default function Dashboard() {
       {/* 2. 메인 차트 영역 */}
       <div className="grid grid-cols-3 gap-6">
         
-        {/* [수정됨] 조직별 진행률 리스트 */}
+        {/* 조직별 성과 현황 (개선된 UI) */}
         <div className="col-span-2 bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-lg font-bold text-slate-900">조직별 성과 현황</h2>
             <button className="text-sm text-blue-600 font-medium hover:underline">전체보기</button>
           </div>
           
-          <div className="space-y-5">
-            {orgProgressList.map((org, index) => (
-              <div key={org.name}>
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-3">
-                    <span className="text-sm font-semibold text-slate-900 min-w-[80px]">{org.name}</span>
-                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${org.status.bg} ${org.status.color}`}>
-                      {org.status.label}
-                    </span>
+          {orgProgressList.length === 0 ? (
+            <div className="text-center py-10 text-slate-500">
+              데이터를 불러오는 중이거나 데이터가 없습니다.
+            </div>
+          ) : (
+            <div className="space-y-5">
+              {orgProgressList.map((org: any) => (
+                <div key={org.name}>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-3">
+                      <span className="text-sm font-semibold text-slate-900 min-w-[80px] truncate max-w-[150px]">{org.name}</span>
+                      <span className={`px-2 py-0.5 rounded text-xs font-medium ${org.status.bg} ${org.status.color}`}>
+                        {org.status.label}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-bold text-slate-900">{org.score}점</span>
+                      <span className="text-xs text-slate-500">({org.total}개 KR)</span>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-bold text-slate-900">{org.score}점</span>
+                  
+                  {/* 커스텀 프로그레스 바 (등급별 비중) */}
+                  <div className="w-full h-3 bg-slate-100 rounded-full overflow-hidden flex">
+                    {org.total > 0 && (
+                      <>
+                        <div className="h-full bg-blue-500 transition-all duration-500" style={{ width: `${(org.S / org.total) * 100}%` }} title={`S등급: ${org.S}개`} />
+                        <div className="h-full bg-green-500 transition-all duration-500" style={{ width: `${(org.A / org.total) * 100}%` }} title={`A등급: ${org.A}개`} />
+                        <div className="h-full bg-lime-500 transition-all duration-500" style={{ width: `${(org.B / org.total) * 100}%` }} title={`B등급: ${org.B}개`} />
+                        <div className="h-full bg-yellow-400 transition-all duration-500" style={{ width: `${(org.C / org.total) * 100}%` }} title={`C등급: ${org.C}개`} />
+                        <div className="h-full bg-red-400 transition-all duration-500" style={{ width: `${(org.D / org.total) * 100}%` }} title={`D등급: ${org.D}개`} />
+                      </>
+                    )}
                   </div>
                 </div>
-                
-                {/* 커스텀 프로그레스 바 */}
-                <div className="w-full h-3 bg-slate-100 rounded-full overflow-hidden flex">
-                  {/* 등급별 비중을 색상으로 표현 */}
-                  <div className="h-full bg-blue-500" style={{ width: `${(org.S / (org.S+org.A+org.B+org.C+org.D)) * 100}%` }} title="S등급" />
-                  <div className="h-full bg-green-500" style={{ width: `${(org.A / (org.S+org.A+org.B+org.C+org.D)) * 100}%` }} title="A등급" />
-                  <div className="h-full bg-lime-500" style={{ width: `${(org.B / (org.S+org.A+org.B+org.C+org.D)) * 100}%` }} title="B등급" />
-                  <div className="h-full bg-yellow-400" style={{ width: `${(org.C / (org.S+org.A+org.B+org.C+org.D)) * 100}%` }} title="C등급" />
-                  <div className="h-full bg-red-400" style={{ width: `${(org.D / (org.S+org.A+org.B+org.C+org.D)) * 100}%` }} title="D등급" />
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* 등급 분포 (Pie Chart) */}
         <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm flex flex-col">
           <div className="flex justify-between items-center mb-4">
-            <h2 className="text-lg font-bold text-slate-900">전사 등급 분포</h2>
+            <h2 className="text-lg font-bold text-slate-900">선택 조직 등급 분포</h2>
             <MoreHorizontal className="w-5 h-5 text-slate-400 cursor-pointer" />
           </div>
           
