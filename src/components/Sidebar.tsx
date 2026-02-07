@@ -1,15 +1,12 @@
 // src/components/Sidebar.tsx
 import { Link, useLocation } from 'react-router-dom';
-import { useAuth } from '../contexts/AuthContext';
 import { 
   Home, 
   Target, 
   TrendingUp, 
   CheckSquare, 
   Building2, 
-  BookOpen, 
-  Settings,
-  User
+  BookOpen
 } from 'lucide-react';
 
 const navigation = [
@@ -26,13 +23,11 @@ const navigation = [
   },
   { name: '체크인', href: '/checkin', icon: CheckSquare },
   { name: '조직 관리', href: '/organization', icon: Building2 },
-  { name: 'KPI Pool', href: '/kpi-pool', icon: BookOpen },
-  { name: '관리자 설정', href: '/admin', icon: Settings }
+  { name: 'KPI Pool', href: '/kpi-pool', icon: BookOpen }
 ];
 
 export default function Sidebar() {
   const location = useLocation();
-  const { user, profile } = useAuth();
 
   const isActive = (href: string) => {
     if (href === '/') return location.pathname === '/';
