@@ -13,6 +13,43 @@ export default function OrganizationPage() {
   const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null);
   const [expandedOrgs, setExpandedOrgs] = useState<Set<string>>(new Set());
   const [isUploading, setIsUploading] = useState(false);
+  
+  // 권한 체크 추가
+  const [canEdit, setCanEdit] = useState(false);
+  const [userLevel, setUserLevel] = useState(0);
+  const [checkingPermission, setCheckingPermission] = useState(true);
+
+  // 권한 체크
+  useEffect(() => {
+    checkEditPermission();
+  }, []);
+
+  const checkEditPermission = async () => {
+    try {
+      setCheckingPermission(true);
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (!user) return;
+
+      // 사용자의 최고 레벨 역할 가져오기
+      const { data: roles } = await supabase
+        .from('user_roles')
+        .select(`
+          role:roles(level)
+        `)
+        .eq('profile_id', user.id);
+
+      const maxLevel = Math.max(...(roles?.map(r => r.role?.level || 0) || [0]));
+      setUserLevel(maxLevel);
+
+      // 레벨 70 이상(본부장, 회사 관리자, Super Admin)만 편집 가능
+      setCanEdit(maxLevel >= 70);
+    } catch (error) {
+      console.error('Failed to check permission:', error);
+    } finally {
+      setCheckingPermission(false);
+    }
+  };
 
   // [기존 코드 유지] 초기 선택 로직
   useEffect(() => {
@@ -97,7 +134,7 @@ export default function OrganizationPage() {
   const rootOrgs = organizations.filter(org => org.parentOrgId === null);
 
   const handleSave = async () => {
-    if (!selectedOrg) return;
+    if (!selectedOrg || !canEdit) return;
     
     await updateOrganization(selectedOrg.id, {
       name: selectedOrg.name,
@@ -110,10 +147,6 @@ export default function OrganizationPage() {
     
     alert('✅ 조직 정보가 저장되었습니다');
   };
-
-  // ------------------------------------------------------------------
-  // [개선된] 엑셀 기능 구현
-  // ------------------------------------------------------------------
 
   // ------------------------------------------------------------------
   // [개선된] 엑셀 기능 구현
@@ -163,6 +196,10 @@ export default function OrganizationPage() {
   };
 
   const handleUploadClick = () => {
+    if (!canEdit) {
+      alert('조직 편집 권한이 없습니다 (본부장 이상 필요)');
+      return;
+    }
     fileInputRef.current?.click();
   };
 
@@ -178,6 +215,12 @@ export default function OrganizationPage() {
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    if (!canEdit) {
+      alert('조직 편집 권한이 없습니다');
+      e.target.value = '';
+      return;
+    }
 
     if (!confirm('기존 조직 데이터에 추가됩니다. 진행하시겠습니까?')) {
       e.target.value = '';
@@ -329,18 +372,36 @@ export default function OrganizationPage() {
           </button>
           <button 
             onClick={handleUploadClick}
-            disabled={isUploading}
-            className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors text-sm font-medium flex items-center gap-2 disabled:opacity-50"
+            disabled={isUploading || !canEdit}
+            className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors text-sm font-medium flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            title={!canEdit ? '조직 편집 권한이 없습니다 (본부장 이상 필요)' : ''}
           >
             {isUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
             {isUploading ? '업로드 중...' : '일괄 업로드'}
           </button>
-          <button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium flex items-center gap-2">
+          <button 
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            disabled={!canEdit}
+            title={!canEdit ? '조직 편집 권한이 없습니다 (본부장 이상 필요)' : ''}
+          >
             <Bot className="w-4 h-4" />
             AI 자동생성
           </button>
         </div>
       </div>
+
+      {/* 권한 없을 때 안내 메시지 */}
+      {!canEdit && !checkingPermission && (
+        <div className="mb-4 p-4 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-3">
+          <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm font-semibold text-amber-900">조회 전용 모드</p>
+            <p className="text-xs text-amber-800 mt-1">
+              조직 구조 편집은 본부장 이상만 가능합니다 (현재 레벨: {userLevel})
+            </p>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-5 gap-6 h-[calc(100vh-180px)]">
         {/* 왼쪽: 조직 트리 */}
@@ -367,8 +428,9 @@ export default function OrganizationPage() {
                 <input
                   type="text"
                   value={selectedOrg.name}
-                  onChange={(e) => updateOrganization(selectedOrg.id, { name: e.target.value })}
-                  className="w-full border border-slate-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                  onChange={(e) => canEdit && updateOrganization(selectedOrg.id, { name: e.target.value })}
+                  disabled={!canEdit}
+                  className="w-full border border-slate-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none disabled:bg-slate-50 disabled:cursor-not-allowed"
                 />
               </div>
 
@@ -379,10 +441,11 @@ export default function OrganizationPage() {
                 </label>
                 <select
                   value={selectedOrg.level}
-                  onChange={(e) => updateOrganization(selectedOrg.id, { 
+                  onChange={(e) => canEdit && updateOrganization(selectedOrg.id, { 
                     level: e.target.value as any 
                   })}
-                  className="w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                  disabled={!canEdit}
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none disabled:bg-slate-50 disabled:cursor-not-allowed"
                 >
                   <option value="전사">전사</option>
                   <option value="부문">부문</option>
@@ -401,12 +464,13 @@ export default function OrganizationPage() {
                   {(['Front', 'Middle', 'Back'] as const).map(type => (
                     <button
                       key={type}
-                      onClick={() => updateOrganization(selectedOrg.id, { orgType: type })}
+                      onClick={() => canEdit && updateOrganization(selectedOrg.id, { orgType: type })}
+                      disabled={!canEdit}
                       className={`flex-1 px-4 py-3 rounded-lg border-2 transition-all ${
                         selectedOrg.orgType === type
                           ? 'border-blue-500 bg-blue-50 text-blue-700 font-medium'
                           : 'border-slate-200 hover:border-slate-300'
-                      }`}
+                      } disabled:opacity-50 disabled:cursor-not-allowed`}
                     >
                       {type}
                     </button>
@@ -421,9 +485,10 @@ export default function OrganizationPage() {
                 </label>
                 <textarea
                   value={selectedOrg.mission}
-                  onChange={(e) => updateOrganization(selectedOrg.id, { mission: e.target.value })}
+                  onChange={(e) => canEdit && updateOrganization(selectedOrg.id, { mission: e.target.value })}
+                  disabled={!canEdit}
                   rows={3}
-                  className="w-full border border-slate-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none"
+                  className="w-full border border-slate-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none disabled:bg-slate-50 disabled:cursor-not-allowed"
                   placeholder="이 조직의 미션을 입력하세요"
                 />
               </div>
@@ -436,10 +501,11 @@ export default function OrganizationPage() {
                 <input
                   type="text"
                   value={selectedOrg.functionTags.join(', ')}
-                  onChange={(e) => updateOrganization(selectedOrg.id, { 
+                  onChange={(e) => canEdit && updateOrganization(selectedOrg.id, { 
                     functionTags: e.target.value.split(',').map(t => t.trim()).filter(Boolean)
                   })}
-                  className="w-full border border-slate-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                  disabled={!canEdit}
+                  className="w-full border border-slate-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none disabled:bg-slate-50 disabled:cursor-not-allowed"
                   placeholder="예: 마케팅전략, 캠페인기획, 시장조사"
                 />
                 <p className="text-xs text-slate-500 mt-1">
@@ -455,23 +521,26 @@ export default function OrganizationPage() {
                 <input
                   type="number"
                   value={selectedOrg.headcount}
-                  onChange={(e) => updateOrganization(selectedOrg.id, { 
+                  onChange={(e) => canEdit && updateOrganization(selectedOrg.id, { 
                     headcount: parseInt(e.target.value) || 0 
                   })}
-                  className="w-full border border-slate-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                  disabled={!canEdit}
+                  className="w-full border border-slate-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none disabled:bg-slate-50 disabled:cursor-not-allowed"
                 />
               </div>
 
               {/* 저장 버튼 */}
-              <div className="pt-4 border-t">
-                <button
-                  onClick={handleSave}
-                  className="w-full px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium flex items-center justify-center gap-2"
-                >
-                  <Save className="w-5 h-5" />
-                  변경사항 저장
-                </button>
-              </div>
+              {canEdit && (
+                <div className="pt-4 border-t">
+                  <button
+                    onClick={handleSave}
+                    className="w-full px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium flex items-center justify-center gap-2"
+                  >
+                    <Save className="w-5 h-5" />
+                    변경사항 저장
+                  </button>
+                </div>
+              )}
             </div>
           ) : (
             <div className="flex items-center justify-center h-full text-slate-500">
