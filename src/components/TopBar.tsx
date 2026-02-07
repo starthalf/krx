@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bell, User, ChevronDown, Settings, LogOut } from 'lucide-react';
+import { Bell, User, ChevronDown, Settings, LogOut, Shield } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { useAuth } from '../contexts/AuthContext';
+import { getMyRoleLevel } from '../lib/permissions';
 
 export default function TopBar() {
   const navigate = useNavigate();
@@ -12,7 +13,17 @@ export default function TopBar() {
   const setCurrentPeriod = useStore(state => state.setCurrentPeriod);
   
   const [showDropdown, setShowDropdown] = useState(false);
+  const [roleLevel, setRoleLevel] = useState(0);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // 권한 체크
+  useEffect(() => {
+    const checkRole = async () => {
+      const level = await getMyRoleLevel();
+      setRoleLevel(level);
+    };
+    checkRole();
+  }, []);
 
   // 드롭다운 외부 클릭 감지
   useEffect(() => {
@@ -39,6 +50,10 @@ export default function TopBar() {
   const handleMySettings = () => {
     setShowDropdown(false);
     navigate('/my-settings');
+  };
+
+  const handleAdminSettings = () => {
+    navigate('/admin');
   };
 
   return (
@@ -69,9 +84,24 @@ export default function TopBar() {
           <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full" />
         </button>
         
+        {/* 관리자 설정 (레벨 70 이상) */}
+        {roleLevel >= 70 && (
+          <>
+            <div className="h-8 w-px bg-slate-300" />
+            <button
+              onClick={handleAdminSettings}
+              className="px-3 py-2 text-slate-700 hover:bg-slate-100 rounded-lg transition-colors flex items-center gap-2"
+              title="관리자 설정"
+            >
+              <Shield className="w-4 h-4" />
+              <span className="text-sm font-medium">관리자 설정</span>
+            </button>
+          </>
+        )}
+        
         <div className="h-8 w-px bg-slate-300" />
         
-        {/* 내 설정 드롭다운 */}
+        {/* 사용자 메뉴 */}
         <div className="relative" ref={dropdownRef}>
           <button
             onClick={() => setShowDropdown(!showDropdown)}
