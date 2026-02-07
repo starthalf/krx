@@ -349,7 +349,7 @@ export default function AcceptInvite() {
         {/* 안내 메시지 */}
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
           <p className="text-sm text-blue-800">
-            💡 가입 후 자동으로 <strong>{invitation.company_name}</strong>의 팀원으로 등록됩니다
+            💡 가입 후 자동으로 <strong>{invitation.company_name}</strong>의 구성원으로 등록됩니다
           </p>
         </div>
 
