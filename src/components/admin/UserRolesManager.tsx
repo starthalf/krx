@@ -20,12 +20,26 @@ export default function UserRolesManager() {
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  // 사용자 목록 로딩 (profiles 테이블에서)
+  // 사용자 목록 로딩 (같은 회사만)
   useEffect(() => {
     const loadUsers = async () => {
       try {
-        // Supabase에서 profiles 가져오기
         const { supabase } = await import('../../lib/supabase');
+        
+        // 현재 사용자 정보 가져오기
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+
+        // 현재 사용자의 회사 확인
+        const { data: currentProfile } = await supabase
+          .from('profiles')
+          .select('company_id')
+          .eq('id', user.id)
+          .single();
+
+        if (!currentProfile?.company_id) return;
+
+        // 같은 회사의 사용자만 조회
         const { data, error } = await supabase
           .from('profiles')
           .select(`
@@ -34,6 +48,7 @@ export default function UserRolesManager() {
             company_id,
             role
           `)
+          .eq('company_id', currentProfile.company_id)
           .order('full_name');
 
         if (error) throw error;
@@ -137,36 +152,46 @@ export default function UserRolesManager() {
           <p className="text-sm text-slate-600">역할을 관리할 사용자를 선택하세요</p>
         </div>
 
-        <div className="space-y-2 max-h-[600px] overflow-y-auto">
-          {users.map((user) => (
-            <button
-              key={user.id}
-              onClick={() => setSelectedUser(user)}
-              className={`w-full flex items-center gap-3 p-4 rounded-lg border-2 transition-all text-left ${
-                selectedUser?.id === user.id
-                  ? 'border-blue-500 bg-blue-50'
-                  : 'border-slate-200 hover:border-slate-300 bg-white'
-              }`}
-            >
-              <div className="w-10 h-10 bg-slate-200 rounded-full flex items-center justify-center flex-shrink-0">
-                <span className="text-slate-600 font-bold">
-                  {user.full_name?.[0]?.toUpperCase() || '?'}
-                </span>
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="font-semibold text-slate-900 truncate">
-                  {user.full_name || '이름 없음'}
+        {users.length === 0 ? (
+          <div className="text-center py-12 bg-slate-50 rounded-lg border border-slate-200">
+            <AlertCircle className="w-12 h-12 text-slate-400 mx-auto mb-3" />
+            <p className="text-slate-600">사용자를 찾을 수 없습니다</p>
+            <p className="text-sm text-slate-500 mt-1">
+              사용자 초대 탭에서 팀원을 초대하세요
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-2 max-h-[600px] overflow-y-auto">
+            {users.map((user) => (
+              <button
+                key={user.id}
+                onClick={() => setSelectedUser(user)}
+                className={`w-full flex items-center gap-3 p-4 rounded-lg border-2 transition-all text-left ${
+                  selectedUser?.id === user.id
+                    ? 'border-blue-500 bg-blue-50'
+                    : 'border-slate-200 hover:border-slate-300 bg-white'
+                }`}
+              >
+                <div className="w-10 h-10 bg-slate-200 rounded-full flex items-center justify-center flex-shrink-0">
+                  <span className="text-slate-600 font-bold">
+                    {user.full_name?.[0]?.toUpperCase() || '?'}
+                  </span>
                 </div>
-                <div className="text-xs text-slate-500 truncate">
-                  ID: {user.id.slice(0, 8)}...
+                <div className="flex-1 min-w-0">
+                  <div className="font-semibold text-slate-900 truncate">
+                    {user.full_name || '이름 없음'}
+                  </div>
+                  <div className="text-xs text-slate-500 truncate">
+                    ID: {user.id.slice(0, 8)}...
+                  </div>
                 </div>
-              </div>
-              {selectedUser?.id === user.id && (
-                <div className="w-2 h-2 bg-blue-500 rounded-full flex-shrink-0" />
-              )}
-            </button>
-          ))}
-        </div>
+                {selectedUser?.id === user.id && (
+                  <div className="w-2 h-2 bg-blue-500 rounded-full flex-shrink-0" />
+                )}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* 오른쪽: 선택된 사용자의 역할 관리 */}
