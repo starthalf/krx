@@ -15,6 +15,7 @@ import AdminSettings from './pages/AdminSettings';
 import OnboardingWizard from './pages/OnboardingWizard';
 import AcceptInvite from './pages/AcceptInvite';
 import JoinCompany from './pages/JoinCompany';
+import MySettings from './pages/MySettings';
 
 function App() {
   return (
@@ -75,6 +76,9 @@ function App() {
             
             {/* KPI Pool */}
             <Route path="kpi-pool" element={<KPIPool />} />
+            
+            {/* 내 설정 */}
+            <Route path="my-settings" element={<MySettings />} />
             
             {/* 관리자 설정 */}
             <Route path="admin" element={<AdminSettings />} />
