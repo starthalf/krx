@@ -14,6 +14,7 @@ import Wizard from './pages/Wizard';
 import AdminSettings from './pages/AdminSettings';
 import OnboardingWizard from './pages/OnboardingWizard';
 import AcceptInvite from './pages/AcceptInvite';
+import JoinCompany from './pages/JoinCompany';
 
 function App() {
   return (
@@ -25,6 +26,9 @@ function App() {
           
           {/* 초대 수락 (인증 불필요) */}
           <Route path="/accept-invite/:token" element={<AcceptInvite />} />
+          
+          {/* 팀 초대 링크로 가입 (인증 불필요) */}
+          <Route path="/join/:token" element={<JoinCompany />} />
           
           {/* 온보딩 (인증 필요, Layout 없음) */}
           <Route
