@@ -18,6 +18,11 @@ export default function AcceptInvite() {
   const [invitation, setInvitation] = useState<InvitationData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [accepting, setAccepting] = useState(false);
+  
+  // 회원가입 폼
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [fullName, setFullName] = useState('');
 
   // 초대 정보 로딩
   useEffect(() => {
@@ -30,6 +35,8 @@ export default function AcceptInvite() {
     try {
       setLoading(true);
       const { supabase } = await import('../lib/supabase');
+
+      console.log('Loading invitation with token:', token);
 
       // 초대 정보 조회
       const { data: invitation, error: inviteError } = await supabase
@@ -46,7 +53,11 @@ export default function AcceptInvite() {
         .eq('token', token)
         .single();
 
+      console.log('Invitation data:', invitation);
+      console.log('Invitation error:', inviteError);
+
       if (inviteError || !invitation) {
+        console.error('Invitation not found:', inviteError);
         throw new Error('초대를 찾을 수 없습니다');
       }
 
@@ -96,6 +107,11 @@ export default function AcceptInvite() {
         role_name: roleName,
         invited_by_name: invitedByName
       });
+      
+      // 초대에 이름이 있으면 자동 입력
+      if (invitation.full_name) {
+        setFullName(invitation.full_name);
+      }
     } catch (err) {
       console.error('Failed to load invitation:', err);
       setError((err as Error).message);
@@ -105,51 +121,87 @@ export default function AcceptInvite() {
   };
 
   const handleAccept = async () => {
-    if (!token) return;
+    if (!token || !invitation) return;
+
+    // 유효성 검사
+    if (!fullName.trim()) {
+      alert('이름을 입력해주세요');
+      return;
+    }
+
+    if (password.length < 6) {
+      alert('비밀번호는 최소 6자 이상이어야 합니다');
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      alert('비밀번호가 일치하지 않습니다');
+      return;
+    }
 
     try {
       setAccepting(true);
       const { supabase } = await import('../lib/supabase');
 
-      // 현재 로그인 상태 확인
-      const { data: { user } } = await supabase.auth.getUser();
+      // 1. 회원가입
+      const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+        email: invitation.email,
+        password: password,
+        options: {
+          data: {
+            full_name: fullName
+          }
+        }
+      });
 
-      if (!user) {
-        // 로그인 안 되어 있으면 로그인 페이지로 (token 유지)
-        navigate(`/login?invite=${token}`);
-        return;
+      if (signUpError) {
+        // 이미 가입된 경우 → 로그인 시도
+        if (signUpError.message.includes('already registered')) {
+          const { error: signInError } = await supabase.auth.signInWithPassword({
+            email: invitation.email,
+            password: password
+          });
+
+          if (signInError) {
+            throw new Error('이미 가입된 이메일입니다. 비밀번호를 확인하거나 비밀번호 재설정을 하세요.');
+          }
+        } else {
+          throw signUpError;
+        }
       }
 
-      // 이메일 확인
-      if (user.email !== invitation?.email) {
-        alert(`이 초대는 ${invitation?.email}로 발송되었습니다.\n해당 이메일로 로그인해주세요.`);
-        await supabase.auth.signOut();
-        navigate(`/login?invite=${token}`);
-        return;
-      }
+      // 2. 잠시 대기 (Supabase Auth 처리 시간)
+      await new Promise(resolve => setTimeout(resolve, 1000));
 
-      // 초대 수락 처리
-      const { data, error } = await supabase.rpc('accept_invitation', {
+      // 3. 초대 수락
+      const { data: acceptData, error: acceptError } = await supabase.rpc('accept_invitation', {
         invitation_token: token
       });
 
-      if (error) throw error;
+      if (acceptError) throw acceptError;
 
-      if (!data.success) {
-        throw new Error(data.error || '초대 수락에 실패했습니다');
+      if (!acceptData.success) {
+        throw new Error(acceptData.error || '초대 수락에 실패했습니다');
       }
 
-      // 초대받은 사용자는 온보딩 스킵 (이미 회사가 설정되어 있으므로)
-      await supabase
-        .from('profiles')
-        .update({ onboarding_completed: true })
-        .eq('id', user.id);
+      // 4. 프로필 업데이트 (온보딩 완료 플래그)
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        await supabase
+          .from('profiles')
+          .update({ 
+            onboarding_completed: true,
+            full_name: fullName
+          })
+          .eq('id', user.id);
+      }
 
-      // 바로 대시보드로
+      // 5. 성공 → 대시보드로
+      alert('가입 및 초대 수락이 완료되었습니다!');
       navigate('/dashboard');
     } catch (err) {
       console.error('Failed to accept invitation:', err);
-      alert('초대 수락 중 오류가 발생했습니다: ' + (err as Error).message);
+      alert('처리 중 오류가 발생했습니다: ' + (err as Error).message);
     } finally {
       setAccepting(false);
     }
@@ -211,17 +263,11 @@ export default function AcceptInvite() {
         </p>
 
         {/* 초대 정보 */}
-        <div className="bg-slate-50 rounded-lg p-4 mb-6 space-y-3">
+        <div className="bg-slate-50 rounded-lg p-4 mb-6 space-y-2">
           <div className="flex justify-between text-sm">
             <span className="text-slate-600">이메일</span>
             <span className="font-medium text-slate-900">{invitation.email}</span>
           </div>
-          {invitation.full_name && (
-            <div className="flex justify-between text-sm">
-              <span className="text-slate-600">이름</span>
-              <span className="font-medium text-slate-900">{invitation.full_name}</span>
-            </div>
-          )}
           {invitation.role_name && (
             <div className="flex justify-between text-sm">
               <span className="text-slate-600">역할</span>
@@ -234,11 +280,58 @@ export default function AcceptInvite() {
           </div>
         </div>
 
+        {/* 회원가입 폼 */}
+        <div className="space-y-4 mb-6">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-2">
+              이름
+            </label>
+            <input
+              type="text"
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+              placeholder="홍길동"
+              className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-2">
+              비밀번호
+            </label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="••••••••"
+              className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+              required
+              minLength={6}
+            />
+            <p className="text-xs text-slate-500 mt-1">최소 6자 이상</p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-2">
+              비밀번호 확인
+            </label>
+            <input
+              type="password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              placeholder="••••••••"
+              className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+              required
+              minLength={6}
+            />
+          </div>
+        </div>
+
         {/* 안내 메시지 */}
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
           <p className="text-sm text-blue-800">
-            💡 초대를 수락하면 <strong>{invitation.company_name}</strong>의 팀원으로 등록되며,
-            OKR 시스템을 사용할 수 있습니다.
+            💡 가입 후 자동으로 <strong>{invitation.company_name}</strong>의 팀원으로 등록됩니다
           </p>
         </div>
 
@@ -256,19 +349,22 @@ export default function AcceptInvite() {
           ) : (
             <>
               <CheckCircle className="w-5 h-5" />
-              초대 수락
+              가입하고 초대 수락
             </>
           )}
         </button>
 
-        {/* 거절 */}
-        <button
-          onClick={() => navigate('/login')}
-          className="w-full mt-3 px-6 py-3 text-slate-600 hover:bg-slate-50 rounded-lg transition-colors text-sm"
-        >
-          나중에 하기
-        </button>
+        {/* 이미 계정이 있는 경우 */}
+        <p className="text-center text-sm text-slate-600 mt-4">
+          이미 계정이 있으신가요?{' '}
+          <button
+            onClick={() => navigate(`/login?invite=${token}`)}
+            className="text-blue-600 font-medium hover:underline"
+          >
+            로그인
+          </button>
+        </p>
       </div>
     </div>
   );
-} 
+}
