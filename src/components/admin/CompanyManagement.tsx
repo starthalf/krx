@@ -223,10 +223,10 @@ function CompanyCard({ company, onUpdate }: CompanyCardProps) {
         </div>
       </div>
 
-      <div className="mt-4 pt-4 border-t border-slate-100 flex gap-2">
+      <div className="mt-4 pt-4 border-t border-slate-100">
         <button 
           onClick={() => setShowInvites(!showInvites)}
-          className="flex-1 px-3 py-2 text-sm font-medium text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+          className="w-full px-3 py-2 text-sm font-medium text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
         >
           {showInvites ? '초대 목록 숨기기' : '초대 목록 보기'}
         </button>
@@ -294,13 +294,20 @@ function AddCompanyModal({ onClose, onSuccess }: AddCompanyModalProps) {
       const { supabase } = await import('../../lib/supabase');
 
       // 1. 회사 생성
+      const inviteToken = Math.random().toString(36).substring(2, 15) + 
+                         Math.random().toString(36).substring(2, 15);
+      const inviteDomain = formData.adminEmail.split('@')[1]; // 도메인 추출
+
       const { data: company, error: companyError } = await supabase
         .from('companies')
         .insert({
           name: formData.name,
           industry: formData.industry || null,
           size: formData.size ? parseInt(formData.size) : null,
-          status: 'trial'
+          status: 'trial',
+          invite_token: inviteToken,
+          invite_domain: inviteDomain,
+          invite_enabled: true
         })
         .select()
         .single();
