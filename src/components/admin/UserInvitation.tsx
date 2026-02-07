@@ -15,13 +15,16 @@ export default function UserInvitation() {
   const { organizations } = useStore();
   const [roles, setRoles] = useState<Role[]>([]);
   const [showInviteModal, setShowInviteModal] = useState(false);
+  const [showTeamInviteModal, setShowTeamInviteModal] = useState(false);
   const [invitations, setInvitations] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
+  const [company, setCompany] = useState<any>(null);
 
   useEffect(() => {
     loadRoles();
     loadInvitations();
+    loadCompanyInfo();
   }, []);
 
   const loadRoles = async () => {
@@ -57,6 +60,34 @@ export default function UserInvitation() {
       setInvitations(data || []);
     } catch (error) {
       console.error('Failed to load invitations:', error);
+    }
+  };
+
+  const loadCompanyInfo = async () => {
+    try {
+      const { supabase } = await import('../../lib/supabase');
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (!user) return;
+
+      // 현재 사용자의 회사 정보 가져오기
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('company_id')
+        .eq('id', user.id)
+        .single();
+
+      if (!profile?.company_id) return;
+
+      const { data: companyData } = await supabase
+        .from('companies')
+        .select('*')
+        .eq('id', profile.company_id)
+        .single();
+
+      setCompany(companyData);
+    } catch (error) {
+      console.error('Failed to load company:', error);
     }
   };
 
@@ -129,6 +160,7 @@ export default function UserInvitation() {
 
   return (
     <div>
+      {/* 상단 헤더 */}
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="text-xl font-bold text-slate-900 mb-2">사용자 초대</h2>
@@ -136,13 +168,22 @@ export default function UserInvitation() {
             새로운 팀원을 초대하고 역할을 배정합니다
           </p>
         </div>
-        <button
-          onClick={() => setShowInviteModal(true)}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium flex items-center gap-2"
-        >
-          <UserPlus className="w-4 h-4" />
-          초대 보내기
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setShowTeamInviteModal(true)}
+            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium flex items-center gap-2"
+          >
+            <Mail className="w-4 h-4" />
+            팀 초대 링크
+          </button>
+          <button
+            onClick={() => setShowInviteModal(true)}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium flex items-center gap-2"
+          >
+            <UserPlus className="w-4 h-4" />
+            개별 초대
+          </button>
+        </div>
       </div>
 
       {/* 초대 목록 */}
@@ -215,6 +256,15 @@ export default function UserInvitation() {
           onSend={handleSendInvite}
           onClose={() => setShowInviteModal(false)}
           loading={loading}
+        />
+      )}
+
+      {/* 팀 초대 링크 모달 */}
+      {showTeamInviteModal && company && (
+        <TeamInviteLinkModal
+          company={company}
+          onClose={() => setShowTeamInviteModal(false)}
+          onUpdate={loadCompanyInfo}
         />
       )}
     </div>
@@ -358,6 +408,202 @@ function InviteModal({ roles, organizations, onSend, onClose, loading }: InviteM
             </button>
           </div>
         </form>
+      </div>
+    </div>
+  );
+}
+
+// ============================================
+// 팀 초대 링크 모달
+// ============================================
+interface TeamInviteLinkModalProps {
+  company: any;
+  onClose: () => void;
+  onUpdate: () => void;
+}
+
+function TeamInviteLinkModal({ company, onClose, onUpdate }: TeamInviteLinkModalProps) {
+  const [inviteDomain, setInviteDomain] = useState(company.invite_domain || '');
+  const [inviteEnabled, setInviteEnabled] = useState(company.invite_enabled ?? true);
+  const [saving, setSaving] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const inviteLink = company.invite_token 
+    ? `${window.location.origin}/join/${company.invite_token}`
+    : '';
+
+  const handleCopyLink = async () => {
+    if (inviteLink) {
+      await navigator.clipboard.writeText(inviteLink);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  const handleSave = async () => {
+    try {
+      setSaving(true);
+      const { supabase } = await import('../../lib/supabase');
+
+      const { error } = await supabase
+        .from('companies')
+        .update({
+          invite_domain: inviteDomain,
+          invite_enabled: inviteEnabled
+        })
+        .eq('id', company.id);
+
+      if (error) throw error;
+
+      alert('설정이 저장되었습니다');
+      onUpdate();
+      onClose();
+    } catch (error) {
+      console.error('Failed to update invite settings:', error);
+      alert('설정 저장에 실패했습니다');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleRegenerateToken = async () => {
+    if (!confirm('새 링크를 생성하면 기존 링크는 사용할 수 없습니다. 계속하시겠습니까?')) {
+      return;
+    }
+
+    try {
+      setSaving(true);
+      const { supabase } = await import('../../lib/supabase');
+
+      const newToken = Math.random().toString(36).substring(2, 15) + 
+                      Math.random().toString(36).substring(2, 15);
+
+      const { error } = await supabase
+        .from('companies')
+        .update({ invite_token: newToken })
+        .eq('id', company.id);
+
+      if (error) throw error;
+
+      alert('새 초대 링크가 생성되었습니다');
+      onUpdate();
+    } catch (error) {
+      console.error('Failed to regenerate token:', error);
+      alert('링크 생성에 실패했습니다');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between mb-6">
+          <h3 className="text-xl font-bold text-slate-900">팀 초대 링크 관리</h3>
+          <button
+            onClick={onClose}
+            className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* 안내 메시지 */}
+        <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+          <h4 className="font-semibold text-blue-900 mb-2">🔗 팀 초대 링크란?</h4>
+          <p className="text-sm text-blue-800">
+            링크 하나로 팀원 전체를 초대할 수 있습니다. 
+            Slack, 이메일, 게시판에 링크를 공유하면 됩니다.
+          </p>
+        </div>
+
+        {/* 활성화 상태 */}
+        <div className="mb-6 p-4 bg-slate-50 rounded-lg">
+          <div className="flex items-center justify-between">
+            <div>
+              <h4 className="font-semibold text-slate-900">링크 상태</h4>
+              <p className="text-sm text-slate-600 mt-1">
+                {inviteEnabled ? '✅ 활성화됨 - 팀원이 가입할 수 있습니다' : '⛔ 비활성화됨 - 가입이 차단됩니다'}
+              </p>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={inviteEnabled}
+                onChange={(e) => setInviteEnabled(e.target.checked)}
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+            </label>
+          </div>
+        </div>
+
+        {/* 이메일 도메인 */}
+        <div className="mb-6">
+          <label className="block text-sm font-medium text-slate-700 mb-2">
+            📧 허용된 이메일 도메인
+          </label>
+          <div className="flex gap-2">
+            <span className="px-3 py-2 bg-slate-100 text-slate-600 rounded-lg">@</span>
+            <input
+              type="text"
+              value={inviteDomain}
+              onChange={(e) => setInviteDomain(e.target.value)}
+              placeholder="company.com"
+              className="flex-1 px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+            />
+          </div>
+          <p className="text-xs text-slate-500 mt-2">
+            이 도메인의 이메일만 가입할 수 있습니다 (예: user@{inviteDomain || 'company.com'})
+          </p>
+        </div>
+
+        {/* 초대 링크 */}
+        <div className="mb-6">
+          <label className="block text-sm font-medium text-slate-700 mb-2">
+            🔗 공유 링크
+          </label>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={inviteLink}
+              readOnly
+              className="flex-1 px-4 py-2 bg-slate-50 border border-slate-300 rounded-lg text-sm font-mono text-slate-700"
+            />
+            <button
+              onClick={handleCopyLink}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+            >
+              {copied ? '복사됨!' : '복사'}
+            </button>
+          </div>
+        </div>
+
+        {/* 경고 메시지 */}
+        <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+          <p className="text-sm text-amber-800">
+            <strong>⚠️ 주의:</strong> 이 링크를 가진 사람은 누구나 @{inviteDomain || 'company.com'} 이메일로 가입할 수 있습니다.
+            Slack, 이메일, 게시판 등 안전한 곳에만 공유하세요.
+          </p>
+        </div>
+
+        {/* 버튼 */}
+        <div className="flex gap-3">
+          <button
+            onClick={handleRegenerateToken}
+            disabled={saving}
+            className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors disabled:opacity-50"
+          >
+            링크 재생성
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 font-medium"
+          >
+            {saving ? '저장 중...' : '설정 저장'}
+          </button>
+        </div>
       </div>
     </div>
   );
