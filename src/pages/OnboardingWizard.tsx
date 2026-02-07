@@ -243,55 +243,102 @@ export default function OnboardingWizard() {
         </div>
 
         {/* 조직 구조 선택 */}
-        <div className="bg-white rounded-xl border border-slate-200 p-6 mb-8">
+        <div className="bg-white rounded-xl border border-slate-200 p-8">
           <div className="flex items-center gap-3 mb-6">
             <Layers className="w-6 h-6 text-blue-600" />
-            <h2 className="text-lg font-semibold text-slate-900">조직 구조 선택</h2>
+            <div>
+              <h2 className="text-xl font-semibold text-slate-900">조직 구조 선택</h2>
+              <p className="text-sm text-slate-600 mt-1">회사 규모에 맞는 조직 계층을 선택하세요</p>
+            </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {PRESETS.map((preset, index) => (
-              <button
+              <div
                 key={preset.id}
                 onClick={() => setSelectedTemplate(index)}
-                className={`text-left p-6 rounded-xl border-2 transition-all ${
+                className={`relative cursor-pointer rounded-2xl border-2 p-6 transition-all ${
                   selectedTemplate === index
-                    ? 'border-blue-500 bg-blue-50'
-                    : 'border-slate-200 hover:border-blue-300 bg-white'
+                    ? 'border-blue-500 bg-blue-50 shadow-lg scale-105'
+                    : 'border-slate-200 hover:border-blue-300 hover:shadow-md bg-white'
                 }`}
               >
-                <div className="flex items-start justify-between mb-3">
-                  <h3 className="font-semibold text-slate-900">{preset.name}</h3>
-                  {selectedTemplate === index && (
-                    <div className="w-6 h-6 bg-blue-600 rounded-full flex items-center justify-center">
-                      <Check className="w-4 h-4 text-white" />
-                    </div>
-                  )}
-                </div>
-                <p className="text-sm text-slate-600 mb-4">{preset.description}</p>
-                <div className="space-y-1">
-                  {preset.levels.map((level) => (
-                    <div key={level.level_code} className="flex items-center gap-2 text-xs text-slate-500">
-                      <div className="w-1.5 h-1.5 rounded-full bg-blue-400"></div>
-                      {level.level_name}
-                      {!level.is_required && <span className="text-slate-400">(선택)</span>}
+                {/* 선택 체크 */}
+                {selectedTemplate === index && (
+                  <div className="absolute top-4 right-4 w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center">
+                    <Check className="w-5 h-5 text-white" />
+                  </div>
+                )}
+
+                {/* 타이틀 */}
+                <h3 className="text-lg font-bold text-slate-900 mb-2 pr-10">
+                  {preset.name}
+                </h3>
+                <p className="text-sm text-slate-600 mb-6">{preset.description}</p>
+
+                {/* 계층 구조 시각화 */}
+                <div className="space-y-3">
+                  {preset.levels.map((level, idx) => (
+                    <div key={level.level_code} className="flex items-center gap-3">
+                      {/* 인덴트 */}
+                      <div className="flex items-center" style={{ paddingLeft: `${idx * 12}px` }}>
+                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
+                          selectedTemplate === index 
+                            ? 'bg-blue-100 text-blue-600' 
+                            : 'bg-slate-100 text-slate-600'
+                        }`}>
+                          <span className="text-xs font-bold">{level.level_code.substring(0, 2)}</span>
+                        </div>
+                      </div>
+
+                      {/* 레벨 정보 */}
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className={`text-sm font-medium ${
+                            selectedTemplate === index ? 'text-blue-900' : 'text-slate-900'
+                          }`}>
+                            {level.level_name}
+                          </span>
+                          {!level.is_required && (
+                            <span className="text-xs px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full">
+                              선택
+                            </span>
+                          )}
+                        </div>
+                      </div>
                     </div>
                   ))}
                 </div>
-              </button>
+
+                {/* 선택 안내 */}
+                {selectedTemplate === index && (
+                  <div className="mt-4 pt-4 border-t border-blue-200">
+                    <p className="text-xs text-blue-700 font-medium">✓ 이 구조로 설정됩니다</p>
+                  </div>
+                )}
+              </div>
             ))}
           </div>
         </div>
 
         {/* 완료 버튼 */}
-        <div className="flex justify-center">
+        <div className="flex justify-center mt-8">
           <button
             onClick={handleComplete}
             disabled={selectedTemplate === null || saving}
-            className="px-8 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+            className="px-8 py-4 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 shadow-lg hover:shadow-xl"
           >
-            {saving ? '저장 중...' : '설정 완료'}
-            {!saving && <Check className="w-5 h-5" />}
+            {saving ? (
+              <>
+                <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent"></div>
+                저장 중...
+              </>
+            ) : (
+              <>
+                <Check className="w-5 h-5" />
+                설정 완료하고 시작하기
+              </>
+            )}
           </button>
         </div>
       </div>
