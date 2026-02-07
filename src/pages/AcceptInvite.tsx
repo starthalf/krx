@@ -184,21 +184,39 @@ export default function AcceptInvite() {
         throw new Error(acceptData.error || '초대 수락에 실패했습니다');
       }
 
-      // 4. 프로필 업데이트 (온보딩 완료 플래그)
+      // 4. 프로필 업데이트
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
+        // 역할 레벨 확인
+        const { data: userRoles } = await supabase
+          .from('user_roles')
+          .select(`
+            role:roles(level)
+          `)
+          .eq('profile_id', user.id);
+
+        const maxLevel = Math.max(...(userRoles?.map(r => r.role?.level || 0) || [0]));
+        const isCompanyAdmin = maxLevel >= 90;
+
         await supabase
           .from('profiles')
           .update({ 
-            onboarding_completed: true,
+            onboarding_completed: !isCompanyAdmin, // Company Admin은 false, 일반 팀원은 true
             full_name: fullName
           })
           .eq('id', user.id);
-      }
 
-      // 5. 성공 → 대시보드로
-      alert('가입 및 초대 수락이 완료되었습니다!');
-      navigate('/dashboard');
+        // 5. 리다이렉트
+        if (isCompanyAdmin) {
+          // Company Admin → 온보딩
+          alert('가입이 완료되었습니다! 조직 구조를 설정해주세요.');
+          navigate('/onboarding');
+        } else {
+          // 일반 팀원 → 대시보드
+          alert('가입 및 초대 수락이 완료되었습니다!');
+          navigate('/dashboard');
+        }
+      }
     } catch (err) {
       console.error('Failed to accept invitation:', err);
       alert('처리 중 오류가 발생했습니다: ' + (err as Error).message);
