@@ -1,5 +1,5 @@
 // src/pages/AdminSettings.tsx
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Shield, Users, Layers, Lock, Settings as SettingsIcon, ChevronRight, Building2, Mail } from 'lucide-react';
 import UserRolesManager from '../components/admin/UserRolesManager';
 import OrgStructureSettings from '../components/admin/OrgStructureSettings';
@@ -11,65 +11,15 @@ type TabType = 'companies' | 'invite' | 'users' | 'roles' | 'structure' | 'permi
 
 export default function AdminSettings() {
   const [activeTab, setActiveTab] = useState<TabType>('companies');
-  const [userLevel, setUserLevel] = useState<number>(0);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    checkUserPermissions();
-  }, []);
-
-  const checkUserPermissions = async () => {
-    try {
-      const { supabase } = await import('../lib/supabase');
-      const { data: { user } } = await supabase.auth.getUser();
-      
-      if (!user) return;
-
-      // 사용자의 최고 레벨 역할 가져오기
-      const { data: roles } = await supabase
-        .from('user_roles')
-        .select(`
-          role:roles(level)
-        `)
-        .eq('profile_id', user.id);
-
-      const maxLevel = Math.max(...(roles?.map(r => r.role?.level || 0) || [0]));
-      setUserLevel(maxLevel);
-
-      // 기본 탭 설정
-      if (maxLevel >= 100) {
-        setActiveTab('companies');
-      } else if (maxLevel >= 90) {
-        setActiveTab('invite');
-      } else {
-        setActiveTab('users');
-      }
-    } catch (error) {
-      console.error('Failed to check permissions:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const tabs = [
-    { id: 'companies' as TabType, name: '회사 관리', icon: Building2, description: '등록된 회사 목록 및 관리 (Super Admin)', minLevel: 100 },
-    { id: 'invite' as TabType, name: '사용자 초대', icon: Mail, description: '새로운 팀원 초대 및 초대 관리', minLevel: 90 },
-    { id: 'users' as TabType, name: '사용자 관리', icon: Users, description: '사용자별 역할 및 권한 할당', minLevel: 90 },
-    { id: 'roles' as TabType, name: '역할 관리', icon: Shield, description: '역할별 권한 설정 및 수정', minLevel: 100 },
-    { id: 'structure' as TabType, name: '조직 구조', icon: Layers, description: '조직 계층 템플릿 설정', minLevel: 90 },
-    { id: 'permissions' as TabType, name: '권한 목록', icon: Lock, description: '전체 권한 목록 조회', minLevel: 100 },
+    { id: 'companies' as TabType, name: '회사 관리', icon: Building2, description: '등록된 회사 목록 및 관리 (Super Admin)' },
+    { id: 'invite' as TabType, name: '사용자 초대', icon: Mail, description: '새로운 팀원 초대 및 초대 관리' },
+    { id: 'users' as TabType, name: '사용자 관리', icon: Users, description: '사용자별 역할 및 권한 할당' },
+    { id: 'roles' as TabType, name: '역할 관리', icon: Shield, description: '역할별 권한 설정 및 수정' },
+    { id: 'structure' as TabType, name: '조직 구조', icon: Layers, description: '조직 계층 템플릿 설정' },
+    { id: 'permissions' as TabType, name: '권한 목록', icon: Lock, description: '전체 권한 목록 조회' },
   ];
-
-  // 권한에 맞는 탭만 필터링
-  const visibleTabs = tabs.filter(tab => userLevel >= tab.minLevel);
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-20">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -94,7 +44,7 @@ export default function AdminSettings() {
           {/* 왼쪽 사이드바 - 탭 메뉴 */}
           <div className="lg:col-span-1">
             <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-2">
-              {visibleTabs.map((tab) => (
+              {tabs.map((tab) => (
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
@@ -210,4 +160,4 @@ function PermissionsList() {
       </div>
     </div>
   );
-} 
+}

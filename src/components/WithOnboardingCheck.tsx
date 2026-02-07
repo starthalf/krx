@@ -20,13 +20,16 @@ export default function WithOnboardingCheck({ children }: WithOnboardingCheckPro
     try {
       const { supabase } = await import('../lib/supabase');
       
+      // 현재 사용자 정보 가져오기
       const { data: { user } } = await supabase.auth.getUser();
       
       if (!user) {
+        // 로그인 안 되어 있으면 로그인 페이지로
         navigate('/login');
         return;
       }
 
+      // 프로필 조회
       const { data: profile, error } = await supabase
         .from('profiles')
         .select('onboarding_completed, company_id')
@@ -35,52 +38,34 @@ export default function WithOnboardingCheck({ children }: WithOnboardingCheckPro
 
       if (error) throw error;
 
-      // 온보딩이 이미 완료되었는지 확인
+      // 온보딩이 이미 완료되었으면 렌더링
       if (profile.onboarding_completed) {
-        // Company Admin인 경우 조직 존재 여부 확인
-        const { data: userRoles } = await supabase
-          .from('user_roles')
-          .select('role:roles(level)')
-          .eq('profile_id', user.id);
-
-        const isCompanyAdmin = userRoles?.some(ur => ur.role?.level >= 90);
-
-        if (isCompanyAdmin && profile.company_id) {
-          // 조직 존재 여부 확인
-          const { data: orgs } = await supabase
-            .from('organizations')
-            .select('id')
-            .eq('company_id', profile.company_id)
-            .limit(1);
-
-          if (!orgs || orgs.length === 0) {
-            // 온보딩 완료했는데 조직 없음 → 온보딩 재실행
-            console.warn('온보딩 완료했지만 조직이 없습니다. 온보딩을 다시 실행합니다.');
-            navigate('/onboarding');
-            return;
-          }
-        }
-
         setShouldRender(true);
         return;
       }
 
       // 온보딩 미완료인 경우: Company Admin만 온보딩 필요
+      // 일반 팀원은 초대로 가입했으므로 온보딩 스킵
       const { data: userRoles } = await supabase
         .from('user_roles')
-        .select('role:roles(level)')
+        .select(`
+          role:roles(level)
+        `)
         .eq('profile_id', user.id);
 
       const isCompanyAdmin = userRoles?.some(ur => ur.role?.level >= 90);
 
       if (isCompanyAdmin && !profile.onboarding_completed) {
+        // Company Admin이고 온보딩 미완료 → 온보딩으로
         navigate('/onboarding');
         return;
       }
 
+      // 일반 팀원이거나 이미 완료 → 렌더링 허용
       setShouldRender(true);
     } catch (error) {
       console.error('Onboarding check failed:', error);
+      // 에러 발생 시 일단 렌더링 허용 (기존 동작 유지)
       setShouldRender(true);
     } finally {
       setChecking(false);
