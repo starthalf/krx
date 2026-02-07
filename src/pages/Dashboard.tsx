@@ -5,7 +5,7 @@ import { getBIIColor } from '../utils/helpers';
 import { 
   TrendingUp, Target, CheckSquare, AlertTriangle, Bot, 
   MoreHorizontal, Calendar, ArrowUpRight, Trophy, AlertCircle, Activity,
-  Settings, Shield
+  Shield
 } from 'lucide-react';
 import { 
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer 
@@ -210,17 +210,6 @@ export default function Dashboard() {
             <Calendar className="w-4 h-4" />
             2025년 1분기
           </button>
-          
-          {/* 관리자 설정 버튼 */}
-          {roleLevel >= 90 && (
-            <button 
-              onClick={() => window.location.href = '/admin/settings'}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 flex items-center gap-2"
-            >
-              <Settings className="w-4 h-4" />
-              관리자 설정
-            </button>
-          )}
         </div>
       </div>
 
@@ -308,7 +297,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* 차트 영역 - 나머지 기존 코드 그대로 유지... */}
+      {/* 차트 영역 */}
       <div className="grid grid-cols-3 gap-6">
         <div className="col-span-2 bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
           <div className="flex items-center justify-between mb-6">
