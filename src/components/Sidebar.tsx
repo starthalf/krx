@@ -9,7 +9,6 @@ import {
   Building2, 
   BookOpen, 
   Settings,
-  LogOut,
   User
 } from 'lucide-react';
 
@@ -28,20 +27,16 @@ const navigation = [
   { name: '체크인', href: '/checkin', icon: CheckSquare },
   { name: '조직 관리', href: '/organization', icon: Building2 },
   { name: 'KPI Pool', href: '/kpi-pool', icon: BookOpen },
-  { name: '설정', href: '/settings', icon: Settings }
+  { name: '관리자 설정', href: '/admin', icon: Settings }
 ];
 
 export default function Sidebar() {
   const location = useLocation();
-  const { user, profile, signOut } = useAuth();
+  const { user, profile } = useAuth();
 
   const isActive = (href: string) => {
     if (href === '/') return location.pathname === '/';
     return location.pathname.startsWith(href);
-  };
-
-  const handleSignOut = async () => {
-    await signOut();
   };
 
   return (
@@ -102,34 +97,10 @@ export default function Sidebar() {
         })}
       </nav>
 
-      {/* 사용자 정보 & 로그아웃 */}
+      {/* 하단 정보 */}
       <div className="p-4 border-t border-slate-200">
-        {/* 사용자 정보 */}
-        <div className="flex items-center gap-3 mb-3">
-          <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
-            <User className="w-4 h-4 text-blue-600" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="text-sm font-medium text-slate-900 truncate">
-              {profile?.full_name || user?.email?.split('@')[0] || '사용자'}
-            </div>
-            <div className="text-xs text-slate-500 truncate">
-              {user?.email || '로그인 필요'}
-            </div>
-          </div>
-        </div>
-
-        {/* 로그아웃 버튼 */}
-        <button
-          onClick={handleSignOut}
-          className="w-full flex items-center justify-center gap-2 px-3 py-2 text-sm text-slate-600 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-        >
-          <LogOut className="w-4 h-4" />
-          로그아웃
-        </button>
-
         {/* 버전 정보 */}
-        <div className="text-xs text-slate-400 text-center mt-3">
+        <div className="text-xs text-slate-400 text-center">
           OKRio v1.0.0
         </div>
       </div>
