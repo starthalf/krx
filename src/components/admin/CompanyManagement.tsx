@@ -151,16 +151,29 @@ function CompanyCard({ company, onUpdate }: CompanyCardProps) {
         return;
       }
       
-// 각 회사의 관리자만 정확히 카운트
-const { count } = await supabase
-  .from('user_roles')
-  .select('profile_id, profiles!inner(company_id)', { count: 'exact', head: true })
-  .eq('role_id', roleData.id)
-  .eq('profiles.company_id', company.id);  // ← 핵심!
+      // 2. 이 회사 소속 프로필의 company_admin 역할만 카운트
+      const { data: profiles } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('company_id', company.id);
+      
+      if (!profiles || profiles.length === 0) {
+        setAdminCount(0);
+        return;
+      }
+      
+      const profileIds = profiles.map(p => p.id);
+      
+      const { count } = await supabase
+        .from('user_roles')
+        .select('*', { count: 'exact', head: true })
+        .eq('role_id', roleData.id)
+        .in('profile_id', profileIds);
       
       setAdminCount(count || 0);
     } catch (error) {
       console.error('Failed to load admin count:', error);
+      setAdminCount(0);
     }
   };
 
