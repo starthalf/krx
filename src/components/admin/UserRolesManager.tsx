@@ -20,7 +20,7 @@ export default function UserRolesManager() {
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  // 사용자 목록 로딩 (같은 회사만)
+  // 사용자 목록 로딩
   useEffect(() => {
     const loadUsers = async () => {
       try {
@@ -30,25 +30,38 @@ export default function UserRolesManager() {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return;
 
-        // 현재 사용자의 회사 확인
+        // 현재 사용자의 회사 및 권한 확인
         const { data: currentProfile } = await supabase
           .from('profiles')
           .select('company_id')
           .eq('id', user.id)
           .single();
 
-        if (!currentProfile?.company_id) return;
+        if (!currentProfile) return;
 
-        // 같은 회사의 사용자만 조회 (role 컬럼 제거)
-        const { data, error } = await supabase
+        // 현재 사용자의 최고 레벨 확인
+        const { getMyRoleLevel } = await import('../../lib/permissions');
+        const roleLevel = await getMyRoleLevel();
+
+        // Super Admin(레벨 100+)이면 모든 회사, 아니면 자기 회사만
+        let query = supabase
           .from('profiles')
           .select(`
             id,
             full_name,
-            company_id
+            company_id,
+            companies (
+              name
+            )
           `)
-          .eq('company_id', currentProfile.company_id)
           .order('full_name');
+
+        // Company Admin 이하는 자기 회사만
+        if (roleLevel < 100 && currentProfile.company_id) {
+          query = query.eq('company_id', currentProfile.company_id);
+        }
+
+        const { data, error } = await query;
 
         if (error) throw error;
         setUsers(data || []);
@@ -181,7 +194,7 @@ export default function UserRolesManager() {
                     {user.full_name || '이름 없음'}
                   </div>
                   <div className="text-xs text-slate-500 truncate">
-                    ID: {user.id.slice(0, 8)}...
+                    {user.companies?.name || '회사 없음'}
                   </div>
                 </div>
                 {selectedUser?.id === user.id && (
