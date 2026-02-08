@@ -151,12 +151,12 @@ function CompanyCard({ company, onUpdate }: CompanyCardProps) {
         return;
       }
       
-      // 2. 이 회사의 관리자만 카운트
-      const { count } = await supabase
-        .from('user_roles')
-        .select('profile_id, profiles!inner(company_id)', { count: 'exact', head: true })
-        .eq('role_id', roleData.id)
-        .eq('profiles.company_id', company.id);  // ← 회사 필터 추가!
+// 각 회사의 관리자만 정확히 카운트
+const { count } = await supabase
+  .from('user_roles')
+  .select('profile_id, profiles!inner(company_id)', { count: 'exact', head: true })
+  .eq('role_id', roleData.id)
+  .eq('profiles.company_id', company.id);  // ← 핵심!
       
       setAdminCount(count || 0);
     } catch (error) {
