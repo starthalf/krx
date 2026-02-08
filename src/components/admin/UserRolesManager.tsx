@@ -39,14 +39,13 @@ export default function UserRolesManager() {
 
         if (!currentProfile?.company_id) return;
 
-        // 같은 회사의 사용자만 조회
+        // 같은 회사의 사용자만 조회 (role 컬럼 제거)
         const { data, error } = await supabase
           .from('profiles')
           .select(`
             id,
             full_name,
-            company_id,
-            role
+            company_id
           `)
           .eq('company_id', currentProfile.company_id)
           .order('full_name');
