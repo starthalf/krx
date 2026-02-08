@@ -138,10 +138,25 @@ function CompanyCard({ company, onUpdate }: CompanyCardProps) {
   const loadAdminCount = async () => {
     try {
       const { supabase } = await import('../../lib/supabase');
+      
+      // 1. company_admin 역할 ID 가져오기
+      const { data: roleData } = await supabase
+        .from('roles')
+        .select('id')
+        .eq('name', 'company_admin')
+        .single();
+      
+      if (!roleData) {
+        console.error('company_admin role not found');
+        return;
+      }
+      
+      // 2. 이 회사의 관리자만 카운트
       const { count } = await supabase
         .from('user_roles')
-        .select('*', { count: 'exact', head: true })
-        .eq('role_id', (await supabase.from('roles').select('id').eq('name', 'company_admin').single()).data?.id);
+        .select('profile_id, profiles!inner(company_id)', { count: 'exact', head: true })
+        .eq('role_id', roleData.id)
+        .eq('profiles.company_id', company.id);  // ← 회사 필터 추가!
       
       setAdminCount(count || 0);
     } catch (error) {
