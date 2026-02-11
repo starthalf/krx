@@ -77,6 +77,22 @@ export default function Wizard() {
   const [poolSelectedIds, setPoolSelectedIds] = useState<Set<string>>(new Set());
   const [poolFunctionFilter, setPoolFunctionFilter] = useState('');
 
+  // [New] Cascading 관련
+  const [parentOKRs, setParentOKRs] = useState<ParentOKR[]>([]);
+  const [parentOrgName, setParentOrgName] = useState<string>('');
+  const [parentOrgLevel, setParentOrgLevel] = useState<string>('');
+  const [isLoadingParent, setIsLoadingParent] = useState(false);
+  const [cascadingLinked, setCascadingLinked] = useState<Record<string, string>>({});
+
+  // [New] 승인 워크플로우
+  const [approvalStatus, setApprovalStatus] = useState<ApprovalStatus>('draft');
+  const [approvalComment, setApprovalComment] = useState('');
+  const [reviewComment, setReviewComment] = useState('');
+  const [submittedAt, setSubmittedAt] = useState<string | null>(null);
+  const [showReviewRequestModal, setShowReviewRequestModal] = useState(false);
+  const [reviewRequestOrgs, setReviewRequestOrgs] = useState<string[]>([]);
+  const [reviewRequestMessage, setReviewRequestMessage] = useState('');
+
   // 현재 선택된 조직 정보 계산
   const orgId = selectedOrgId;
   const currentOrg = organizations.find(o => o.id === orgId);
