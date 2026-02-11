@@ -1519,66 +1519,104 @@ export default function Wizard() {
         {currentStep === 3 && (() => {
           const selectedObjs = objectives.filter(o => o.selected);
           const activeKRs = krs.filter(kr => kr.selected !== false);
-          const allWeight = activeKRs.reduce((s, k) => s + k.weight, 0);
-          const weightValid = allWeight === 100;
+          
+          // Objective별 가중치 합계 검증
+          const objWeightMap = selectedObjs.map(obj => {
+            const objKRs = activeKRs.filter(kr => kr.objectiveId === obj.id);
+            const sum = objKRs.reduce((s, k) => s + k.weight, 0);
+            return { objId: obj.id, objName: obj.name, sum, valid: sum === 100, krCount: objKRs.length };
+          });
+          const allValid = objWeightMap.every(o => o.valid);
 
           return (
           <div className="space-y-6">
             <h2 className="text-xl font-bold text-slate-900">세부 설정</h2>
-            <p className="text-slate-600">가중치 배분, Cascading 연결, 공통 KR을 설정합니다</p>
+            <p className="text-slate-600">각 Objective 내 KR 가중치를 100%로 배분하고, Cascading·분기목표를 설정합니다</p>
 
-            {/* 섹션 1: 가중치 배분 */}
+            {/* 섹션 1: Objective별 KR 가중치 배분 */}
             <div className="bg-white border border-slate-200 rounded-xl p-6">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-semibold text-slate-900 flex items-center gap-2">
-                  ⚖️ 가중치 배분
+                  ⚖️ KR 가중치 배분
+                  <span className="text-xs text-slate-400 font-normal">(Objective별 합계 100%)</span>
                 </h3>
-                <div className="flex items-center gap-3">
-                  <span className={`text-sm font-bold ${weightValid ? 'text-green-600' : 'text-red-600'}`}>
-                    합계: {allWeight}% {weightValid ? '✅' : `(${allWeight > 100 ? '+' : ''}${allWeight - 100}%)`}
-                  </span>
-                  <button
-                    onClick={() => {
-                      // 균등 배분
-                      const count = activeKRs.length;
-                      if (count === 0) return;
-                      const base = Math.floor(100 / count);
-                      const remainder = 100 - base * count;
-                      setKrs(prev => {
+                <button
+                  onClick={() => {
+                    // 모든 Objective에 대해 균등배분
+                    setKrs(prev => {
+                      const next = [...prev];
+                      selectedObjs.forEach(obj => {
+                        const objKRIds = next.filter(kr => kr.objectiveId === obj.id && kr.selected !== false).map(kr => kr.id);
+                        const count = objKRIds.length;
+                        if (count === 0) return;
+                        const base = Math.floor(100 / count);
+                        const remainder = 100 - base * count;
                         let idx = 0;
-                        return prev.map(kr => {
-                          if (kr.selected === false) return kr;
-                          const w = base + (idx < remainder ? 1 : 0);
-                          idx++;
-                          return { ...kr, weight: w };
-                        });
+                        for (let i = 0; i < next.length; i++) {
+                          if (objKRIds.includes(next[i].id)) {
+                            next[i] = { ...next[i], weight: base + (idx < remainder ? 1 : 0) };
+                            idx++;
+                          }
+                        }
                       });
-                    }}
-                    className="px-3 py-1.5 border border-blue-300 text-blue-700 bg-blue-50 rounded-lg text-xs font-medium hover:bg-blue-100"
-                  >
-                    🔄 균등배분
-                  </button>
-                </div>
+                      return next;
+                    });
+                  }}
+                  className="px-3 py-1.5 border border-blue-300 text-blue-700 bg-blue-50 rounded-lg text-xs font-medium hover:bg-blue-100"
+                >
+                  🔄 전체 균등배분
+                </button>
               </div>
 
-              {/* 목표별 KR 가중치 */}
-              <div className="space-y-4">
-                {selectedObjs.map(obj => {
+              <div className="space-y-5">
+                {selectedObjs.map((obj, objIdx) => {
                   const objKRs = activeKRs.filter(kr => kr.objectiveId === obj.id);
-                  const objWeight = objKRs.reduce((s, k) => s + k.weight, 0);
+                  const info = objWeightMap.find(o => o.objId === obj.id)!;
                   const biiColor = getBIIColor(obj.biiType);
                   
                   return (
-                    <div key={obj.id} className="border border-slate-200 rounded-lg">
-                      <div className="bg-slate-50 px-4 py-3 flex items-center justify-between rounded-t-lg">
+                    <div key={obj.id} className={`border rounded-xl overflow-hidden ${info.valid ? 'border-slate-200' : 'border-red-300'}`}>
+                      {/* Objective 헤더 */}
+                      <div className={`px-4 py-3 flex items-center justify-between ${info.valid ? 'bg-slate-50' : 'bg-red-50'}`}>
                         <div className="flex items-center gap-2">
                           <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${biiColor.bg} ${biiColor.text}`}>
                             {obj.biiType}
                           </span>
                           <span className="font-medium text-slate-900 text-sm">{obj.name}</span>
+                          <span className="text-xs text-slate-400">({info.krCount}개 KR)</span>
                         </div>
-                        <span className="text-sm text-slate-500">소계: <span className="font-semibold text-slate-700">{objWeight}%</span></span>
+                        <div className="flex items-center gap-3">
+                          <span className={`text-sm font-bold ${info.valid ? 'text-green-600' : 'text-red-600'}`}>
+                            {info.sum}% {info.valid ? '✅' : '❌'}
+                          </span>
+                          <button
+                            onClick={() => {
+                              // 이 Objective만 균등배분
+                              setKrs(prev => {
+                                const next = [...prev];
+                                const objKRIds = next.filter(kr => kr.objectiveId === obj.id && kr.selected !== false).map(kr => kr.id);
+                                const count = objKRIds.length;
+                                if (count === 0) return next;
+                                const base = Math.floor(100 / count);
+                                const remainder = 100 - base * count;
+                                let idx = 0;
+                                for (let i = 0; i < next.length; i++) {
+                                  if (objKRIds.includes(next[i].id)) {
+                                    next[i] = { ...next[i], weight: base + (idx < remainder ? 1 : 0) };
+                                    idx++;
+                                  }
+                                }
+                                return next;
+                              });
+                            }}
+                            className="px-2 py-1 text-xs text-blue-600 hover:bg-blue-50 rounded"
+                          >
+                            균등
+                          </button>
+                        </div>
                       </div>
+
+                      {/* KR 가중치 슬라이더 */}
                       <div className="p-4 space-y-3">
                         {objKRs.map(kr => (
                           <div key={kr.id} className="flex items-center gap-4">
@@ -1587,7 +1625,7 @@ export default function Wizard() {
                               <input
                                 type="range"
                                 min={0}
-                                max={50}
+                                max={100}
                                 step={5}
                                 value={kr.weight}
                                 onChange={(e) => {
@@ -1596,15 +1634,15 @@ export default function Wizard() {
                                     k.id === kr.id ? { ...k, weight: newWeight } : k
                                   ));
                                 }}
-                                className="w-24 accent-blue-600"
+                                className="w-28 accent-blue-600"
                               />
                               <input
                                 type="number"
                                 min={0}
-                                max={50}
+                                max={100}
                                 value={kr.weight}
                                 onChange={(e) => {
-                                  const newWeight = Math.max(0, Math.min(50, parseInt(e.target.value) || 0));
+                                  const newWeight = Math.max(0, Math.min(100, parseInt(e.target.value) || 0));
                                   setKrs(prev => prev.map(k => 
                                     k.id === kr.id ? { ...k, weight: newWeight } : k
                                   ));
@@ -1618,42 +1656,25 @@ export default function Wizard() {
                         {objKRs.length === 0 && (
                           <p className="text-sm text-slate-400 italic">이 목표에 KR이 없습니다</p>
                         )}
+
+                        {/* Objective별 가중치 바 */}
+                        <div className="h-2 bg-slate-100 rounded-full overflow-hidden flex mt-2">
+                          {objKRs.map((kr, i) => {
+                            const krColors = ['bg-blue-500', 'bg-emerald-500', 'bg-amber-500', 'bg-violet-500', 'bg-rose-500', 'bg-cyan-500'];
+                            return kr.weight > 0 ? (
+                              <div
+                                key={kr.id}
+                                className={`${krColors[i % krColors.length]} transition-all`}
+                                style={{ width: `${kr.weight}%` }}
+                                title={`${kr.name}: ${kr.weight}%`}
+                              />
+                            ) : null;
+                          })}
+                        </div>
                       </div>
                     </div>
                   );
                 })}
-              </div>
-
-              {/* 가중치 시각화 바 */}
-              <div className="mt-4">
-                <div className="h-4 bg-slate-100 rounded-full overflow-hidden flex">
-                  {selectedObjs.map((obj, i) => {
-                    const objKRs = activeKRs.filter(kr => kr.objectiveId === obj.id);
-                    const objWeight = objKRs.reduce((s, k) => s + k.weight, 0);
-                    const colors = ['bg-blue-500', 'bg-emerald-500', 'bg-amber-500', 'bg-violet-500', 'bg-rose-500'];
-                    return objWeight > 0 ? (
-                      <div
-                        key={obj.id}
-                        className={`${colors[i % colors.length]} transition-all`}
-                        style={{ width: `${objWeight}%` }}
-                        title={`${obj.name}: ${objWeight}%`}
-                      />
-                    ) : null;
-                  })}
-                </div>
-                <div className="flex gap-3 mt-2 flex-wrap">
-                  {selectedObjs.map((obj, i) => {
-                    const objKRs = activeKRs.filter(kr => kr.objectiveId === obj.id);
-                    const objWeight = objKRs.reduce((s, k) => s + k.weight, 0);
-                    const dotColors = ['bg-blue-500', 'bg-emerald-500', 'bg-amber-500', 'bg-violet-500', 'bg-rose-500'];
-                    return (
-                      <span key={obj.id} className="text-xs text-slate-600 flex items-center gap-1">
-                        <span className={`w-2 h-2 rounded-full ${dotColors[i % dotColors.length]}`} />
-                        {obj.name.length > 15 ? obj.name.substring(0, 15) + '...' : obj.name} ({objWeight}%)
-                      </span>
-                    );
-                  })}
-                </div>
               </div>
             </div>
 
@@ -1770,12 +1791,15 @@ export default function Wizard() {
             </div>
 
             {/* 경고/안내 */}
-            {!weightValid && (
-              <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-center gap-3">
-                <span className="text-red-500 text-lg">⚠️</span>
-                <div>
-                  <p className="text-sm font-medium text-red-700">가중치 합계가 100%가 아닙니다 (현재: {allWeight}%)</p>
-                  <p className="text-xs text-red-600 mt-0.5">다음 단계로 진행하기 전에 가중치를 조정해주세요</p>
+            {!allValid && (
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                <p className="text-sm font-medium text-red-700 mb-2">⚠️ 가중치가 100%가 아닌 Objective가 있습니다</p>
+                <div className="space-y-1">
+                  {objWeightMap.filter(o => !o.valid).map(o => (
+                    <p key={o.objId} className="text-xs text-red-600">
+                      • {o.objName}: 현재 {o.sum}% ({o.sum > 100 ? `${o.sum - 100}% 초과` : `${100 - o.sum}% 부족`})
+                    </p>
+                  ))}
                 </div>
               </div>
             )}
@@ -1796,8 +1820,13 @@ export default function Wizard() {
                 </div>
               </div>
               <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-center">
-                <div className="text-sm text-green-600 mb-1">가중치 합계</div>
-                <div className="text-lg font-bold text-green-700">{krs.filter(k => k.selected !== false).reduce((s, k) => s + k.weight, 0)}% ✅</div>
+                <div className="text-sm text-green-600 mb-1">가중치 검증</div>
+                <div className="text-xs text-green-700">
+                  {objectives.filter(o => o.selected).map(obj => {
+                    const sum = krs.filter(k => k.objectiveId === obj.id && k.selected !== false).reduce((s, k) => s + k.weight, 0);
+                    return `${obj.name.substring(0, 6)}:${sum}%`;
+                  }).join(' / ')} ✅
+                </div>
               </div>
               <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-center">
                 <div className="text-sm text-green-600 mb-1">Alignment</div>
@@ -1914,12 +1943,16 @@ export default function Wizard() {
           </button>
           <button
             onClick={() => {
-              // Step 3 → 4 진행 시 가중치 100% 검증
+              // Step 3 → 4 진행 시 Objective별 가중치 100% 검증
               if (currentStep === 3) {
-                const activeKRs = krs.filter(kr => kr.selected !== false);
-                const totalW = activeKRs.reduce((s, k) => s + k.weight, 0);
-                if (totalW !== 100) {
-                  alert(`가중치 합계가 ${totalW}%입니다. 100%로 맞춰주세요.`);
+                const selObjs = objectives.filter(o => o.selected);
+                const actKRs = krs.filter(kr => kr.selected !== false);
+                const invalid = selObjs.filter(obj => {
+                  const sum = actKRs.filter(kr => kr.objectiveId === obj.id).reduce((s, k) => s + k.weight, 0);
+                  return sum !== 100;
+                });
+                if (invalid.length > 0) {
+                  alert(`다음 Objective의 KR 가중치 합계가 100%가 아닙니다:\n${invalid.map(o => `• ${o.name}`).join('\n')}`);
                   return;
                 }
               }
