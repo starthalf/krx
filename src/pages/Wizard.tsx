@@ -822,7 +822,7 @@ export default function Wizard() {
             <Bot className="w-16 h-16 text-blue-600 mx-auto mb-4 animate-pulse" />
             <h3 className="text-xl font-bold text-slate-900 mb-2">AI가 분석 중입니다...</h3>
             <p className="text-slate-600 mb-4">
-              {companyIndustry} 업종의 KPI DB를 참조하여 최적의 목표를 생성하고 있습니다.
+              {companyIndustry} 업종의 KR지표 DB를 참조하여 최적의 목표를 생성하고 있습니다.
             </p>
             <div className="h-2 bg-slate-200 rounded-full overflow-hidden">
               <div className="h-full bg-blue-600 rounded-full animate-pulse" style={{ width: '70%' }} />
