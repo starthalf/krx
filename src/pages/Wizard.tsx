@@ -215,11 +215,6 @@ export default function Wizard() {
     ));
   };
 
-  // KR 가중치 변경
-  const updateKRWeight = (krId: string, newWeight: number) => {
-    setKrs(krs.map(kr => kr.id === krId ? { ...kr, weight: newWeight } : kr));
-  };
-
   // 목표 선택 토글
   const toggleObjective = (id: string) => {
     setObjectives(objectives.map(obj =>
@@ -822,7 +817,7 @@ export default function Wizard() {
             <Bot className="w-16 h-16 text-blue-600 mx-auto mb-4 animate-pulse" />
             <h3 className="text-xl font-bold text-slate-900 mb-2">AI가 분석 중입니다...</h3>
             <p className="text-slate-600 mb-4">
-              {companyIndustry} 업종의 KR DB를 참조하여 최적의 목표를 생성하고 있습니다.
+              {companyIndustry} 업종의 KPI DB를 참조하여 최적의 목표를 생성하고 있습니다.
             </p>
             <div className="h-2 bg-slate-200 rounded-full overflow-hidden">
               <div className="h-full bg-blue-600 rounded-full animate-pulse" style={{ width: '70%' }} />
@@ -969,7 +964,7 @@ export default function Wizard() {
                       </div>
                     );
                   })}
-                </div> 
+                </div>
               )}
             </div>
 
@@ -1313,7 +1308,6 @@ export default function Wizard() {
                       </div>
 
                       <div className="flex items-center gap-2">
-                        {!isEditing && <span className="text-sm text-slate-600">가중치 {kr.weight}%</span>}
                         <span className={`px-2 py-1 rounded text-xs font-medium border ${categoryColor}`}>
                           {kr.kpiCategory}
                         </span>
@@ -1433,21 +1427,6 @@ export default function Wizard() {
                       </div>
                     </div>
 
-                    <div className="mb-4">
-                      <label className="block text-xs text-slate-500 mb-2">가중치</label>
-                      <div className="flex items-center gap-3">
-                        <input
-                          type="range"
-                          min="0"
-                          max="50"
-                          value={kr.weight}
-                          onChange={(e) => updateKRWeight(kr.id, parseInt(e.target.value))}
-                          className="flex-1 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
-                        />
-                        <span className="text-sm font-medium text-slate-900 w-12">{kr.weight}%</span>
-                      </div>
-                    </div>
-
                     <div className="flex gap-2 mb-4">
                       <button
                         onClick={() => setExpandedKR(isExpanded ? null : kr.id)}
@@ -1503,16 +1482,9 @@ export default function Wizard() {
             </div>
 
             <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
-              <div className="flex items-center justify-between">
-                <div className="text-sm text-slate-600">
-                  <span className="font-medium">선택된 KR:</span> {selectedKRs.filter(kr => kr.objectiveId === selectedObjectiveTab).length}개
-                </div>
-                <div className="text-sm">
-                  <span className="text-slate-600">가중치 합계: </span>
-                  <span className={`font-bold text-lg ${totalWeight === 100 ? 'text-green-600' : 'text-red-600'}`}>
-                    {totalWeight}% {totalWeight === 100 ? '✅' : '❌'}
-                  </span>
-                </div>
+              <div className="text-sm text-slate-600">
+                <span className="font-medium">선택된 KR:</span> {selectedKRs.filter(kr => kr.objectiveId === selectedObjectiveTab).length}개
+                <span className="text-xs text-slate-400 ml-3">💡 가중치는 다음 단계(세부설정)에서 배분합니다</span>
               </div>
             </div>
 
