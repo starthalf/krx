@@ -54,14 +54,30 @@ export default function CEONudgePanel() {
           .limit(1)
           .maybeSingle();
 
-        // 조직장 조회 (user_roles + roles)
-        const { data: headData } = await supabase
-          .from('user_roles')
-          .select('user_id, profiles!inner(full_name), roles!inner(name)')
-          .eq('org_id', org.id)
-          .in('roles.name', ['org_head', 'company_admin'])
-          .limit(1)
-          .maybeSingle();
+        // 조직장 조회 - join 모호성 방지를 위해 2단계 쿼리
+        let headName: string | null = null;
+        let headId: string | null = null;
+        try {
+          const { data: headRole } = await supabase
+            .from('user_roles')
+            .select('profile_id, role:roles!inner(name)')
+            .eq('org_id', org.id)
+            .in('roles.name', ['org_head', 'company_admin'])
+            .limit(1)
+            .maybeSingle();
+
+          if (headRole?.profile_id) {
+            headId = headRole.profile_id;
+            const { data: headProfile } = await supabase
+              .from('profiles')
+              .select('full_name')
+              .eq('id', headRole.profile_id)
+              .single();
+            headName = headProfile?.full_name || null;
+          }
+        } catch (e) {
+          // 조직장 조회 실패 시 무시
+        }
 
         // 마지막 독촉 시간 확인
         const { data: lastNudge } = await supabase
@@ -83,8 +99,8 @@ export default function CEONudgePanel() {
           id: org.id,
           name: org.name,
           level: org.level,
-          headName: (headData as any)?.profiles?.full_name || null,
-          headId: (headData as any)?.user_id || null,
+          headName: headName,
+          headId: headId,
           okrStatus: status,
           lastNudgedAt: lastNudge?.created_at || null,
           selected: status === 'not_started' || status === 'draft', // 미완료 조직 자동 선택
