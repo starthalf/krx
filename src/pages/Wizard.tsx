@@ -63,6 +63,7 @@ export default function Wizard() {
   
   // [New] KR 편집 모드 (수정 중인 KR의 ID)
   const [editingKRId, setEditingKRId] = useState<string | null>(null);
+  const [editingObjId, setEditingObjId] = useState<string | null>(null);
 
   // [New] 회사 업종 (DB에서 가져옴 → Edge Function에 전달)
   const [companyIndustry, setCompanyIndustry] = useState<string>('SaaS/클라우드');
@@ -1100,11 +1101,11 @@ export default function Wizard() {
             <div className="grid grid-cols-2 gap-4">
               {objectives.map((obj) => {
                 const biiColor = getBIIColor(obj.biiType);
+                const isEditing = editingObjId === obj.id;
                 return (
                   <div
                     key={obj.id}
-                    onClick={() => toggleObjective(obj.id)}
-                    className={`border-2 rounded-xl p-4 cursor-pointer transition-all ${
+                    className={`border-2 rounded-xl p-4 transition-all ${
                       obj.selected ? 'border-blue-600 bg-blue-50' : 'border-slate-200 hover:border-slate-300'
                     }`}
                   >
@@ -1112,19 +1113,92 @@ export default function Wizard() {
                       <input
                         type="checkbox"
                         checked={obj.selected}
-                        onChange={() => {}}
-                        className="mt-1 w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                        onChange={() => toggleObjective(obj.id)}
+                        className="mt-1 w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
                       />
-                      <div className="flex-1">
-                        <h3 className="font-medium text-slate-900 mb-2">{obj.name}</h3>
-                        <div className="flex items-center gap-2">
-                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${biiColor.bg} ${biiColor.text}`}>
-                            {obj.biiType}
-                          </span>
-                          <span className="text-xs text-slate-600">{obj.perspective} 관점</span>
-                        </div>
-                        <p className="text-xs text-slate-500 mt-2">💡 "조직 미션 달성을 위한 핵심 목표입니다"</p>
+                      <div className="flex-1 min-w-0">
+                        {isEditing ? (
+                          <div className="space-y-2">
+                            <input
+                              type="text"
+                              value={obj.name}
+                              onChange={(e) => setObjectives(prev => prev.map(o => 
+                                o.id === obj.id ? { ...o, name: e.target.value } : o
+                              ))}
+                              className="w-full px-2 py-1.5 border border-blue-300 rounded-lg text-sm font-medium focus:ring-2 focus:ring-blue-500 outline-none"
+                              placeholder="목표명을 입력하세요"
+                              autoFocus
+                            />
+                            <div className="flex gap-2">
+                              <select
+                                value={obj.biiType}
+                                onChange={(e) => setObjectives(prev => prev.map(o => 
+                                  o.id === obj.id ? { ...o, biiType: e.target.value as BIIType } : o
+                                ))}
+                                className="flex-1 px-2 py-1 border border-slate-300 rounded text-xs"
+                              >
+                                <option value="Build">Build</option>
+                                <option value="Innovate">Innovate</option>
+                                <option value="Improve">Improve</option>
+                              </select>
+                              <select
+                                value={obj.perspective}
+                                onChange={(e) => setObjectives(prev => prev.map(o => 
+                                  o.id === obj.id ? { ...o, perspective: e.target.value } : o
+                                ))}
+                                className="flex-1 px-2 py-1 border border-slate-300 rounded text-xs"
+                              >
+                                <option value="재무">재무</option>
+                                <option value="고객">고객</option>
+                                <option value="프로세스">프로세스</option>
+                                <option value="학습성장">학습성장</option>
+                              </select>
+                            </div>
+                            <div className="flex gap-1 justify-end">
+                              <button
+                                onClick={() => setEditingObjId(null)}
+                                className="px-3 py-1 bg-blue-600 text-white rounded text-xs font-medium hover:bg-blue-700"
+                              >
+                                완료
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setObjectives(prev => prev.filter(o => o.id !== obj.id));
+                                  setEditingObjId(null);
+                                }}
+                                className="px-3 py-1 text-red-600 hover:bg-red-50 rounded text-xs font-medium"
+                              >
+                                삭제
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div 
+                            onClick={() => toggleObjective(obj.id)}
+                            className="cursor-pointer"
+                          >
+                            <h3 className="font-medium text-slate-900 mb-2">{obj.name || '(이름 없음)'}</h3>
+                            <div className="flex items-center gap-2">
+                              <span className={`px-2 py-1 rounded-full text-xs font-medium ${biiColor.bg} ${biiColor.text}`}>
+                                {obj.biiType}
+                              </span>
+                              <span className="text-xs text-slate-600">{obj.perspective} 관점</span>
+                            </div>
+                          </div>
+                        )}
                       </div>
+                      {!isEditing && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingObjId(obj.id);
+                          }}
+                          className="p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                          title="수정"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                     </div>
                   </div>
                 );
@@ -1142,18 +1216,20 @@ export default function Wizard() {
               </button>
               <button 
                 onClick={() => {
+                  const newId = `obj-new-${Date.now()}`;
                   const newObj: ObjectiveCandidate = {
-                    id: `obj-new-${Date.now()}`,
-                    name: '새 목표',
+                    id: newId,
+                    name: '',
                     biiType: 'Improve',
                     perspective: '재무',
                     selected: true
                   };
                   setObjectives(prev => [...prev, newObj]);
+                  setEditingObjId(newId);
                 }}
                 className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors text-sm font-medium flex items-center gap-2"
               >
-                <Target className="w-4 h-4" />
+                <Plus className="w-4 h-4" />
                 직접 추가
               </button>
             </div>
