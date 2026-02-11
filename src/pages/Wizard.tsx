@@ -3,7 +3,8 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { 
   ChevronLeft, ChevronRight, Bot, Target, RefreshCw, Pencil, Trash2, 
-  ChevronDown, BookOpen, Plus, X, ArrowLeft, Loader2, Check, Search, Star, Database
+  ChevronDown, BookOpen, Plus, X, ArrowLeft, Loader2, Check, Search, Star, Database,
+  Send, Bell, FileCheck, GitBranch, Users, Clock, MessageSquare, AlertTriangle, Link2
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useStore } from '../store/useStore';
@@ -37,6 +38,15 @@ interface KRCandidate {
   gradeCriteria: { S: number; A: number; B: number; C: number; D: number };
   quarterlyTargets: { Q1: number; Q2: number; Q3: number; Q4: number };
 }
+
+// 상위 OKR 타입
+interface ParentOKR {
+  objective: { id: string; name: string; biiType: string; orgName: string; orgLevel: string };
+  keyResults: { id: string; name: string; targetValue: number; unit: string; weight: number }[];
+}
+
+// 승인 상태 타입
+type ApprovalStatus = 'draft' | 'submitted' | 'under_review' | 'approved' | 'rejected' | 'revision_requested';
 
 export default function Wizard() {
   const navigate = useNavigate();
@@ -76,6 +86,21 @@ export default function Wizard() {
   const [poolSelectedIds, setPoolSelectedIds] = useState<Set<string>>(new Set());
   const [poolFunctionFilter, setPoolFunctionFilter] = useState('');
 
+  // [New] Cascading 관련
+  const [parentOKRs, setParentOKRs] = useState<ParentOKR[]>([]);
+  const [parentOrgName, setParentOrgName] = useState<string>('');
+  const [parentOrgLevel, setParentOrgLevel] = useState<string>('');
+  const [isLoadingParent, setIsLoadingParent] = useState(false);
+  const [cascadingLinked, setCascadingLinked] = useState<Record<string, string>>({}); // objId → parentObjId
+
+  // [New] 승인 워크플로우
+  const [approvalStatus, setApprovalStatus] = useState<ApprovalStatus>('draft');
+  const [approvalComment, setApprovalComment] = useState('');
+  const [reviewComment, setReviewComment] = useState('');
+  const [submittedAt, setSubmittedAt] = useState<string | null>(null);
+  const [showReviewRequestModal, setShowReviewRequestModal] = useState(false);
+  const [reviewRequestOrgs, setReviewRequestOrgs] = useState<string[]>([]);
+  const [reviewRequestMessage, setReviewRequestMessage] = useState('');
   // 현재 선택된 조직 정보 계산
   const orgId = selectedOrgId;
   const currentOrg = organizations.find(o => o.id === orgId);
@@ -115,6 +140,79 @@ export default function Wizard() {
       }
     };
     fetchCompanyIndustry();
+  }, [selectedOrgId, urlOrgId, organizations]);
+
+  // [New] 상위 조직 OKR 자동 로딩 (Cascading)
+  useEffect(() => {
+    const fetchParentOKRs = async () => {
+      const targetOrg = organizations.find(o => o.id === (selectedOrgId || urlOrgId));
+      if (!targetOrg?.parentOrgId) {
+        setParentOKRs([]);
+        setParentOrgName('');
+        return;
+      }
+
+      setIsLoadingParent(true);
+      try {
+        // 상위 조직 정보
+        const parentOrg = organizations.find(o => o.id === targetOrg.parentOrgId);
+        if (parentOrg) {
+          setParentOrgName(parentOrg.name);
+          setParentOrgLevel(parentOrg.level);
+        }
+
+        // 상위 조직의 확정된 Objectives 조회
+        const { data: parentObjs, error: objErr } = await supabase
+          .from('objectives')
+          .select('*')
+          .eq('org_id', targetOrg.parentOrgId)
+          .in('status', ['agreed', 'active'])
+          .order('sort_order');
+
+        if (objErr) throw objErr;
+        if (!parentObjs || parentObjs.length === 0) {
+          setParentOKRs([]);
+          setIsLoadingParent(false);
+          return;
+        }
+
+        // 각 Objective의 KR 조회
+        const parentData: ParentOKR[] = [];
+        for (const obj of parentObjs) {
+          const { data: parentKRs } = await supabase
+            .from('key_results')
+            .select('id, name, target_value, unit, weight')
+            .eq('objective_id', obj.id)
+            .order('weight', { ascending: false });
+
+          parentData.push({
+            objective: {
+              id: obj.id,
+              name: obj.name,
+              biiType: obj.bii_type,
+              orgName: parentOrg?.name || '',
+              orgLevel: parentOrg?.level || '',
+            },
+            keyResults: (parentKRs || []).map(kr => ({
+              id: kr.id,
+              name: kr.name,
+              targetValue: kr.target_value,
+              unit: kr.unit,
+              weight: kr.weight,
+            })),
+          });
+        }
+
+        setParentOKRs(parentData);
+      } catch (err) {
+        console.warn('상위 OKR 조회 실패:', err);
+        setParentOKRs([]);
+      } finally {
+        setIsLoadingParent(false);
+      }
+    };
+
+    fetchParentOKRs();
   }, [selectedOrgId, urlOrgId, organizations]);
 
   // ==================== Data States ====================
@@ -610,13 +708,73 @@ export default function Wizard() {
     }
   };
 
+  // [New] 상위 조직에 제출 (승인 요청)
+  const handleSubmitForApproval = async () => {
+    if (!orgId) return;
+    if (!confirm('상위 조직장에게 OKR을 제출하시겠습니까?')) return;
+
+    try {
+      // 1. OKR Set 생성/업데이트
+      const { data: okrSet, error: setErr } = await supabase
+        .from('okr_sets')
+        .upsert({
+          org_id: orgId,
+          period: '2025-H1',
+          status: 'submitted',
+          submitted_at: new Date().toISOString(),
+          submitted_by: (await supabase.auth.getUser()).data.user?.id,
+        }, { onConflict: 'org_id,period' })
+        .select()
+        .single();
+
+      if (setErr) throw setErr;
+
+      setApprovalStatus('submitted');
+      setSubmittedAt(new Date().toISOString());
+      alert('✅ OKR이 제출되었습니다. 상위 조직장에게 검토 알림이 발송됩니다.');
+    } catch (err: any) {
+      console.error('제출 실패:', err);
+      alert(`제출 실패: ${err.message}`);
+    }
+  };
+
+  // [New] 유관부서 검토 요청 발송
+  const handleSendReviewRequest = async () => {
+    if (reviewRequestOrgs.length === 0) {
+      alert('검토 요청할 조직을 선택해주세요.');
+      return;
+    }
+    try {
+      const userId = (await supabase.auth.getUser()).data.user?.id;
+      for (const targetOrgId of reviewRequestOrgs) {
+        await supabase.from('review_requests').insert({
+          requester_id: userId,
+          requester_org_id: orgId,
+          reviewer_id: userId, // 실제로는 해당 조직장 ID
+          reviewer_org_id: targetOrgId,
+          request_type: 'review',
+          title: `${currentOrgName} OKR 검토 요청`,
+          message: reviewRequestMessage || `${currentOrgName}의 OKR을 검토해주세요.`,
+          status: 'pending',
+        });
+      }
+      setShowReviewRequestModal(false);
+      setReviewRequestOrgs([]);
+      setReviewRequestMessage('');
+      alert(`✅ ${reviewRequestOrgs.length}개 조직에 검토 요청을 발송했습니다.`);
+    } catch (err: any) {
+      alert(`요청 실패: ${err.message}`);
+    }
+  };
+
   // Helper Values
   const steps = [
-    { id: 0, name: '전략방향', description: '전사 전략 및 조직 미션 확인' },
+    { id: 0, name: '전략방향', description: '전사 전략 및 상위 OKR 확인' },
     { id: 1, name: '목표수립', description: '3-5개 핵심 목표 선정' },
     { id: 2, name: 'KR설정', description: '각 목표별 핵심결과 정의' },
     { id: 3, name: '세부설정', description: 'Cascading 및 공통 KPI 설정' },
     { id: 4, name: '최종확인', description: '종합 점검 및 확정' },
+    { id: 5, name: '제출승인', description: '상위 조직 승인 요청' },
   ];
 
   const biiBalance = {
@@ -1029,10 +1187,125 @@ export default function Wizard() {
       {/* Main Content */}
       <div className="bg-white rounded-xl border border-slate-200 p-8">
         
-        {/* Step 0: 전략 방향 */}
+        {/* Step 0: 전략 방향 + 상위 OKR Cascading */}
         {currentStep === 0 && (
           <div className="space-y-6">
             <h2 className="text-xl font-bold text-slate-900">전략 방향 확인</h2>
+            
+            {/* 상위 OKR Cascading 섹션 */}
+            {parentOKRs.length > 0 && (
+              <div className="bg-gradient-to-br from-indigo-50 to-blue-50 border border-indigo-200 rounded-xl p-6">
+                <div className="flex items-center gap-2 mb-4">
+                  <GitBranch className="w-5 h-5 text-indigo-600" />
+                  <h3 className="font-semibold text-indigo-900">
+                    상위 조직 OKR ({parentOrgName} · {parentOrgLevel})
+                  </h3>
+                  <span className="text-xs bg-indigo-200 text-indigo-800 px-2 py-0.5 rounded-full">확정</span>
+                </div>
+                <p className="text-sm text-indigo-700 mb-4">
+                  아래 상위 목표를 기반으로 AI가 Cascading 추천을 해드립니다. Step 1에서 수정/추가할 수 있습니다.
+                </p>
+                <div className="space-y-3">
+                  {parentOKRs.map((pokr, idx) => {
+                    const biiColor = getBIIColor(pokr.objective.biiType as BIIType);
+                    return (
+                      <div key={pokr.objective.id} className="bg-white/70 border border-indigo-100 rounded-lg p-4">
+                        <div className="flex items-center gap-2 mb-2">
+                          <span className="text-xs font-mono text-slate-400">O{idx + 1}</span>
+                          <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${biiColor.bg} ${biiColor.text}`}>
+                            {pokr.objective.biiType}
+                          </span>
+                          <span className="font-medium text-slate-900 text-sm">{pokr.objective.name}</span>
+                        </div>
+                        {pokr.keyResults.length > 0 && (
+                          <div className="ml-6 space-y-1">
+                            {pokr.keyResults.map((kr, krIdx) => (
+                              <div key={kr.id} className="flex items-center gap-2 text-xs text-slate-600">
+                                <span className="text-blue-500 font-mono">KR{krIdx + 1}</span>
+                                <span>{kr.name}</span>
+                                <span className="text-slate-400">({kr.targetValue}{kr.unit}, {kr.weight}%)</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                <button
+                  onClick={async () => {
+                    setIsAIGenerating(true);
+                    try {
+                      const { data, error } = await supabase.functions.invoke('generate-objectives', {
+                        body: {
+                          orgName: currentOrgName,
+                          orgMission: mission,
+                          orgType: currentOrg?.orgType || 'Front',
+                          functionTags: currentOrg?.functionTags || [],
+                          industry: companyIndustry,
+                          parentOKRs: parentOKRs.map(p => ({
+                            objectiveName: p.objective.name,
+                            biiType: p.objective.biiType,
+                            keyResults: p.keyResults.map(kr => kr.name),
+                          })),
+                          cascadingMode: true,
+                        }
+                      });
+                      if (error) throw error;
+                      if (data?.objectives) {
+                        setObjectives(data.objectives.map((obj: any, i: number) => ({
+                          id: String(i + 1),
+                          name: obj.name,
+                          biiType: obj.biiType || 'Improve',
+                          perspective: obj.perspective || '재무',
+                          selected: i < 3,
+                        })));
+
+                        // Cascading 연결 자동 설정
+                        const links: Record<string, string> = {};
+                        data.objectives.forEach((obj: any, i: number) => {
+                          if (obj.parentObjectiveId) {
+                            links[String(i + 1)] = obj.parentObjectiveId;
+                          }
+                        });
+                        setCascadingLinked(links);
+                      }
+                      setCurrentStep(1);
+                      alert('🔗 상위 OKR 기반으로 AI가 목표를 추천했습니다!');
+                    } catch (err: any) {
+                      alert(`Cascading 생성 실패: ${err.message}`);
+                    } finally {
+                      setIsAIGenerating(false);
+                    }
+                  }}
+                  className="mt-4 w-full bg-indigo-600 text-white rounded-lg py-3 font-medium hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2"
+                >
+                  <Bot className="w-4 h-4" />
+                  🔗 AI Cascading 추천 받기
+                </button>
+              </div>
+            )}
+
+            {/* 상위 OKR 없는 경우 (최상위 조직이거나 미확정) */}
+            {!isLoadingParent && parentOKRs.length === 0 && parentOrgName && (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="w-5 h-5 text-amber-600" />
+                  <p className="text-sm text-amber-800">
+                    상위 조직({parentOrgName})의 OKR이 아직 확정되지 않았습니다. 
+                    독립적으로 수립하거나, 상위 OKR 확정 후 Cascading을 받을 수 있습니다.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {isLoadingParent && (
+              <div className="flex items-center gap-3 p-4 bg-slate-50 rounded-xl">
+                <Loader2 className="w-5 h-5 text-blue-600 animate-spin" />
+                <span className="text-sm text-slate-600">상위 조직 OKR을 불러오는 중...</span>
+              </div>
+            )}
+
             <div className="bg-blue-50 border border-blue-200 rounded-xl p-6">
               <h3 className="font-semibold text-blue-900 mb-2">전사 전략방향</h3>
               <p className="text-blue-700">디지털 혁신을 통한 지속 가능한 성장과 고객 가치 창출</p>
@@ -1923,15 +2196,237 @@ export default function Wizard() {
               >
                 {isSaving ? '저장 중...' : '✅ KR 세트 확정 (DB 저장)'}
               </button>
-              <button className="px-6 border border-slate-300 text-slate-700 rounded-lg py-3 font-medium hover:bg-slate-50 transition-colors">
+              <button 
+                onClick={() => setShowReviewRequestModal(true)}
+                className="px-6 border border-slate-300 text-slate-700 rounded-lg py-3 font-medium hover:bg-slate-50 transition-colors"
+              >
                 📨 리뷰 요청 발송
               </button>
               <button className="px-6 border border-slate-300 text-slate-700 rounded-lg py-3 font-medium hover:bg-slate-50 transition-colors">
                 📥 엑셀 다운로드
               </button>
-              <button className="px-6 border border-slate-300 text-slate-700 rounded-lg py-3 font-medium hover:bg-slate-50 transition-colors">
-                🔄 하위조직 Cascading
-              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Step 5: 제출 & 승인 워크플로우 */}
+        {currentStep === 5 && (
+          <div className="space-y-6">
+            <h2 className="text-xl font-bold text-slate-900">제출 & 승인</h2>
+
+            {/* 승인 상태 카드 */}
+            <div className={`border-2 rounded-xl p-6 ${
+              approvalStatus === 'draft' ? 'border-slate-300 bg-slate-50' :
+              approvalStatus === 'submitted' ? 'border-blue-300 bg-blue-50' :
+              approvalStatus === 'approved' ? 'border-green-300 bg-green-50' :
+              approvalStatus === 'rejected' ? 'border-red-300 bg-red-50' :
+              approvalStatus === 'revision_requested' ? 'border-amber-300 bg-amber-50' :
+              'border-slate-300 bg-slate-50'
+            }`}>
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-3">
+                  <FileCheck className={`w-6 h-6 ${
+                    approvalStatus === 'approved' ? 'text-green-600' :
+                    approvalStatus === 'rejected' ? 'text-red-600' :
+                    approvalStatus === 'submitted' ? 'text-blue-600' :
+                    'text-slate-400'
+                  }`} />
+                  <div>
+                    <h3 className="font-semibold text-slate-900">승인 상태</h3>
+                    <p className="text-sm text-slate-600">
+                      {approvalStatus === 'draft' && '초안 작성 중 - 제출 전입니다'}
+                      {approvalStatus === 'submitted' && `제출 완료 - ${parentOrgName || '상위 조직장'} 검토 대기 중`}
+                      {approvalStatus === 'approved' && '✅ 승인 완료'}
+                      {approvalStatus === 'rejected' && '❌ 반려됨 - 수정 후 재제출 필요'}
+                      {approvalStatus === 'revision_requested' && '⚠️ 수정 요청됨'}
+                    </p>
+                  </div>
+                </div>
+                {submittedAt && (
+                  <div className="flex items-center gap-1 text-xs text-slate-500">
+                    <Clock className="w-3.5 h-3.5" />
+                    {new Date(submittedAt).toLocaleString('ko-KR')}
+                  </div>
+                )}
+              </div>
+
+              {/* 승인 프로세스 타임라인 */}
+              <div className="flex items-center gap-0 mb-6">
+                {[
+                  { key: 'draft', label: '초안', icon: '📝' },
+                  { key: 'submitted', label: '제출', icon: '📤' },
+                  { key: 'under_review', label: '검토중', icon: '🔍' },
+                  { key: 'approved', label: '승인', icon: '✅' },
+                ].map((step, idx) => {
+                  const stages = ['draft', 'submitted', 'under_review', 'approved'];
+                  const currentIdx = stages.indexOf(approvalStatus === 'rejected' || approvalStatus === 'revision_requested' ? 'submitted' : approvalStatus);
+                  const stepIdx = stages.indexOf(step.key);
+                  const isActive = stepIdx <= currentIdx;
+                  const isCurrent = step.key === approvalStatus;
+                  return (
+                    <div key={step.key} className="flex items-center flex-1">
+                      <div className={`flex flex-col items-center ${isCurrent ? 'scale-110' : ''}`}>
+                        <div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg ${
+                          isActive ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-400'
+                        } ${isCurrent ? 'ring-4 ring-blue-200' : ''}`}>
+                          {step.icon}
+                        </div>
+                        <span className={`text-xs mt-1 ${isActive ? 'text-blue-700 font-medium' : 'text-slate-400'}`}>
+                          {step.label}
+                        </span>
+                      </div>
+                      {idx < 3 && (
+                        <div className={`flex-1 h-0.5 mx-1 ${stepIdx < currentIdx ? 'bg-blue-400' : 'bg-slate-200'}`} />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* 반려/수정요청 코멘트 표시 */}
+              {(approvalStatus === 'rejected' || approvalStatus === 'revision_requested') && reviewComment && (
+                <div className="bg-white border border-red-200 rounded-lg p-4 mb-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <MessageSquare className="w-4 h-4 text-red-500" />
+                    <span className="text-sm font-medium text-red-800">검토 의견</span>
+                  </div>
+                  <p className="text-sm text-red-700">{reviewComment}</p>
+                </div>
+              )}
+            </div>
+
+            {/* 액션 버튼 영역 */}
+            <div className="space-y-3">
+              {/* 초안/수정요청 상태: 제출 가능 */}
+              {(approvalStatus === 'draft' || approvalStatus === 'revision_requested' || approvalStatus === 'rejected') && (
+                <div className="flex gap-3">
+                  <button
+                    onClick={handleSubmitForApproval}
+                    className="flex-1 bg-blue-600 text-white rounded-lg py-3 font-semibold hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"
+                  >
+                    <Send className="w-4 h-4" />
+                    {approvalStatus === 'draft' ? '상위 조직에 제출' : '수정 후 재제출'}
+                  </button>
+                  <button
+                    onClick={handleSave}
+                    disabled={isSaving}
+                    className="px-6 border border-slate-300 text-slate-700 rounded-lg py-3 font-medium hover:bg-slate-50 transition-colors"
+                  >
+                    💾 임시 저장
+                  </button>
+                </div>
+              )}
+
+              {/* 공통 버튼 */}
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowReviewRequestModal(true)}
+                  className="flex-1 border border-indigo-300 text-indigo-700 bg-indigo-50 rounded-lg py-3 font-medium hover:bg-indigo-100 transition-colors flex items-center justify-center gap-2"
+                >
+                  <Users className="w-4 h-4" />
+                  유관부서 검토 요청
+                </button>
+                <button className="flex-1 border border-slate-300 text-slate-700 rounded-lg py-3 font-medium hover:bg-slate-50 transition-colors flex items-center justify-center gap-2">
+                  <Link2 className="w-4 h-4" />
+                  Alignment 현황 보기
+                </button>
+              </div>
+            </div>
+
+            {/* Cascading 상태 요약 */}
+            {parentOKRs.length > 0 && (
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <GitBranch className="w-4 h-4 text-slate-500" />
+                  <span className="text-sm font-medium text-slate-700">Cascading 연결 현황</span>
+                </div>
+                <div className="space-y-2">
+                  {objectives.filter(o => o.selected).map(obj => {
+                    const linked = cascadingLinked[obj.id];
+                    const parentObj = parentOKRs.find(p => p.objective.id === linked);
+                    return (
+                      <div key={obj.id} className="flex items-center gap-2 text-sm">
+                        <span className="text-slate-600">{obj.name.substring(0, 25)}...</span>
+                        {parentObj ? (
+                          <>
+                            <span className="text-blue-400">←</span>
+                            <span className="text-blue-600 text-xs bg-blue-50 px-2 py-0.5 rounded">
+                              {parentObj.objective.name.substring(0, 20)}...
+                            </span>
+                          </>
+                        ) : (
+                          <span className="text-xs text-slate-400 bg-slate-100 px-2 py-0.5 rounded">독립</span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* 유관부서 검토 요청 모달 */}
+        {showReviewRequestModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-2xl p-6 max-w-lg w-full mx-4">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-bold text-slate-900">유관부서 검토 요청</h3>
+                <button onClick={() => setShowReviewRequestModal(false)} className="text-slate-400 hover:text-slate-600">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <p className="text-sm text-slate-600 mb-4">검토를 요청할 조직을 선택하고 메시지를 작성해주세요.</p>
+              
+              <div className="space-y-3 mb-4 max-h-40 overflow-y-auto">
+                {organizations
+                  .filter(o => o.id !== orgId && o.level !== '전사')
+                  .map(org => (
+                    <label key={org.id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-slate-50 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={reviewRequestOrgs.includes(org.id)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setReviewRequestOrgs(prev => [...prev, org.id]);
+                          } else {
+                            setReviewRequestOrgs(prev => prev.filter(id => id !== org.id));
+                          }
+                        }}
+                        className="w-4 h-4 rounded border-slate-300 text-indigo-600"
+                      />
+                      <div>
+                        <span className="text-sm font-medium text-slate-900">{org.name}</span>
+                        <span className="text-xs text-slate-500 ml-2">{org.level}</span>
+                      </div>
+                    </label>
+                  ))}
+              </div>
+
+              <textarea
+                value={reviewRequestMessage}
+                onChange={(e) => setReviewRequestMessage(e.target.value)}
+                placeholder="검토 요청 메시지를 작성해주세요..."
+                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm mb-4 resize-none"
+                rows={3}
+              />
+
+              <div className="flex gap-3">
+                <button
+                  onClick={handleSendReviewRequest}
+                  disabled={reviewRequestOrgs.length === 0}
+                  className="flex-1 bg-indigo-600 text-white rounded-lg py-2.5 font-medium hover:bg-indigo-700 disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  <Send className="w-4 h-4" />
+                  {reviewRequestOrgs.length}개 조직에 요청 발송
+                </button>
+                <button
+                  onClick={() => setShowReviewRequestModal(false)}
+                  className="px-4 border border-slate-300 text-slate-600 rounded-lg py-2.5 hover:bg-slate-50"
+                >
+                  취소
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -1960,9 +2455,9 @@ export default function Wizard() {
                   return;
                 }
               }
-              setCurrentStep(Math.min(4, currentStep + 1));
+              setCurrentStep(Math.min(5, currentStep + 1));
             }}
-            disabled={currentStep === 4}
+            disabled={currentStep === 5}
             className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
           >
             다음
