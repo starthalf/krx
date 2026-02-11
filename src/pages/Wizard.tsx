@@ -1579,6 +1579,7 @@ export default function Wizard() {
                       {/* Objective 헤더 */}
                       <div className={`px-4 py-3 flex items-center justify-between ${info.valid ? 'bg-slate-50' : 'bg-red-50'}`}>
                         <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold text-slate-400 w-6">O{objIdx + 1}</span>
                           <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${biiColor.bg} ${biiColor.text}`}>
                             {obj.biiType}
                           </span>
@@ -1618,8 +1619,9 @@ export default function Wizard() {
 
                       {/* KR 가중치 슬라이더 */}
                       <div className="p-4 space-y-3">
-                        {objKRs.map(kr => (
+                        {objKRs.map((kr, krIdx) => (
                           <div key={kr.id} className="flex items-center gap-4">
+                            <span className="text-xs font-bold text-blue-400 w-8 flex-shrink-0">KR{krIdx + 1}</span>
                             <span className="text-sm text-slate-700 flex-1 min-w-0 truncate">{kr.name}</span>
                             <div className="flex items-center gap-2 flex-shrink-0">
                               <input
