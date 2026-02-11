@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { 
   ChevronLeft, ChevronRight, Bot, Target, RefreshCw, Pencil, Trash2, 
-  ChevronDown, BookOpen, Plus, X, ArrowLeft, Loader2, Check 
+  ChevronDown, BookOpen, Plus, X, ArrowLeft, Loader2, Check, Search, Star, Database
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useStore } from '../store/useStore';
@@ -66,6 +66,14 @@ export default function Wizard() {
 
   // [New] 회사 업종 (DB에서 가져옴 → Edge Function에 전달)
   const [companyIndustry, setCompanyIndustry] = useState<string>('SaaS/클라우드');
+
+  // [New] Pool에서 선택 모달
+  const [showPoolModal, setShowPoolModal] = useState(false);
+  const [poolKPIs, setPoolKPIs] = useState<any[]>([]);
+  const [poolSearch, setPoolSearch] = useState('');
+  const [poolLoading, setPoolLoading] = useState(false);
+  const [poolSelectedIds, setPoolSelectedIds] = useState<Set<string>>(new Set());
+  const [poolFunctionFilter, setPoolFunctionFilter] = useState('');
 
   // 현재 선택된 조직 정보 계산
   const orgId = selectedOrgId;
@@ -243,6 +251,101 @@ export default function Wizard() {
     setKrs([...krs, newKR]);
     setExpandedKR(newKR.id);
     setEditingKRId(newKR.id); // 추가하자마자 편집 모드
+  };
+
+  // [New] Pool 모달 열기 - DB에서 KPI 검색
+  const handleOpenPoolModal = async () => {
+    setShowPoolModal(true);
+    setPoolSelectedIds(new Set());
+    setPoolSearch('');
+    setPoolFunctionFilter('');
+    await fetchPoolKPIs('', '');
+  };
+
+  // [New] Pool KPI 검색
+  const fetchPoolKPIs = async (search: string, fnFilter: string) => {
+    setPoolLoading(true);
+    try {
+      let query = supabase
+        .from('kpi_pool')
+        .select('*')
+        .order('relevance_score', { ascending: false })
+        .limit(50);
+
+      // 업종 필터 (현재 회사 업종)
+      if (companyIndustry) {
+        query = query.contains('industry_tags', [companyIndustry]);
+      }
+
+      // 텍스트 검색
+      if (search) {
+        query = query.or(`name.ilike.%${search}%,definition.ilike.%${search}%`);
+      }
+
+      // 기능 필터
+      if (fnFilter) {
+        query = query.contains('function_tags', [fnFilter]);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+      setPoolKPIs(data || []);
+    } catch (err) {
+      console.error('Pool 조회 오류:', err);
+    } finally {
+      setPoolLoading(false);
+    }
+  };
+
+  // [New] Pool 검색 디바운스
+  useEffect(() => {
+    if (!showPoolModal) return;
+    const timer = setTimeout(() => {
+      fetchPoolKPIs(poolSearch, poolFunctionFilter);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [poolSearch, poolFunctionFilter, showPoolModal]);
+
+  // [New] Pool 체크박스 토글
+  const togglePoolSelection = (id: string) => {
+    setPoolSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  // [New] Pool에서 선택한 KPI를 KR로 추가
+  const handleAddFromPool = () => {
+    const currentObj = objectives.find(o => o.id === selectedObjectiveTab);
+    if (!currentObj) return;
+
+    const selectedPoolKPIs = poolKPIs.filter(k => poolSelectedIds.has(k.id));
+    const newKRs: (KRCandidate & { selected: boolean })[] = selectedPoolKPIs.map((pk, idx) => ({
+      id: `kr-pool-${Date.now()}-${idx}`,
+      objectiveId: selectedObjectiveTab,
+      name: pk.name,
+      definition: pk.definition || '',
+      formula: pk.formula || '',
+      unit: pk.unit || '%',
+      weight: pk.weight_range?.typical || 15,
+      targetValue: pk.typical_target?.median || 100,
+      biiType: (pk.bii_type?.[0] || currentObj.biiType) as BIIType,
+      kpiCategory: '전략' as const,
+      perspective: (pk.perspective || currentObj.perspective) as any,
+      indicatorType: (pk.indicator_type || '결과') as any,
+      measurementCycle: (pk.measurement_cycle || '월') as any,
+      previousYear: 0,
+      poolMatch: pk.relevance_score || 80,
+      gradeCriteria: pk.grade_template || { S: 120, A: 110, B: 100, C: 90, D: 0 },
+      quarterlyTargets: { Q1: 0, Q2: 0, Q3: 0, Q4: 0 },
+      selected: true
+    }));
+
+    setKrs(prev => [...prev, ...newKRs]);
+    setShowPoolModal(false);
+    alert(`✅ ${newKRs.length}개 KR을 Pool에서 추가했습니다!`);
   };
 
   // AI KR 추천 (v2: industry, orgType 추가)
@@ -737,6 +840,167 @@ export default function Wizard() {
         </div>
       )}
 
+      {/* Pool에서 선택 모달 */}
+      {showPoolModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl w-full max-w-4xl mx-4 max-h-[85vh] flex flex-col">
+            {/* 모달 헤더 */}
+            <div className="p-6 border-b border-slate-200 flex-shrink-0">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-3">
+                  <Database className="w-6 h-6 text-blue-600" />
+                  <h2 className="text-xl font-bold text-slate-900">KR Pool에서 선택</h2>
+                  <span className="text-sm text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">{companyIndustry}</span>
+                </div>
+                <button onClick={() => setShowPoolModal(false)} className="text-slate-400 hover:text-slate-600">
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+
+              {/* 검색 & 필터 */}
+              <div className="flex gap-3">
+                <div className="flex-1 relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                  <input
+                    type="text"
+                    placeholder="KR명, 정의 검색..."
+                    value={poolSearch}
+                    onChange={(e) => setPoolSearch(e.target.value)}
+                    className="w-full pl-9 pr-4 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                  />
+                </div>
+                <select
+                  value={poolFunctionFilter}
+                  onChange={(e) => setPoolFunctionFilter(e.target.value)}
+                  className="border border-slate-300 rounded-lg px-3 py-2 text-sm min-w-[140px]"
+                >
+                  <option value="">전체 기능</option>
+                  <option value="영업">영업</option>
+                  <option value="마케팅">마케팅</option>
+                  <option value="R&D/연구개발">R&D/연구개발</option>
+                  <option value="생산/제조">생산/제조</option>
+                  <option value="품질">품질</option>
+                  <option value="구매/조달">구매/조달</option>
+                  <option value="HR/인사">HR/인사</option>
+                  <option value="재무/회계">재무/회계</option>
+                  <option value="IT/정보시스템">IT/정보시스템</option>
+                  <option value="경영기획">경영기획</option>
+                  <option value="SCM/물류">SCM/물류</option>
+                  <option value="고객서비스/CS">고객서비스/CS</option>
+                  <option value="설비/시설">설비/시설</option>
+                  <option value="법무/컴플라이언스">법무/컴플라이언스</option>
+                  <option value="사업개발">사업개발</option>
+                </select>
+              </div>
+            </div>
+
+            {/* 모달 바디 - KPI 리스트 */}
+            <div className="flex-1 overflow-y-auto p-6">
+              {poolLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
+                  <span className="ml-3 text-slate-500">검색 중...</span>
+                </div>
+              ) : poolKPIs.length === 0 ? (
+                <div className="text-center py-12">
+                  <Database className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+                  <p className="text-slate-500 text-sm">검색 결과가 없습니다</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {poolKPIs.map((pk) => {
+                    const isChecked = poolSelectedIds.has(pk.id);
+                    const biiColor = getBIIColor((pk.bii_type?.[0] || 'Improve') as BIIType);
+                    const perspColors: Record<string, string> = {
+                      '재무': 'bg-emerald-100 text-emerald-700',
+                      '고객': 'bg-sky-100 text-sky-700',
+                      '프로세스': 'bg-amber-100 text-amber-700',
+                      '학습성장': 'bg-violet-100 text-violet-700',
+                    };
+                    const pColor = perspColors[pk.perspective] || 'bg-slate-100 text-slate-600';
+
+                    return (
+                      <div
+                        key={pk.id}
+                        onClick={() => togglePoolSelection(pk.id)}
+                        className={`border rounded-lg p-4 cursor-pointer transition-all ${
+                          isChecked 
+                            ? 'border-blue-500 bg-blue-50/50' 
+                            : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                        }`}
+                      >
+                        <div className="flex items-start gap-3">
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => {}}
+                            className="mt-1 w-4 h-4 rounded border-slate-300 text-blue-600"
+                          />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="font-medium text-slate-900 text-sm">{pk.name}</span>
+                              {pk.is_mandatory && <Star className="w-3.5 h-3.5 text-amber-500 fill-amber-500 flex-shrink-0" />}
+                            </div>
+                            <p className="text-xs text-slate-500 mb-2 line-clamp-1">{pk.definition}</p>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${biiColor.bg} ${biiColor.text}`}>
+                                {pk.bii_type?.[0] || 'Improve'}
+                              </span>
+                              <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${pColor}`}>
+                                {pk.perspective}
+                              </span>
+                              <span className="text-xs text-slate-400">{pk.unit}</span>
+                              <span className="text-xs text-slate-400">•</span>
+                              <span className="text-xs text-slate-400">{pk.indicator_type}</span>
+                              {pk.formula && (
+                                <>
+                                  <span className="text-xs text-slate-400">•</span>
+                                  <span className="text-xs text-slate-400 truncate max-w-[200px]">{pk.formula}</span>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                          <div className="text-right flex-shrink-0">
+                            <div className="text-xs text-slate-400">관련도</div>
+                            <div className="text-sm font-semibold text-blue-600">{pk.relevance_score}</div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* 모달 푸터 */}
+            <div className="p-4 border-t border-slate-200 flex items-center justify-between flex-shrink-0 bg-slate-50">
+              <div className="text-sm text-slate-600">
+                {poolSelectedIds.size > 0 
+                  ? <span className="font-medium text-blue-600">{poolSelectedIds.size}개 선택됨</span>
+                  : <span>{poolKPIs.length}개 KR 검색됨</span>
+                }
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowPoolModal(false)}
+                  className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-100"
+                >
+                  취소
+                </button>
+                <button
+                  onClick={handleAddFromPool}
+                  disabled={poolSelectedIds.size === 0}
+                  className="px-6 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
+                >
+                  <Plus className="w-4 h-4" />
+                  {poolSelectedIds.size}개 추가
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Stepper */}
       <div className="bg-white rounded-xl border border-slate-200 p-8 mb-6">
         <div className="flex items-center justify-between mb-8">
@@ -1180,7 +1444,10 @@ export default function Wizard() {
                 <RefreshCw className={`w-4 h-4 ${isAIGenerating ? 'animate-spin' : ''}`} />
                 {isAIGenerating ? '생성 중...' : 'AI 재추천'}
               </button>
-              <button className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors text-sm font-medium flex items-center gap-2">
+              <button 
+                onClick={handleOpenPoolModal}
+                className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors text-sm font-medium flex items-center gap-2"
+              >
                 <BookOpen className="w-4 h-4" />
                 Pool에서 선택
               </button>
