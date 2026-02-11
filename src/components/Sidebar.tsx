@@ -23,7 +23,7 @@ const navigation = [
   },
   { name: '체크인', href: '/checkin', icon: CheckSquare },
   { name: '조직 관리', href: '/organization', icon: Building2 },
-  { name: 'KPI Pool', href: '/kpi-pool', icon: BookOpen }
+  { name: 'KR지표 DB', href: '/kpi-pool', icon: BookOpen }
 ];
 
 export default function Sidebar() {

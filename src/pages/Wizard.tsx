@@ -64,6 +64,9 @@ export default function Wizard() {
   // [New] KR 편집 모드 (수정 중인 KR의 ID)
   const [editingKRId, setEditingKRId] = useState<string | null>(null);
 
+  // [New] 회사 업종 (DB에서 가져옴 → Edge Function에 전달)
+  const [companyIndustry, setCompanyIndustry] = useState<string>('SaaS/클라우드');
+
   // 현재 선택된 조직 정보 계산
   const orgId = selectedOrgId;
   const currentOrg = organizations.find(o => o.id === orgId);
@@ -78,6 +81,32 @@ export default function Wizard() {
       setShowOneClickModal(true);
     }
   }, [selectedOrgId, showOrgSelector]);
+
+  // [New] 회사 industry 가져오기
+  useEffect(() => {
+    const fetchCompanyIndustry = async () => {
+      const targetOrgId = selectedOrgId || urlOrgId;
+      if (!targetOrgId) return;
+      
+      const targetOrg = organizations.find(o => o.id === targetOrgId);
+      if (!targetOrg?.companyId) return;
+      
+      try {
+        const { data } = await supabase
+          .from('companies')
+          .select('industry')
+          .eq('id', targetOrg.companyId)
+          .single();
+        
+        if (data?.industry) {
+          setCompanyIndustry(data.industry);
+        }
+      } catch (err) {
+        console.warn('회사 업종 조회 실패, 기본값 사용:', err);
+      }
+    };
+    fetchCompanyIndustry();
+  }, [selectedOrgId, urlOrgId, organizations]);
 
   // ==================== Data States ====================
 
@@ -216,7 +245,7 @@ export default function Wizard() {
     setEditingKRId(newKR.id); // 추가하자마자 편집 모드
   };
 
-  // AI KR 추천 (실제 연결됨)
+  // AI KR 추천 (v2: industry, orgType 추가)
   const handleAIRegenerateKRs = async () => {
     const currentObj = objectives.find(o => o.id === selectedObjectiveTab);
     if (!currentObj) return;
@@ -228,7 +257,11 @@ export default function Wizard() {
         body: {
           objectiveName: currentObj.name,
           objectiveType: currentObj.biiType,
-          perspective: currentObj.perspective
+          perspective: currentObj.perspective,
+          // v2: 새 파라미터 추가
+          orgType: currentOrg?.orgType || 'Front',
+          functionTags: currentOrg?.functionTags || [],
+          industry: companyIndustry
         }
       });
 
@@ -240,17 +273,17 @@ export default function Wizard() {
           objectiveId: selectedObjectiveTab,
           name: item.name,
           definition: item.definition || '',
-          formula: '실적 측정',
+          formula: item.formula || '실적 측정',
           unit: item.unit || '건',
           weight: item.weight || 30,
           targetValue: item.targetValue || 100,
-          biiType: currentObj.biiType,
+          biiType: item.biiType || currentObj.biiType,
           kpiCategory: '전략',
-          perspective: currentObj.perspective,
-          indicatorType: item.type === '결과' ? '결과' : '과정',
-          measurementCycle: '월',
+          perspective: item.perspective || currentObj.perspective,
+          indicatorType: item.indicatorType || (item.type === '결과' ? '결과' : '과정'),
+          measurementCycle: item.measurementCycle || '월',
           previousYear: 0,
-          poolMatch: 0,
+          poolMatch: item.poolMatch || 0,
           gradeCriteria: item.gradeCriteria || { S: 120, A: 110, B: 100, C: 90, D: 0 },
           quarterlyTargets: { Q1: 0, Q2: 0, Q3: 0, Q4: 0 },
           selected: true
@@ -278,13 +311,14 @@ export default function Wizard() {
     setShowOneClickModal(false);
 
     try {
-      const { data, error } = await supabase.functions.invoke('one-click-generate', {
+      // v2: generate-objectives 사용 (one-click-generate 없음)
+      const { data, error } = await supabase.functions.invoke('generate-objectives', {
         body: {
           orgName: currentOrgName,
           orgMission: mission,
           orgType: currentOrg?.orgType || 'Front',
           functionTags: currentOrg?.functionTags || [],
-          industry: 'IT 서비스'
+          industry: companyIndustry
         }
       });
 
@@ -300,34 +334,55 @@ export default function Wizard() {
         }));
         setObjectives(newObjectives);
 
-        const newKRs: (KRCandidate & { selected: boolean })[] = [];
-        data.objectives.forEach((obj: any, objIdx: number) => {
-          if (obj.krs) {
-            obj.krs.forEach((kr: any, krIdx: number) => {
-              newKRs.push({
-                id: `kr-${objIdx}-${krIdx}`,
-                objectiveId: String(objIdx + 1),
-                name: kr.name,
-                definition: kr.definition || kr.name,
-                formula: kr.formula || '실적 측정',
-                unit: kr.unit || '건',
-                weight: kr.weight || 20,
-                targetValue: kr.targetValue || 100,
-                biiType: kr.biiType || obj.biiType,
-                kpiCategory: kr.kpiCategory || '전략',
-                perspective: kr.perspective || '재무',
-                indicatorType: kr.indicatorType || '결과',
-                measurementCycle: kr.measurementCycle || '월',
-                previousYear: 0,
-                poolMatch: 0,
-                gradeCriteria: kr.gradeCriteria || { S: 120, A: 110, B: 100, C: 90, D: 0 },
-                quarterlyTargets: { Q1: 0, Q2: 0, Q3: 0, Q4: 0 },
-                selected: true
-              });
+        // 목표 생성 후 각 목표에 대해 KR도 자동 생성
+        const allNewKRs: (KRCandidate & { selected: boolean })[] = [];
+        
+        for (const obj of data.objectives) {
+          const objIdx = data.objectives.indexOf(obj);
+          try {
+            const { data: krData } = await supabase.functions.invoke('generate-krs', {
+              body: {
+                objectiveName: obj.name,
+                objectiveType: obj.biiType || 'Improve',
+                perspective: obj.perspective || '재무',
+                orgType: currentOrg?.orgType || 'Front',
+                functionTags: currentOrg?.functionTags || [],
+                industry: companyIndustry
+              }
             });
+
+            if (krData?.krs) {
+              krData.krs.forEach((kr: any, krIdx: number) => {
+                allNewKRs.push({
+                  id: `kr-${objIdx}-${krIdx}`,
+                  objectiveId: String(objIdx + 1),
+                  name: kr.name,
+                  definition: kr.definition || kr.name,
+                  formula: kr.formula || '실적 측정',
+                  unit: kr.unit || '건',
+                  weight: kr.weight || 20,
+                  targetValue: kr.targetValue || 100,
+                  biiType: kr.biiType || obj.biiType || 'Improve',
+                  kpiCategory: kr.kpiCategory || '전략',
+                  perspective: kr.perspective || obj.perspective || '재무',
+                  indicatorType: kr.indicatorType || '결과',
+                  measurementCycle: kr.measurementCycle || '월',
+                  previousYear: 0,
+                  poolMatch: kr.poolMatch || 0,
+                  gradeCriteria: kr.gradeCriteria || { S: 120, A: 110, B: 100, C: 90, D: 0 },
+                  quarterlyTargets: { Q1: 0, Q2: 0, Q3: 0, Q4: 0 },
+                  selected: true
+                });
+              });
+            }
+          } catch (krErr) {
+            console.warn(`KR 생성 실패 (목표 ${objIdx + 1}):`, krErr);
           }
-        });
-        setKrs(newKRs);
+        }
+
+        if (allNewKRs.length > 0) {
+          setKrs(allNewKRs);
+        }
 
         setCurrentStep(4);
         alert('✨ AI가 OKR 전체 세트를 생성했습니다! 내용을 확인해주세요.');
@@ -348,7 +403,7 @@ export default function Wizard() {
     setCurrentStep(0);
   };
 
-  // AI 목표 생성 핸들러 (Step 1)
+  // AI 목표 생성 핸들러 (Step 1) - v2: industry 동적
   const handleAIGenerateObjectives = async () => {
     setIsAIGenerating(true);
     try {
@@ -358,7 +413,7 @@ export default function Wizard() {
           orgMission: mission,
           orgType: currentOrg?.orgType || 'Front',
           functionTags: currentOrg?.functionTags || [],
-          industry: 'IT 서비스'
+          industry: companyIndustry
         }
       });
 
@@ -602,6 +657,10 @@ export default function Wizard() {
             <ArrowLeft className="w-6 h-6" />
           </button>
           <h1 className="text-2xl font-bold text-slate-900">목표 수립 ({currentOrgName})</h1>
+          {/* v2: 업종 표시 */}
+          <span className="text-sm text-slate-500 bg-slate-100 px-3 py-1 rounded-full">
+            업종: {companyIndustry}
+          </span>
         </div>
       )}
 
@@ -658,7 +717,9 @@ export default function Wizard() {
           <div className="bg-white rounded-2xl p-8 max-w-md w-full mx-4 text-center">
             <Bot className="w-16 h-16 text-blue-600 mx-auto mb-4 animate-pulse" />
             <h3 className="text-xl font-bold text-slate-900 mb-2">AI가 분석 중입니다...</h3>
-            <p className="text-slate-600 mb-4">조직의 미션과 기능을 바탕으로 최적의 목표를 고민하고 있습니다.</p>
+            <p className="text-slate-600 mb-4">
+              {companyIndustry} 업종의 KPI DB를 참조하여 최적의 목표를 생성하고 있습니다.
+            </p>
             <div className="h-2 bg-slate-200 rounded-full overflow-hidden">
               <div className="h-full bg-blue-600 rounded-full animate-pulse" style={{ width: '70%' }} />
             </div>
@@ -866,7 +927,7 @@ export default function Wizard() {
                 const categoryColor = getKPICategoryColor(kr.kpiCategory);
                 const isExpanded = expandedKR === kr.id;
                 const isSelected = kr.selected !== false;
-                const isEditing = editingKRId === kr.id; // 수정 모드 확인
+                const isEditing = editingKRId === kr.id;
 
                 return (
                   <div 
@@ -887,7 +948,6 @@ export default function Wizard() {
                           {kr.biiType}
                         </span>
                         
-                        {/* 이름 수정 모드 */}
                         {isEditing ? (
                           <input 
                             type="text" 
@@ -906,7 +966,6 @@ export default function Wizard() {
                           {kr.kpiCategory}
                         </span>
                         
-                        {/* 수정 버튼 토글 */}
                         {isEditing ? (
                           <button 
                             onClick={() => setEditingKRId(null)}
@@ -935,7 +994,6 @@ export default function Wizard() {
                       </div>
                     </div>
 
-                    {/* 정의 및 산식 */}
                     <div className="grid grid-cols-2 gap-4 mb-4 text-sm">
                       <div className="flex items-center">
                         <span className="text-slate-500 w-12 shrink-0">정의:</span>
@@ -965,7 +1023,6 @@ export default function Wizard() {
                       </div>
                     </div>
 
-                    {/* 상세 설정 필드 */}
                     <div className="grid grid-cols-4 gap-4 mb-4">
                       <div>
                         <label className="block text-xs text-slate-500 mb-1">목표값</label>
