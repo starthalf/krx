@@ -1,12 +1,18 @@
 // src/components/Sidebar.tsx
 import { Link, useLocation } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
 import { 
   Home, 
   Target, 
   TrendingUp, 
   CheckSquare, 
   Building2, 
-  BookOpen
+  BookOpen, 
+  Settings,
+  LogOut,
+  User,
+  Bell,
+  Inbox
 } from 'lucide-react';
 
 const navigation = [
@@ -22,16 +28,24 @@ const navigation = [
     ]
   },
   { name: '체크인', href: '/checkin', icon: CheckSquare },
+  { name: '승인 대기함', href: '/approval-inbox', icon: Inbox },
+  { name: '알림', href: '/notifications', icon: Bell },
   { name: '조직 관리', href: '/organization', icon: Building2 },
-  { name: 'KR지표 DB', href: '/kpi-pool', icon: BookOpen }
+  { name: 'KPI Pool', href: '/kpi-pool', icon: BookOpen },
+  { name: '설정', href: '/settings', icon: Settings }
 ];
 
 export default function Sidebar() {
   const location = useLocation();
+  const { user, profile, signOut } = useAuth();
 
   const isActive = (href: string) => {
     if (href === '/') return location.pathname === '/';
     return location.pathname.startsWith(href);
+  };
+
+  const handleSignOut = async () => {
+    await signOut();
   };
 
   return (
@@ -92,11 +106,32 @@ export default function Sidebar() {
         })}
       </nav>
 
-      {/* 하단 정보 */}
+      {/* 사용자 정보 & 로그아웃 */}
       <div className="p-4 border-t border-slate-200">
-        {/* 버전 정보 */}
-        <div className="text-xs text-slate-400 text-center">
-          OKRio v1.0.0
+        <div className="flex items-center gap-3 mb-3">
+          <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
+            <User className="w-4 h-4 text-blue-600" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-medium text-slate-900 truncate">
+              {profile?.full_name || user?.email?.split('@')[0] || '사용자'}
+            </div>
+            <div className="text-xs text-slate-500 truncate">
+              {user?.email || '로그인 필요'}
+            </div>
+          </div>
+        </div>
+
+        <button
+          onClick={handleSignOut}
+          className="w-full flex items-center justify-center gap-2 px-3 py-2 text-sm text-slate-600 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+        >
+          <LogOut className="w-4 h-4" />
+          로그아웃
+        </button>
+
+        <div className="text-xs text-slate-400 text-center mt-3">
+          OKRio v1.1.0
         </div>
       </div>
     </div>
