@@ -10,6 +10,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useStore } from '../store/useStore';
 import { getBIIColor } from '../utils/helpers';
 import type { BIIType } from '../types';
+import OKRCommentPanel from '../components/OKRCommentPanel';
 
 type TabType = 'pending' | 'completed' | 'my_submissions';
 
@@ -541,6 +542,9 @@ export default function ApprovalInbox() {
                         <p className="text-sm text-amber-700">{selectedSet.review_comment}</p>
                       </div>
                     )}
+
+                    {/* 토론/코멘트 패널 */}
+                    <OKRCommentPanel okrSetId={selectedSet.id} />
                   </div>
                 )}
               </div>
