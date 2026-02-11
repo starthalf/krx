@@ -6,7 +6,9 @@ import {
   TrendingUp, 
   CheckSquare, 
   Building2, 
-  BookOpen
+  BookOpen,
+  Inbox,
+  Bell
 } from 'lucide-react';
 
 const navigation = [
@@ -22,6 +24,8 @@ const navigation = [
     ]
   },
   { name: '체크인', href: '/checkin', icon: CheckSquare },
+  { name: '승인 대기함', href: '/approval-inbox', icon: Inbox },
+  { name: '알림', href: '/notifications', icon: Bell },
   { name: '조직 관리', href: '/organization', icon: Building2 },
   { name: 'KR지표 DB', href: '/kpi-pool', icon: BookOpen }
 ];
@@ -94,9 +98,8 @@ export default function Sidebar() {
 
       {/* 하단 정보 */}
       <div className="p-4 border-t border-slate-200">
-        {/* 버전 정보 */}
         <div className="text-xs text-slate-400 text-center">
-          OKRio v1.0.0
+          OKRio v1.1.0
         </div>
       </div>
     </div>
