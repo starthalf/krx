@@ -2,6 +2,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
+import WithOnboardingCheck from './components/WithOnboardingCheck';
 import Layout from './components/Layout';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
@@ -11,8 +12,10 @@ import Organization from './pages/Organization';
 import KPIPool from './pages/KPIPool';
 import Wizard from './pages/Wizard';
 import AdminSettings from './pages/AdminSettings';
-import Notifications from './pages/Notifications';
-import ApprovalInbox from './pages/ApprovalInbox';
+import OnboardingWizard from './pages/OnboardingWizard';
+import AcceptInvite from './pages/AcceptInvite';
+import JoinCompany from './pages/JoinCompany';
+import MySettings from './pages/MySettings';
 
 function App() {
   return (
@@ -22,12 +25,30 @@ function App() {
           {/* 로그인 페이지 (인증 불필요) */}
           <Route path="/login" element={<Login />} />
           
+          {/* 초대 수락 (인증 불필요) */}
+          <Route path="/accept-invite/:token" element={<AcceptInvite />} />
+          
+          {/* 팀 초대 링크로 가입 (인증 불필요) */}
+          <Route path="/join/:token" element={<JoinCompany />} />
+          
+          {/* 온보딩 (인증 필요, Layout 없음) */}
+          <Route
+            path="/onboarding"
+            element={
+              <ProtectedRoute>
+                <OnboardingWizard />
+              </ProtectedRoute>
+            }
+          />
+          
           {/* 인증 필요한 페이지들 */}
           <Route
             path="/"
             element={
               <ProtectedRoute>
-                <Layout />
+                <WithOnboardingCheck>
+                  <Layout />
+                </WithOnboardingCheck>
               </ProtectedRoute>
             }
           >
@@ -50,17 +71,14 @@ function App() {
             <Route path="wizard" element={<Wizard />} />
             <Route path="wizard/:orgId" element={<Wizard />} />
             
-            {/* 승인 대기함 */}
-            <Route path="approval-inbox" element={<ApprovalInbox />} />
-            
-            {/* 알림 */}
-            <Route path="notifications" element={<Notifications />} />
-            
             {/* 조직 관리 */}
             <Route path="organization" element={<Organization />} />
             
             {/* KPI Pool */}
             <Route path="kpi-pool" element={<KPIPool />} />
+            
+            {/* 내 설정 */}
+            <Route path="my-settings" element={<MySettings />} />
             
             {/* 관리자 설정 */}
             <Route path="admin" element={<AdminSettings />} />
