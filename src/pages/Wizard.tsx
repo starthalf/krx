@@ -1427,6 +1427,7 @@ export default function Wizard() {
                       </div>
                     </div>
 
+                    {isEditing && (
                     <div className="flex gap-2 mb-4">
                       <button
                         onClick={() => setExpandedKR(isExpanded ? null : kr.id)}
@@ -1443,6 +1444,7 @@ export default function Wizard() {
                         AI가 완성해줘
                       </button>
                     </div>
+                    )}
 
                     {isExpanded && (
                       <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
