@@ -1924,14 +1924,14 @@ export default function Wizard() {
               >
                 {isSaving ? '저장 중...' : '✅ KR 세트 확정 (DB 저장)'}
               </button>
-              <button className="px-6 border border-slate-300 text-slate-700 rounded-lg py-3 font-medium hover:bg-slate-50 transition-colors">
+              <button 
+                onClick={() => setShowReviewRequestModal(true)}
+                className="px-6 border border-slate-300 text-slate-700 rounded-lg py-3 font-medium hover:bg-slate-50 transition-colors"
+              >
                 📨 리뷰 요청 발송
               </button>
               <button className="px-6 border border-slate-300 text-slate-700 rounded-lg py-3 font-medium hover:bg-slate-50 transition-colors">
                 📥 엑셀 다운로드
-              </button>
-              <button className="px-6 border border-slate-300 text-slate-700 rounded-lg py-3 font-medium hover:bg-slate-50 transition-colors">
-                🔄 하위조직 Cascading
               </button>
             </div>
 
@@ -1945,6 +1945,183 @@ export default function Wizard() {
           </div>
         )}
 
+        {/* ============================================================ */}
+        {/* Step 5: 제출 & 승인 워크플로우 */}
+        {/* ============================================================ */}
+        {currentStep === 5 && (
+          <div className="space-y-6">
+            <h2 className="text-xl font-bold text-slate-900">제출 & 승인</h2>
+
+            {/* 승인 상태 카드 */}
+            <div className={`border-2 rounded-xl p-6 ${
+              approvalStatus === 'draft' ? 'border-slate-300 bg-slate-50' :
+              approvalStatus === 'submitted' ? 'border-blue-300 bg-blue-50' :
+              approvalStatus === 'approved' ? 'border-green-300 bg-green-50' :
+              approvalStatus === 'rejected' ? 'border-red-300 bg-red-50' :
+              approvalStatus === 'revision_requested' ? 'border-amber-300 bg-amber-50' :
+              'border-slate-300 bg-slate-50'
+            }`}>
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-3">
+                  <FileCheck className={`w-6 h-6 ${
+                    approvalStatus === 'approved' ? 'text-green-600' :
+                    approvalStatus === 'rejected' ? 'text-red-600' :
+                    approvalStatus === 'submitted' ? 'text-blue-600' :
+                    'text-slate-400'
+                  }`} />
+                  <div>
+                    <h3 className="font-semibold text-slate-900">승인 상태</h3>
+                    <p className="text-sm text-slate-600">
+                      {approvalStatus === 'draft' && '초안 작성 중 - 제출 전입니다'}
+                      {approvalStatus === 'submitted' && `제출 완료 - ${parentOrgName || '상위 조직장'} 검토 대기 중`}
+                      {approvalStatus === 'approved' && '✅ 승인 완료'}
+                      {approvalStatus === 'rejected' && '❌ 반려됨 - 수정 후 재제출 필요'}
+                      {approvalStatus === 'revision_requested' && '⚠️ 수정 요청됨'}
+                    </p>
+                  </div>
+                </div>
+                {submittedAt && (
+                  <div className="flex items-center gap-1 text-xs text-slate-500">
+                    <Clock className="w-3.5 h-3.5" />
+                    {new Date(submittedAt).toLocaleString('ko-KR')}
+                  </div>
+                )}
+              </div>
+
+              {/* 승인 프로세스 타임라인 */}
+              <div className="flex items-center gap-0 mb-6">
+                {[
+                  { key: 'draft', label: '초안', icon: '📝' },
+                  { key: 'submitted', label: '제출', icon: '📤' },
+                  { key: 'under_review', label: '검토중', icon: '🔍' },
+                  { key: 'approved', label: '승인', icon: '✅' },
+                ].map((step, idx) => {
+                  const stages = ['draft', 'submitted', 'under_review', 'approved'];
+                  const currentIdx = stages.indexOf(approvalStatus === 'rejected' || approvalStatus === 'revision_requested' ? 'submitted' : approvalStatus);
+                  const stepIdx = stages.indexOf(step.key);
+                  const isActive = stepIdx <= currentIdx;
+                  const isCurrent = step.key === approvalStatus;
+                  return (
+                    <div key={step.key} className="flex items-center flex-1">
+                      <div className={`flex flex-col items-center ${isCurrent ? 'scale-110' : ''}`}>
+                        <div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg ${
+                          isActive ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-400'
+                        } ${isCurrent ? 'ring-4 ring-blue-200' : ''}`}>
+                          {step.icon}
+                        </div>
+                        <span className={`text-xs mt-1 ${isActive ? 'text-blue-700 font-medium' : 'text-slate-400'}`}>
+                          {step.label}
+                        </span>
+                      </div>
+                      {idx < 3 && (
+                        <div className={`flex-1 h-0.5 mx-1 ${stepIdx < currentIdx ? 'bg-blue-400' : 'bg-slate-200'}`} />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* 반려/수정요청 코멘트 */}
+              {(approvalStatus === 'rejected' || approvalStatus === 'revision_requested') && reviewComment && (
+                <div className="bg-white border border-red-200 rounded-lg p-4 mb-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <MessageSquare className="w-4 h-4 text-red-500" />
+                    <span className="text-sm font-medium text-red-800">검토 의견</span>
+                  </div>
+                  <p className="text-sm text-red-700">{reviewComment}</p>
+                </div>
+              )}
+            </div>
+
+            {/* 액션 버튼 */}
+            <div className="space-y-3">
+              {(approvalStatus === 'draft' || approvalStatus === 'revision_requested' || approvalStatus === 'rejected') && (
+                <div className="flex gap-3">
+                  <button onClick={handleSubmitForApproval} className="flex-1 bg-blue-600 text-white rounded-lg py-3 font-semibold hover:bg-blue-700 transition-colors flex items-center justify-center gap-2">
+                    <Send className="w-4 h-4" />
+                    {approvalStatus === 'draft' ? '상위 조직에 제출' : '수정 후 재제출'}
+                  </button>
+                  <button onClick={handleSave} disabled={isSaving} className="px-6 border border-slate-300 text-slate-700 rounded-lg py-3 font-medium hover:bg-slate-50 transition-colors">
+                    💾 임시 저장
+                  </button>
+                </div>
+              )}
+              <div className="flex gap-3">
+                <button onClick={() => setShowReviewRequestModal(true)} className="flex-1 border border-indigo-300 text-indigo-700 bg-indigo-50 rounded-lg py-3 font-medium hover:bg-indigo-100 transition-colors flex items-center justify-center gap-2">
+                  <Users className="w-4 h-4" />유관부서 검토 요청
+                </button>
+                <button className="flex-1 border border-slate-300 text-slate-700 rounded-lg py-3 font-medium hover:bg-slate-50 transition-colors flex items-center justify-center gap-2">
+                  <Link2 className="w-4 h-4" />Alignment 현황 보기
+                </button>
+              </div>
+            </div>
+
+            {/* Cascading 상태 요약 */}
+            {parentOKRs.length > 0 && (
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <GitBranch className="w-4 h-4 text-slate-500" />
+                  <span className="text-sm font-medium text-slate-700">Cascading 연결 현황</span>
+                </div>
+                <div className="space-y-2">
+                  {objectives.filter(o => o.selected).map(obj => {
+                    const linked = cascadingLinked[obj.id];
+                    const parentObj = parentOKRs.find(p => p.objective.id === linked);
+                    return (
+                      <div key={obj.id} className="flex items-center gap-2 text-sm">
+                        <span className="text-slate-600">{obj.name.substring(0, 25)}...</span>
+                        {parentObj ? (
+                          <>
+                            <span className="text-blue-400">←</span>
+                            <span className="text-blue-600 text-xs bg-blue-50 px-2 py-0.5 rounded">{parentObj.objective.name.substring(0, 20)}...</span>
+                          </>
+                        ) : (
+                          <span className="text-xs text-slate-400 bg-slate-100 px-2 py-0.5 rounded">독립</span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* OKR 토론/코멘트 패널 (승인 과정 논의용) */}
+            <OKRCommentPanel
+              objectiveId={objectives.filter(o => o.selected)[0]?.id}
+              compact={false}
+            />
+          </div>
+        )}
+
+        {/* 유관부서 검토 요청 모달 */}
+        {showReviewRequestModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-2xl p-6 max-w-lg w-full mx-4">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-bold text-slate-900">유관부서 검토 요청</h3>
+                <button onClick={() => setShowReviewRequestModal(false)} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
+              </div>
+              <p className="text-sm text-slate-600 mb-4">검토를 요청할 조직을 선택하고 메시지를 작성해주세요.</p>
+              <div className="space-y-3 mb-4 max-h-40 overflow-y-auto">
+                {organizations.filter(o => o.id !== orgId && o.level !== '전사').map(org => (
+                  <label key={org.id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-slate-50 cursor-pointer">
+                    <input type="checkbox" checked={reviewRequestOrgs.includes(org.id)} onChange={(e) => { if (e.target.checked) setReviewRequestOrgs(prev => [...prev, org.id]); else setReviewRequestOrgs(prev => prev.filter(id => id !== org.id)); }} className="w-4 h-4 rounded border-slate-300 text-indigo-600" />
+                    <div><span className="text-sm font-medium text-slate-900">{org.name}</span><span className="text-xs text-slate-500 ml-2">{org.level}</span></div>
+                  </label>
+                ))}
+              </div>
+              <textarea value={reviewRequestMessage} onChange={(e) => setReviewRequestMessage(e.target.value)} placeholder="검토 요청 메시지를 작성해주세요..." className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm mb-4 resize-none" rows={3} />
+              <div className="flex gap-3">
+                <button onClick={handleSendReviewRequest} disabled={reviewRequestOrgs.length === 0} className="flex-1 bg-indigo-600 text-white rounded-lg py-2.5 font-medium hover:bg-indigo-700 disabled:opacity-50 flex items-center justify-center gap-2">
+                  <Send className="w-4 h-4" />{reviewRequestOrgs.length}개 조직에 요청 발송
+                </button>
+                <button onClick={() => setShowReviewRequestModal(false)} className="px-4 border border-slate-300 text-slate-600 rounded-lg py-2.5 hover:bg-slate-50">취소</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 네비게이션 버튼 */}
         <div className="flex justify-between mt-8 pt-6 border-t border-slate-200">
           <button
             onClick={() => setCurrentStep(Math.max(0, currentStep - 1))}
@@ -1956,7 +2133,6 @@ export default function Wizard() {
           </button>
           <button
             onClick={() => {
-              // Step 3 → 4 진행 시 Objective별 가중치 100% 검증
               if (currentStep === 3) {
                 const selObjs = objectives.filter(o => o.selected);
                 const actKRs = krs.filter(kr => kr.selected !== false);
@@ -1969,9 +2145,9 @@ export default function Wizard() {
                   return;
                 }
               }
-              setCurrentStep(Math.min(4, currentStep + 1));
+              setCurrentStep(Math.min(5, currentStep + 1));
             }}
-            disabled={currentStep === 4}
+            disabled={currentStep === 5}
             className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
           >
             다음
