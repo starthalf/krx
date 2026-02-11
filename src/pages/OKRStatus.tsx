@@ -5,6 +5,7 @@ import { useStore } from '../store/useStore';
 import { getBIIColor } from '../utils/helpers';
 import { ChevronRight, Target, TrendingUp, Edit, Trash2, Lock } from 'lucide-react';
 import { getMyRoleLevel, checkCanManageOrg, checkPermission } from '../lib/permissions';
+import OKRCommentPanel from '../components/OKRCommentPanel';
 
 type ViewMode = 'company' | 'division' | 'team';
 
@@ -173,6 +174,11 @@ export default function OKRStatus() {
               style={{ width: `${Math.min(progress, 100)}%` }}
             />
           </div>
+        </div>
+
+        {/* 토론 패널 (compact 모드) */}
+        <div className="mt-3">
+          <OKRCommentPanel objectiveId={objective.id} compact={true} />
         </div>
       </div>
     );
