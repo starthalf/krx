@@ -11,6 +11,7 @@ import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer 
 } from 'recharts';
 import { getMyRoleLevel, checkCanManageOrg } from '../lib/permissions';
+import CEONudgePanel from '../components/CEONudgePanel';
 
 export default function Dashboard() {
   const { 
@@ -368,6 +369,11 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+
+      {/* CEO/본부장 OKR 수립 독촉 패널 */}
+      {roleLevel >= 70 && (
+        <CEONudgePanel />
+      )}
 
       {/* 피드 및 AI 인사이트 */}
       <div className="grid grid-cols-3 gap-6">
