@@ -1140,7 +1140,19 @@ export default function Wizard() {
                 <RefreshCw className={`w-4 h-4 ${isAIGenerating ? 'animate-spin' : ''}`} />
                 {isAIGenerating ? '생성 중...' : 'AI 재생성'}
               </button>
-              <button className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors text-sm font-medium flex items-center gap-2">
+              <button 
+                onClick={() => {
+                  const newObj: ObjectiveCandidate = {
+                    id: `obj-new-${Date.now()}`,
+                    name: '새 목표',
+                    biiType: 'Improve',
+                    perspective: '재무',
+                    selected: true
+                  };
+                  setObjectives(prev => [...prev, newObj]);
+                }}
+                className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors text-sm font-medium flex items-center gap-2"
+              >
                 <Target className="w-4 h-4" />
                 직접 추가
               </button>
