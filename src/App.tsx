@@ -16,6 +16,8 @@ import OnboardingWizard from './pages/OnboardingWizard';
 import AcceptInvite from './pages/AcceptInvite';
 import JoinCompany from './pages/JoinCompany';
 import MySettings from './pages/MySettings';
+import Notifications from './pages/Notifications';
+import ApprovalInbox from './pages/ApprovalInbox';
 
 function App() {
   return (
@@ -70,6 +72,12 @@ function App() {
             {/* 목표 수립 위저드 */}
             <Route path="wizard" element={<Wizard />} />
             <Route path="wizard/:orgId" element={<Wizard />} />
+            
+            {/* [NEW] 승인 대기함 */}
+            <Route path="approval-inbox" element={<ApprovalInbox />} />
+            
+            {/* [NEW] 알림 */}
+            <Route path="notifications" element={<Notifications />} />
             
             {/* 조직 관리 */}
             <Route path="organization" element={<Organization />} />
