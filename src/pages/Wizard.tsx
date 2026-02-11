@@ -1544,55 +1544,272 @@ export default function Wizard() {
         )}
 
         {/* Step 3: 세부 설정 */}
-        {currentStep === 3 && (
+        {currentStep === 3 && (() => {
+          const selectedObjs = objectives.filter(o => o.selected);
+          const activeKRs = krs.filter(kr => kr.selected !== false);
+          const allWeight = activeKRs.reduce((s, k) => s + k.weight, 0);
+          const weightValid = allWeight === 100;
+
+          return (
           <div className="space-y-6">
             <h2 className="text-xl font-bold text-slate-900">세부 설정</h2>
-            <p className="text-slate-600">Cascading 및 공통 KPI를 설정합니다</p>
+            <p className="text-slate-600">가중치 배분, Cascading 연결, 공통 KR을 설정합니다</p>
 
-            <div className="bg-white border border-slate-200 rounded-lg p-6 mb-6">
-              <h3 className="font-semibold text-slate-900 mb-4">Cascading 확인 (Alignment)</h3>
-              <div className="flex items-center justify-between bg-slate-50 rounded-lg p-4">
-                <div className="flex items-center gap-4 flex-1">
-                  <div className="bg-white border border-slate-200 rounded p-3 shadow-sm">
-                    <div className="text-xs text-slate-500 mb-1">상위 조직 (전사)</div>
-                    <div className="font-medium text-slate-900">지속적 규모성장</div>
-                  </div>
-                  <div className="flex flex-col items-center">
-                    <span className="text-xs text-blue-600 font-medium mb-1">Full (전체계승)</span>
-                    <div className="w-16 h-px bg-blue-300 relative">
-                      <div className="absolute right-0 top-1/2 -translate-y-1/2 w-2 h-2 border-t border-r border-blue-300 rotate-45"></div>
-                    </div>
-                  </div>
-                  <div className="bg-blue-50 border border-blue-200 rounded p-3 shadow-sm">
-                    <div className="text-xs text-blue-600 mb-1">우리 조직 ({currentOrgName})</div>
-                    <div className="font-medium text-slate-900">매출 목표달성도</div>
-                  </div>
+            {/* 섹션 1: 가중치 배분 */}
+            <div className="bg-white border border-slate-200 rounded-xl p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-semibold text-slate-900 flex items-center gap-2">
+                  ⚖️ 가중치 배분
+                </h3>
+                <div className="flex items-center gap-3">
+                  <span className={`text-sm font-bold ${weightValid ? 'text-green-600' : 'text-red-600'}`}>
+                    합계: {allWeight}% {weightValid ? '✅' : `(${allWeight > 100 ? '+' : ''}${allWeight - 100}%)`}
+                  </span>
+                  <button
+                    onClick={() => {
+                      // 균등 배분
+                      const count = activeKRs.length;
+                      if (count === 0) return;
+                      const base = Math.floor(100 / count);
+                      const remainder = 100 - base * count;
+                      setKrs(prev => {
+                        let idx = 0;
+                        return prev.map(kr => {
+                          if (kr.selected === false) return kr;
+                          const w = base + (idx < remainder ? 1 : 0);
+                          idx++;
+                          return { ...kr, weight: w };
+                        });
+                      });
+                    }}
+                    className="px-3 py-1.5 border border-blue-300 text-blue-700 bg-blue-50 rounded-lg text-xs font-medium hover:bg-blue-100"
+                  >
+                    🔄 균등배분
+                  </button>
                 </div>
-                <button className="px-3 py-1.5 border border-slate-300 bg-white text-slate-700 rounded text-sm hover:bg-slate-50">
-                  🔄 연결 수정
+              </div>
+
+              {/* 목표별 KR 가중치 */}
+              <div className="space-y-4">
+                {selectedObjs.map(obj => {
+                  const objKRs = activeKRs.filter(kr => kr.objectiveId === obj.id);
+                  const objWeight = objKRs.reduce((s, k) => s + k.weight, 0);
+                  const biiColor = getBIIColor(obj.biiType);
+                  
+                  return (
+                    <div key={obj.id} className="border border-slate-200 rounded-lg">
+                      <div className="bg-slate-50 px-4 py-3 flex items-center justify-between rounded-t-lg">
+                        <div className="flex items-center gap-2">
+                          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${biiColor.bg} ${biiColor.text}`}>
+                            {obj.biiType}
+                          </span>
+                          <span className="font-medium text-slate-900 text-sm">{obj.name}</span>
+                        </div>
+                        <span className="text-sm text-slate-500">소계: <span className="font-semibold text-slate-700">{objWeight}%</span></span>
+                      </div>
+                      <div className="p-4 space-y-3">
+                        {objKRs.map(kr => (
+                          <div key={kr.id} className="flex items-center gap-4">
+                            <span className="text-sm text-slate-700 flex-1 min-w-0 truncate">{kr.name}</span>
+                            <div className="flex items-center gap-2 flex-shrink-0">
+                              <input
+                                type="range"
+                                min={0}
+                                max={50}
+                                step={5}
+                                value={kr.weight}
+                                onChange={(e) => {
+                                  const newWeight = parseInt(e.target.value);
+                                  setKrs(prev => prev.map(k => 
+                                    k.id === kr.id ? { ...k, weight: newWeight } : k
+                                  ));
+                                }}
+                                className="w-24 accent-blue-600"
+                              />
+                              <input
+                                type="number"
+                                min={0}
+                                max={50}
+                                value={kr.weight}
+                                onChange={(e) => {
+                                  const newWeight = Math.max(0, Math.min(50, parseInt(e.target.value) || 0));
+                                  setKrs(prev => prev.map(k => 
+                                    k.id === kr.id ? { ...k, weight: newWeight } : k
+                                  ));
+                                }}
+                                className="w-14 text-center border border-slate-300 rounded py-1 text-sm font-medium"
+                              />
+                              <span className="text-xs text-slate-500">%</span>
+                            </div>
+                          </div>
+                        ))}
+                        {objKRs.length === 0 && (
+                          <p className="text-sm text-slate-400 italic">이 목표에 KR이 없습니다</p>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* 가중치 시각화 바 */}
+              <div className="mt-4">
+                <div className="h-4 bg-slate-100 rounded-full overflow-hidden flex">
+                  {selectedObjs.map((obj, i) => {
+                    const objKRs = activeKRs.filter(kr => kr.objectiveId === obj.id);
+                    const objWeight = objKRs.reduce((s, k) => s + k.weight, 0);
+                    const colors = ['bg-blue-500', 'bg-emerald-500', 'bg-amber-500', 'bg-violet-500', 'bg-rose-500'];
+                    return objWeight > 0 ? (
+                      <div
+                        key={obj.id}
+                        className={`${colors[i % colors.length]} transition-all`}
+                        style={{ width: `${objWeight}%` }}
+                        title={`${obj.name}: ${objWeight}%`}
+                      />
+                    ) : null;
+                  })}
+                </div>
+                <div className="flex gap-3 mt-2 flex-wrap">
+                  {selectedObjs.map((obj, i) => {
+                    const objKRs = activeKRs.filter(kr => kr.objectiveId === obj.id);
+                    const objWeight = objKRs.reduce((s, k) => s + k.weight, 0);
+                    const dotColors = ['bg-blue-500', 'bg-emerald-500', 'bg-amber-500', 'bg-violet-500', 'bg-rose-500'];
+                    return (
+                      <span key={obj.id} className="text-xs text-slate-600 flex items-center gap-1">
+                        <span className={`w-2 h-2 rounded-full ${dotColors[i % dotColors.length]}`} />
+                        {obj.name.length > 15 ? obj.name.substring(0, 15) + '...' : obj.name} ({objWeight}%)
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            {/* 섹션 2: Cascading (Alignment) */}
+            <div className="bg-white border border-slate-200 rounded-xl p-6">
+              <h3 className="font-semibold text-slate-900 mb-4 flex items-center gap-2">
+                🔗 Cascading 확인 (Alignment)
+              </h3>
+              <div className="space-y-3">
+                {selectedObjs.map(obj => {
+                  const parentOrg = organizations.find(o => {
+                    const currentOrg = organizations.find(c => c.id === orgId);
+                    return currentOrg?.parentId && o.id === currentOrg.parentId;
+                  });
+                  
+                  return (
+                    <div key={obj.id} className="flex items-center gap-3 bg-slate-50 rounded-lg p-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${getBIIColor(obj.biiType).bg} ${getBIIColor(obj.biiType).text}`}>
+                            {obj.biiType}
+                          </span>
+                          <span className="text-sm font-medium text-slate-900 truncate">{obj.name}</span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <span className="text-xs text-slate-400">←</span>
+                        <select
+                          className="border border-slate-300 rounded px-2 py-1 text-xs min-w-[140px]"
+                          defaultValue=""
+                        >
+                          <option value="">상위 목표 선택 (선택사항)</option>
+                          {parentOrg && (
+                            <option value="parent-cascade">📌 {parentOrg.name} 목표 계승</option>
+                          )}
+                          <option value="independent">독립 목표</option>
+                        </select>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <p className="text-xs text-slate-400 mt-3">
+                💡 상위 조직 목표가 설정된 후 연결하면 정렬도가 자동 계산됩니다
+              </p>
+            </div>
+
+            {/* 섹션 3: 분기별 목표 일괄 설정 */}
+            <div className="bg-white border border-slate-200 rounded-xl p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-semibold text-slate-900 flex items-center gap-2">
+                  📅 분기별 목표 배분
+                </h3>
+                <button
+                  onClick={() => {
+                    // 연간 목표의 25%씩 균등 배분
+                    setKrs(prev => prev.map(kr => ({
+                      ...kr,
+                      quarterlyTargets: {
+                        Q1: Math.round(kr.targetValue * 0.25),
+                        Q2: Math.round(kr.targetValue * 0.50),
+                        Q3: Math.round(kr.targetValue * 0.75),
+                        Q4: kr.targetValue
+                      }
+                    })));
+                  }}
+                  className="px-3 py-1.5 border border-blue-300 text-blue-700 bg-blue-50 rounded-lg text-xs font-medium hover:bg-blue-100"
+                >
+                  📊 누적형 균등배분
                 </button>
               </div>
-            </div>
-
-            <div className="bg-slate-50 border border-slate-200 rounded-lg p-6">
-              <h3 className="font-semibold text-slate-900 mb-4">공통 KPI (감점형)</h3>
-              <div className="space-y-2">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input type="checkbox" defaultChecked className="w-4 h-4 rounded border-slate-300 text-blue-600" />
-                  <span className="text-sm text-slate-700">인재유지율 (가중치 5%)</span>
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input type="checkbox" defaultChecked className="w-4 h-4 rounded border-slate-300 text-blue-600" />
-                  <span className="text-sm text-slate-700">교육이수율 (가중치 5%)</span>
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input type="checkbox" className="w-4 h-4 rounded border-slate-300 text-blue-600" />
-                  <span className="text-sm text-slate-700">협업만족도</span>
-                </label>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-200">
+                      <th className="text-left py-2 pr-4 text-xs font-medium text-slate-500">KR명</th>
+                      <th className="text-center py-2 px-2 text-xs font-medium text-slate-500 w-20">연간</th>
+                      <th className="text-center py-2 px-2 text-xs font-medium text-slate-500 w-20">Q1</th>
+                      <th className="text-center py-2 px-2 text-xs font-medium text-slate-500 w-20">Q2</th>
+                      <th className="text-center py-2 px-2 text-xs font-medium text-slate-500 w-20">Q3</th>
+                      <th className="text-center py-2 px-2 text-xs font-medium text-slate-500 w-20">Q4</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {activeKRs.map(kr => (
+                      <tr key={kr.id}>
+                        <td className="py-2 pr-4 text-slate-700 truncate max-w-[200px]">
+                          {kr.name}
+                          <span className="text-xs text-slate-400 ml-1">({kr.unit})</span>
+                        </td>
+                        <td className="py-2 px-2 text-center font-medium text-slate-900">{kr.targetValue}</td>
+                        {(['Q1', 'Q2', 'Q3', 'Q4'] as const).map(q => (
+                          <td key={q} className="py-2 px-1">
+                            <input
+                              type="number"
+                              value={kr.quarterlyTargets[q]}
+                              onChange={(e) => {
+                                const val = parseInt(e.target.value) || 0;
+                                setKrs(prev => prev.map(k => 
+                                  k.id === kr.id 
+                                    ? { ...k, quarterlyTargets: { ...k.quarterlyTargets, [q]: val } }
+                                    : k
+                                ));
+                              }}
+                              className="w-full text-center border border-slate-200 rounded py-1 text-xs"
+                            />
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </div>
+
+            {/* 경고/안내 */}
+            {!weightValid && (
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-center gap-3">
+                <span className="text-red-500 text-lg">⚠️</span>
+                <div>
+                  <p className="text-sm font-medium text-red-700">가중치 합계가 100%가 아닙니다 (현재: {allWeight}%)</p>
+                  <p className="text-xs text-red-600 mt-0.5">다음 단계로 진행하기 전에 가중치를 조정해주세요</p>
+                </div>
+              </div>
+            )}
           </div>
-        )}
+          );
+        })()}
 
         {/* Step 4: 최종 확인 */}
         {currentStep === 4 && (
@@ -1724,7 +1941,18 @@ export default function Wizard() {
             이전
           </button>
           <button
-            onClick={() => setCurrentStep(Math.min(4, currentStep + 1))}
+            onClick={() => {
+              // Step 3 → 4 진행 시 가중치 100% 검증
+              if (currentStep === 3) {
+                const activeKRs = krs.filter(kr => kr.selected !== false);
+                const totalW = activeKRs.reduce((s, k) => s + k.weight, 0);
+                if (totalW !== 100) {
+                  alert(`가중치 합계가 ${totalW}%입니다. 100%로 맞춰주세요.`);
+                  return;
+                }
+              }
+              setCurrentStep(Math.min(4, currentStep + 1));
+            }}
             disabled={currentStep === 4}
             className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
           >
@@ -1735,4 +1963,4 @@ export default function Wizard() {
       </div>
     </div>
   );
-} 
+}
