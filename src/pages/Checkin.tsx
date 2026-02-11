@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { useStore } from '../store/useStore';
 import { getBIIColor } from '../utils/helpers';
 import KRCard from '../components/KRCard';
+import OKRCommentPanel from '../components/OKRCommentPanel';
 import { Loader2, Calendar } from 'lucide-react';
 
 export default function Checkin() {
@@ -140,7 +141,13 @@ export default function Checkin() {
                 {objectiveKRs.length > 0 ? (
                   <div className="space-y-4">
                     {objectiveKRs.map((kr) => (
-                      <KRCard key={kr.id} kr={kr} />
+                      <div key={kr.id}>
+                        <KRCard kr={kr} />
+                        {/* KR별 토론 (compact 모드) */}
+                        <div className="mt-2 ml-4">
+                          <OKRCommentPanel krId={kr.id} compact={true} />
+                        </div>
+                      </div>
                     ))}
                   </div>
                 ) : (
