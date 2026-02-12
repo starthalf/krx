@@ -8,7 +8,8 @@ import {
   Building2, 
   BookOpen,
   Inbox,
-  Bell
+  Bell,
+  GitBranch
 } from 'lucide-react';
 
 const navigation = [
@@ -23,6 +24,7 @@ const navigation = [
       { name: '팀별 OKR', href: '/okr/team' }
     ]
   },
+  { name: 'OKR Map', href: '/okr-map', icon: GitBranch },
   { name: '체크인', href: '/checkin', icon: CheckSquare },
   { name: '승인 대기함', href: '/approval-inbox', icon: Inbox },
   { name: '알림', href: '/notifications', icon: Bell },
