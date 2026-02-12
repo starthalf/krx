@@ -10,16 +10,13 @@ import { exportToExcel, readExcel } from '../utils/excel';
 import { supabase } from '../lib/supabase';
 import type { Organization } from '../types';
 
-// ─── 레벨 계층 ───────────────────────────────────────
-const LEVEL_HIERARCHY = ['전사', '부문', '본부', '실', '팀'] as const;
-const levelPriority: Record<string, number> = {
-  '전사': 0, '부문': 1, '본부': 2, '실': 3, '팀': 4
-};
+// ─── 레벨 계층 (동적 — org_level_templates에서 로드) ──────
+const DEFAULT_LEVELS = ['전사', '본부', '팀'] as const;
 
-function getChildLevel(parentLevel: string): string {
-  const idx = LEVEL_HIERARCHY.indexOf(parentLevel as any);
-  if (idx < 0 || idx >= LEVEL_HIERARCHY.length - 1) return '팀';
-  return LEVEL_HIERARCHY[idx + 1];
+function getChildLevel(parentLevel: string, levels: string[]): string {
+  const idx = levels.indexOf(parentLevel);
+  if (idx < 0 || idx >= levels.length - 1) return levels[levels.length - 1] || '팀';
+  return levels[idx + 1];
 }
 
 export default function OrganizationPage() {
@@ -38,6 +35,10 @@ export default function OrganizationPage() {
   const [userLevel, setUserLevel] = useState(0);
   const [checkingPermission, setCheckingPermission] = useState(true);
 
+  // 동적 레벨 목록
+  const [orgLevels, setOrgLevels] = useState<string[]>([...DEFAULT_LEVELS]);
+  const [levelPriority, setLevelPriority] = useState<Record<string, number>>({});
+
   // 하위 조직 추가 모달
   const [showAddModal, setShowAddModal] = useState(false);
   const [addParentOrg, setAddParentOrg] = useState<Organization | null>(null);
@@ -50,6 +51,39 @@ export default function OrganizationPage() {
   const [aiLoading, setAiLoading] = useState(false);
   const [aiResult, setAiResult] = useState<any[] | null>(null);
   const [aiApplying, setAiApplying] = useState(false);
+
+  // ─── 조직 계층 템플릿 로드 ───────────────────────────
+  useEffect(() => {
+    loadOrgLevelTemplate();
+  }, [company?.id]);
+
+  const loadOrgLevelTemplate = async () => {
+    const companyId = company?.id || organizations[0]?.companyId;
+    if (!companyId) return;
+
+    try {
+      const { data, error } = await supabase
+        .from('org_level_templates')
+        .select('level_name, level_order, level_code')
+        .eq('company_id', companyId)
+        .order('level_order');
+
+      if (error) throw error;
+      if (data && data.length > 0) {
+        // '개인' 레벨은 조직 추가에서 제외 (조직이 아닌 개인이므로)
+        const levels = data
+          .filter(l => l.level_code !== 'INDIVIDUAL')
+          .map(l => l.level_name);
+        const priority: Record<string, number> = {};
+        data.forEach(l => { priority[l.level_name] = l.level_order; });
+
+        setOrgLevels(levels.length > 0 ? levels : [...DEFAULT_LEVELS]);
+        setLevelPriority(priority);
+      }
+    } catch (err) {
+      console.warn('조직 계층 템플릿 로드 실패:', err);
+    }
+  };
 
   // ─── 권한 체크 ───────────────────────────────────────
   useEffect(() => {
@@ -190,7 +224,7 @@ export default function OrganizationPage() {
   // ─── 하위 조직 추가 ──────────────────────────────────
   const openAddModal = (parentOrg: Organization) => {
     setAddParentOrg(parentOrg);
-    const childLevel = getChildLevel(parentOrg.level);
+    const childLevel = getChildLevel(parentOrg.level, orgLevels);
     setNewOrg({ name: '', level: childLevel, orgType: parentOrg.orgType || 'Middle', mission: '' });
     setShowAddModal(true);
   };
@@ -577,7 +611,7 @@ ${existingOrgs || '(없음 - 전사 조직만 있음)'}
                   onChange={(e) => canEdit && updateOrganization(selectedOrg.id, { level: e.target.value as any })}
                   disabled={!canEdit}
                   className="w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-slate-50 disabled:cursor-not-allowed">
-                  {LEVEL_HIERARCHY.map(l => <option key={l} value={l}>{l}</option>)}
+                  {orgLevels.map(l => <option key={l} value={l}>{l}</option>)}
                 </select>
               </div>
 
@@ -696,7 +730,7 @@ ${existingOrgs || '(없음 - 전사 조직만 있음)'}
                   <label className="block text-sm font-medium text-slate-700 mb-1">레벨</label>
                   <select value={newOrg.level} onChange={(e) => setNewOrg({ ...newOrg, level: e.target.value })}
                     className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none">
-                    {LEVEL_HIERARCHY.map(l => <option key={l} value={l}>{l}</option>)}
+                    {orgLevels.map(l => <option key={l} value={l}>{l}</option>)}
                   </select>
                 </div>
                 <div>
