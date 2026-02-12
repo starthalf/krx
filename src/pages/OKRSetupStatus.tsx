@@ -401,7 +401,7 @@ export default function OKRSetupStatus() {
             </div>
           </div>
           {roleLevel >= 90 && (
-            <button onClick={() => navigate('/admin')}
+            <button onClick={() => navigate('/admin?tab=planning-cycles')}
               className="px-3 py-2 text-sm text-blue-600 hover:bg-blue-50 rounded-lg transition-colors flex items-center gap-1">
               설정으로 이동 <ChevronRight className="w-4 h-4" />
             </button>
