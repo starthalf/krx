@@ -11,7 +11,6 @@ import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer 
 } from 'recharts';
 import { getMyRoleLevel, checkCanManageOrg } from '../lib/permissions';
-import CEONudgePanel from '../components/CEONudgePanel';
 
 export default function Dashboard() {
   const { 
@@ -38,11 +37,9 @@ export default function Dashboard() {
       try {
         setPermissionsLoading(true);
         
-        // 내 역할 레벨 가져오기
         const level = await getMyRoleLevel();
         setRoleLevel(level);
 
-        // 관리 가능한 조직 목록 확인
         const managable: string[] = [];
         for (const org of organizations) {
           const canManage = await checkCanManageOrg(org.id);
@@ -175,7 +172,6 @@ export default function Dashboard() {
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-bold text-slate-900">대시보드</h1>
             
-            {/* 역할 배지 */}
             {roleLevel >= 90 && (
               <span className="px-3 py-1 bg-purple-100 text-purple-700 text-xs font-semibold rounded-full flex items-center gap-1">
                 <Shield className="w-3 h-3" />
@@ -370,11 +366,6 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* CEO/본부장 OKR 수립 독촉 패널 */}
-      {roleLevel >= 70 && (
-        <CEONudgePanel />
-      )}
-
       {/* 피드 및 AI 인사이트 */}
       <div className="grid grid-cols-3 gap-6">
         <div className="col-span-2 bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
@@ -426,7 +417,7 @@ export default function Dashboard() {
                   <p className="text-sm text-slate-700">
                     <span className="font-bold">마케팅본부</span>의 매출채권회전일 목표가 조기 달성! 👏
                   </p>
-                </div>
+                </div> 
               </div>
             </div>
             <button className="w-full mt-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg">
@@ -444,7 +435,7 @@ export default function Dashboard() {
             </div>
           </div>
         )}
-      </div>
+      </div> 
     </div>
   );
-} 
+}
