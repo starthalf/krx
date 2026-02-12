@@ -1,9 +1,11 @@
 // src/pages/ApprovalInbox.tsx
+// 승인 대기함 - 사이클 연동 버전
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Inbox, Check, X, MessageSquare, Clock, FileCheck, ChevronDown, ChevronRight,
-  Send, GitBranch, Eye, ArrowLeft, AlertTriangle, CheckCheck, RefreshCw, User, Filter
+  Send, GitBranch, Eye, ArrowLeft, AlertTriangle, CheckCheck, RefreshCw, User, Filter,
+  CalendarClock, Timer
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -70,10 +72,18 @@ interface ReviewRequest {
   requester_org_name?: string;
 }
 
+interface ActiveCycle {
+  title: string;
+  status: string;
+  deadlineAt: string;
+  daysRemaining: number;
+  isOverdue: boolean;
+}
+
 export default function ApprovalInbox() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { organizations } = useStore();
+  const { organizations, company } = useStore();
 
   const [activeTab, setActiveTab] = useState<TabType>('pending');
   const [okrSets, setOkrSets] = useState<OKRSet[]>([]);
@@ -83,12 +93,36 @@ export default function ApprovalInbox() {
   const [okrDetail, setOkrDetail] = useState<OKRDetail | null>(null);
   const [approvalHistory, setApprovalHistory] = useState<ApprovalHistoryItem[]>([]);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [activeCycle, setActiveCycle] = useState<ActiveCycle | null>(null);
 
   // 모달
   const [showActionModal, setShowActionModal] = useState(false);
   const [actionType, setActionType] = useState<'approve' | 'reject' | 'revision_request'>('approve');
   const [actionComment, setActionComment] = useState('');
   const [actionLoading, setActionLoading] = useState(false);
+
+  // 활성 사이클 조회
+  const fetchActiveCycle = async () => {
+    if (!company?.id) return;
+    try {
+      const { data, error } = await supabase.rpc('get_active_planning_cycle', {
+        p_company_id: company.id,
+      });
+      if (error) throw error;
+      if (data && data.length > 0) {
+        const row = data[0];
+        setActiveCycle({
+          title: row.title,
+          status: row.status,
+          deadlineAt: row.deadline_at,
+          daysRemaining: row.days_remaining,
+          isOverdue: row.is_overdue,
+        });
+      }
+    } catch (err) {
+      console.warn('사이클 조회 실패:', err);
+    }
+  };
 
   // 승인 대기 OKR 조회
   const fetchOKRSets = async () => {
@@ -105,14 +139,12 @@ export default function ApprovalInbox() {
       } else if (activeTab === 'completed') {
         query = query.in('status', ['approved', 'rejected', 'revision_requested', 'finalized']);
       } else {
-        // my_submissions
         query = query.eq('submitted_by', user.id);
       }
 
       const { data, error } = await query;
       if (error) throw error;
 
-      // 조직명 매핑
       const enriched = (data || []).map(set => {
         const org = organizations.find(o => o.id === set.org_id);
         return {
@@ -147,6 +179,10 @@ export default function ApprovalInbox() {
   };
 
   useEffect(() => {
+    if (company?.id) fetchActiveCycle();
+  }, [company?.id]);
+
+  useEffect(() => {
     fetchOKRSets();
     fetchReviewRequests();
   }, [user?.id, activeTab, organizations]);
@@ -156,7 +192,6 @@ export default function ApprovalInbox() {
     setSelectedSet(set);
     setDetailLoading(true);
     try {
-      // Objectives + KRs
       const { data: objs } = await supabase
         .from('objectives')
         .select('id, name, bii_type, sort_order')
@@ -171,19 +206,16 @@ export default function ApprovalInbox() {
           .select('id, name, weight, target_value, unit, bii_type, kpi_category, perspective, grade_criteria')
           .eq('objective_id', obj.id)
           .order('weight', { ascending: false });
-
         objectives.push({ ...obj, key_results: krs || [] });
       }
       setOkrDetail({ objectives });
 
-      // 승인 이력
       const { data: history } = await supabase
         .from('approval_history')
         .select('id, action, actor_name, comment, created_at')
         .eq('okr_set_id', set.id)
         .order('created_at', { ascending: false });
       setApprovalHistory(history || []);
-
     } catch (err) {
       console.warn('상세 조회 실패:', err);
     } finally {
@@ -200,7 +232,7 @@ export default function ApprovalInbox() {
         : actionType === 'reject' ? 'rejected'
         : 'revision_requested';
 
-      // OKR Set 상태 업데이트
+      // OKR Set 상태 업데이트 → DB 트리거가 자동으로 조직장에게 알림 발송
       const { error } = await supabase
         .from('okr_sets')
         .update({
@@ -232,11 +264,18 @@ export default function ApprovalInbox() {
       setActionComment('');
       setSelectedSet(null);
       fetchOKRSets();
-      alert(
-        actionType === 'approve' ? '✅ OKR이 승인되었습니다.'
-        : actionType === 'reject' ? '❌ OKR이 반려되었습니다.'
-        : '⚠️ 수정 요청이 전달되었습니다.'
-      );
+
+      // 승인 시 수립 현황으로 이동 제안
+      if (actionType === 'approve') {
+        if (confirm('✅ OKR이 승인되었습니다. 수립 현황으로 이동하시겠습니까?')) {
+          navigate('/okr-setup');
+        }
+      } else {
+        alert(
+          actionType === 'reject' ? '❌ OKR이 반려되었습니다. 조직장에게 알림이 전송되었습니다.'
+          : '⚠️ 수정 요청이 전달되었습니다. 조직장에게 알림이 전송되었습니다.'
+        );
+      }
     } catch (err: any) {
       alert(`처리 실패: ${err.message}`);
     } finally {
@@ -283,10 +322,29 @@ export default function ApprovalInbox() {
 
   const pendingCount = okrSets.filter(s => ['submitted', 'under_review'].includes(s.status)).length;
 
+  // D-day 색상
+  const dDayColor = !activeCycle ? ''
+    : activeCycle.isOverdue ? 'text-red-600'
+    : activeCycle.daysRemaining <= 3 ? 'text-amber-600'
+    : 'text-blue-600';
+
+  const dDayText = !activeCycle ? ''
+    : activeCycle.isOverdue ? `마감 ${Math.abs(activeCycle.daysRemaining)}일 초과`
+    : activeCycle.daysRemaining === 0 ? '오늘 마감'
+    : `D-${activeCycle.daysRemaining}`;
+
   return (
     <div className="p-6 max-w-6xl mx-auto">
+      {/* 수립 현황으로 돌아가기 */}
+      <button
+        onClick={() => navigate('/okr-setup')}
+        className="text-sm text-slate-400 hover:text-slate-600 flex items-center gap-1 mb-4 transition-colors"
+      >
+        <ArrowLeft className="w-4 h-4" /> 수립 현황으로
+      </button>
+
       {/* 헤더 */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
           <Inbox className="w-7 h-7 text-blue-600" />
           <div>
@@ -294,10 +352,34 @@ export default function ApprovalInbox() {
             <p className="text-sm text-slate-500 mt-0.5">OKR 검토 및 승인/반려/수정 요청을 관리합니다</p>
           </div>
         </div>
-        <button onClick={() => { fetchOKRSets(); fetchReviewRequests(); }} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg">
+        <button onClick={() => { fetchOKRSets(); fetchReviewRequests(); fetchActiveCycle(); }} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg">
           <RefreshCw className="w-5 h-5" />
         </button>
       </div>
+
+      {/* 사이클 컨텍스트 미니 배너 */}
+      {activeCycle && activeCycle.status === 'in_progress' && (
+        <div className={`flex items-center gap-3 px-4 py-2.5 rounded-lg border mb-5 ${
+          activeCycle.isOverdue ? 'bg-red-50 border-red-200' :
+          activeCycle.daysRemaining <= 3 ? 'bg-amber-50 border-amber-200' :
+          'bg-blue-50 border-blue-200'
+        }`}>
+          <CalendarClock className={`w-4 h-4 ${dDayColor} shrink-0`} />
+          <span className="text-sm text-slate-700">{activeCycle.title}</span>
+          <span className={`text-sm font-bold ${dDayColor}`}>{dDayText}</span>
+          <span className="text-slate-300">|</span>
+          <span className="text-xs text-slate-500 flex items-center gap-1">
+            <Timer className="w-3 h-3" />
+            마감: {new Date(activeCycle.deadlineAt).toLocaleDateString('ko-KR', { month: 'long', day: 'numeric', weekday: 'short' })}
+          </span>
+          {pendingCount > 0 && (
+            <>
+              <span className="text-slate-300">|</span>
+              <span className="text-xs font-medium text-blue-600">{pendingCount}건 검토 대기</span>
+            </>
+          )}
+        </div>
+      )}
 
       {/* 탭 */}
       <div className="flex gap-1 mb-6 bg-slate-100 rounded-lg p-1 w-fit">
@@ -374,6 +456,11 @@ export default function ApprovalInbox() {
                  activeTab === 'completed' ? '처리 완료된 건이 없습니다' :
                  '제출한 OKR이 없습니다'}
               </p>
+              {activeTab === 'pending' && (
+                <p className="text-xs text-slate-400 mt-2">
+                  조직들이 OKR을 제출하면 여기에 표시됩니다
+                </p>
+              )}
             </div>
           ) : (
             <div className="space-y-3">
@@ -435,7 +522,15 @@ export default function ApprovalInbox() {
                     <X className="w-5 h-5" />
                   </button>
                 </div>
-                <p className="text-xs text-slate-500">{selectedSet.period} · v{selectedSet.version}</p>
+                <div className="flex items-center gap-3">
+                  <p className="text-xs text-slate-500">{selectedSet.period} · v{selectedSet.version}</p>
+                  <button
+                    onClick={() => navigate(`/wizard/${selectedSet.org_id}`)}
+                    className="text-xs text-blue-600 hover:text-blue-700 flex items-center gap-0.5"
+                  >
+                    <Eye className="w-3 h-3" /> Wizard에서 보기
+                  </button>
+                </div>
               </div>
 
               {/* 상세 내용 */}
@@ -512,7 +607,7 @@ export default function ApprovalInbox() {
                             const IconComp = info.icon;
                             return (
                               <div key={h.id} className="flex gap-3">
-                                <div className={`w-7 h-7 rounded-full bg-slate-100 flex items-center justify-center flex-shrink-0`}>
+                                <div className="w-7 h-7 rounded-full bg-slate-100 flex items-center justify-center flex-shrink-0">
                                   <IconComp className={`w-3.5 h-3.5 ${info.color}`} />
                                 </div>
                                 <div className="flex-1">
