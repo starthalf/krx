@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 import { Outlet } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import TopBar from './TopBar';
+import CycleBanner from './CycleBanner';
 import { useAuth } from '../contexts/AuthContext';
 import { useStore } from '../store/useStore';
 
@@ -34,6 +35,8 @@ export default function Layout() {
     <div className="flex h-screen bg-slate-50">
       <Sidebar />
       <div className="flex-1 flex flex-col overflow-hidden">
+        {/* 수립 기간 띠 배너 - 활성 사이클이 있을 때만 표시 */}
+        <CycleBanner />
         <TopBar />
         <main className="flex-1 overflow-y-auto">
           {error && (
