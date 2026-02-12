@@ -7,6 +7,7 @@ import Layout from './components/Layout';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import OKRStatus from './pages/OKRStatus';
+import OKRSetupStatus from './pages/OKRSetupStatus';
 import Checkin from './pages/Checkin';
 import Organization from './pages/Organization';
 import KPIPool from './pages/KPIPool';
@@ -69,6 +70,9 @@ function App() {
             
             {/* [NEW] OKR Cascading Map */}
             <Route path="okr-map" element={<OKRMap />} />
+            
+            {/* [NEW] OKR 수립 현황 - CEO/본부장용 독촉 페이지 */}
+            <Route path="okr-setup" element={<OKRSetupStatus />} />
             
             {/* 체크인 (실적 입력 및 KR 상세 관리) */}
             <Route path="checkin" element={<Checkin />} />
