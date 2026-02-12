@@ -1,641 +1,615 @@
 // src/pages/OKRMap.tsx
-// 전사 OKR Cascading Map - 조직 구조별 목표 정렬 시각화
-import { useState, useEffect, useCallback } from 'react';
+// 전사 OKR Cascading Map - Top-Down 조직도 다이어그램
+// SVG bezier 연결선 + 노드 카드 + 클릭 시 상세 팝업 + 줌/패닝
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
-  GitBranch, ChevronDown, ChevronRight, Target, Loader2,
-  Maximize2, Minimize2, Filter, Eye, EyeOff, ArrowLeft,
-  TrendingUp, AlertCircle, CheckCircle2, Clock, Zap,
-  Building2, Users, Briefcase, BarChart3
+  GitBranch, Target, Loader2, Maximize2, Minimize2,
+  X, TrendingUp, Building2, Users, Briefcase, BarChart3,
+  ZoomIn, ZoomOut, RotateCcw, AlertCircle
 } from 'lucide-react';
-import { supabase } from '../lib/supabase';
 import { useStore } from '../store/useStore';
 import { useAuth } from '../contexts/AuthContext';
 import { getBIIColor } from '../utils/helpers';
-import type { BIIType } from '../types';
 
 // ==================== Types ====================
 
-interface OrgNode {
+interface TreeNode {
   id: string;
   name: string;
   level: string;
   orgType: string;
   parentOrgId: string | null;
-  objectives: ObjNode[];
-  children: OrgNode[];
-  expanded: boolean;
+  children: TreeNode[];
+  objectives: ObjData[];
   stats: {
-    objectiveCount: number;
+    objCount: number;
     krCount: number;
     avgProgress: number;
     topGrade: string;
+    status: 'not_started' | 'in_progress' | 'on_track' | 'at_risk';
   };
 }
 
-interface ObjNode {
+interface ObjData {
   id: string;
   name: string;
-  biiType: BIIType;
-  status: string;
-  period: string;
-  krs: KRNode[];
+  biiType: string;
+  krs: KRData[];
 }
 
-interface KRNode {
+interface KRData {
   id: string;
   name: string;
-  biiType: BIIType;
+  biiType: string;
   weight: number;
   targetValue: number;
   currentValue: number;
   unit: string;
   progressPct: number;
   grade: string;
-  perspective: string;
 }
 
-// ==================== Helpers ====================
-
-function calcGrade(progressPct: number, criteria: any): string {
-  if (!criteria) return '-';
-  if (progressPct >= (criteria.S || 120)) return 'S';
-  if (progressPct >= (criteria.A || 110)) return 'A';
-  if (progressPct >= (criteria.B || 100)) return 'B';
-  if (progressPct >= (criteria.C || 90)) return 'C';
-  return 'D';
+interface NodeLayout {
+  node: TreeNode;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  children: NodeLayout[];
 }
 
-function calcProgress(current: number, target: number): number {
-  if (!target || target === 0) return 0;
-  return Math.round((current / target) * 100);
+// ==================== Constants ====================
+
+const NODE_W = 220;
+const NODE_H = 88;
+const GAP_Y = 100;
+const GAP_X = 28;
+
+const LEVEL_STYLES: Record<string, {
+  gradient: string; iconBg: string; icon: typeof Building2;
+  ring: string;
+}> = {
+  '전사': { gradient: 'from-slate-800 to-slate-900', iconBg: 'bg-amber-500', icon: Building2, ring: 'ring-slate-400/30' },
+  '본부': { gradient: 'from-blue-600 to-indigo-700', iconBg: 'bg-blue-400', icon: Briefcase, ring: 'ring-blue-300/30' },
+  '팀':   { gradient: 'from-emerald-600 to-teal-700', iconBg: 'bg-emerald-400', icon: Users, ring: 'ring-emerald-300/30' },
+};
+
+const GRADE_STYLE: Record<string, { bg: string; text: string }> = {
+  S: { bg: 'bg-violet-600', text: 'text-white' },
+  A: { bg: 'bg-blue-600', text: 'text-white' },
+  B: { bg: 'bg-green-600', text: 'text-white' },
+  C: { bg: 'bg-amber-500', text: 'text-white' },
+  D: { bg: 'bg-red-500', text: 'text-white' },
+  '-': { bg: 'bg-slate-200', text: 'text-slate-500' },
+};
+
+const STATUS_CLR: Record<string, string> = {
+  not_started: '#94a3b8', in_progress: '#3b82f6', on_track: '#22c55e', at_risk: '#f59e0b',
+};
+
+// ==================== Layout Engine ====================
+
+function subtreeW(node: TreeNode): number {
+  if (node.children.length === 0) return NODE_W;
+  return Math.max(NODE_W,
+    node.children.reduce((s, c) => s + subtreeW(c), 0) + GAP_X * (node.children.length - 1)
+  );
 }
 
-const gradeColor: Record<string, string> = {
-  S: 'bg-violet-600 text-white',
-  A: 'bg-blue-600 text-white',
-  B: 'bg-green-600 text-white',
-  C: 'bg-amber-500 text-white',
-  D: 'bg-red-500 text-white',
-  '-': 'bg-slate-200 text-slate-500',
-};
+function doLayout(node: TreeNode, x: number, y: number): NodeLayout {
+  const sw = subtreeW(node);
+  const nx = x + (sw - NODE_W) / 2;
+  const kids: NodeLayout[] = [];
+  if (node.children.length > 0) {
+    let cx = x;
+    const cy = y + NODE_H + GAP_Y;
+    for (const c of node.children) {
+      const cw = subtreeW(c);
+      kids.push(doLayout(c, cx, cy));
+      cx += cw + GAP_X;
+    }
+  }
+  return { node, x: nx, y, width: NODE_W, height: NODE_H, children: kids };
+}
 
-const levelIcon: Record<string, typeof Building2> = {
-  '전사': Building2,
-  '본부': Briefcase,
-  '팀': Users,
-};
+// ==================== SVG Lines ====================
 
-const levelColor: Record<string, { bg: string; border: string; accent: string }> = {
-  '전사': { bg: 'bg-slate-900', border: 'border-slate-700', accent: 'text-white' },
-  '본부': { bg: 'bg-blue-600', border: 'border-blue-400', accent: 'text-white' },
-  '팀': { bg: 'bg-emerald-600', border: 'border-emerald-400', accent: 'text-white' },
-};
+function drawConnectors(lay: NodeLayout): JSX.Element[] {
+  const out: JSX.Element[] = [];
+  const px = lay.x + lay.width / 2;
+  const py = lay.y + lay.height;
+
+  for (const kid of lay.children) {
+    const cx = kid.x + kid.width / 2;
+    const cy = kid.y;
+    const my = py + (cy - py) / 2;
+    const d = `M ${px} ${py} C ${px} ${my}, ${cx} ${my}, ${cx} ${cy}`;
+    const clr = STATUS_CLR[kid.node.stats.status] || '#cbd5e1';
+
+    out.push(
+      <path key={`e-${lay.node.id}-${kid.node.id}`} d={d}
+        stroke={clr} strokeWidth={2.5} fill="none" strokeLinecap="round" opacity={0.55} />,
+      <circle key={`d-${kid.node.id}`} cx={cx} cy={cy - 1} r={3} fill={clr} opacity={0.7} />
+    );
+    out.push(...drawConnectors(kid));
+  }
+  return out;
+}
+
+// ==================== Grade Calc ====================
+
+function calcGrade(pct: number, crit: any): string {
+  const S = crit?.S ?? 120, A = crit?.A ?? 110, B = crit?.B ?? 100, C = crit?.C ?? 90;
+  if (pct >= S) return 'S'; if (pct >= A) return 'A';
+  if (pct >= B) return 'B'; if (pct >= C) return 'C'; return 'D';
+}
 
 // ==================== Component ====================
 
 export default function OKRMap() {
   const { profile } = useAuth();
-  const { organizations } = useStore();
+  const { organizations, objectives, krs, fetchObjectives, fetchKRs } = useStore();
 
-  const [tree, setTree] = useState<OrgNode[]>([]);
+  const [tree, setTree] = useState<TreeNode[]>([]);
   const [loading, setLoading] = useState(true);
-  const [expandedOrgs, setExpandedOrgs] = useState<Set<string>>(new Set());
-  const [selectedOrg, setSelectedOrg] = useState<string | null>(null);
-  const [showKRs, setShowKRs] = useState(true);
-  const [filterLevel, setFilterLevel] = useState<string>('all');
-  const [filterBII, setFilterBII] = useState<string>('all');
+  const [selectedNode, setSelectedNode] = useState<TreeNode | null>(null);
+  const [popupPos, setPopupPos] = useState<{ x: number; y: number } | null>(null);
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [isPanning, setIsPanning] = useState(false);
+  const [panStart, setPanStart] = useState({ x: 0, y: 0 });
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [collapsedOrgs, setCollapsedOrgs] = useState<Set<string>>(new Set());
 
-  // ==================== Data Fetch ====================
+  const canvasRef = useRef<HTMLDivElement>(null);
 
-  const fetchOKRTree = useCallback(async () => {
-    if (!profile?.company_id || organizations.length === 0) return;
-    setLoading(true);
-
-    try {
-      // 1) 모든 Objectives
-      const { data: allObjs, error: objErr } = await supabase
-        .from('objectives')
-        .select('*')
-        .in('org_id', organizations.map(o => o.id))
-        .order('sort_order');
-      if (objErr) throw objErr;
-
-      // 2) 모든 KRs
-      const { data: allKRs, error: krErr } = await supabase
-        .from('key_results')
-        .select('*')
-        .in('org_id', organizations.map(o => o.id));
-      if (krErr) throw krErr;
-
-      // 3) 트리 빌드
-      const orgMap = new Map<string, OrgNode>();
-
-      for (const org of organizations) {
-        const orgObjs = (allObjs || []).filter(o => o.org_id === org.id);
-        const orgKRs = (allKRs || []).filter(k => k.org_id === org.id);
-
-        const objectiveNodes: ObjNode[] = orgObjs.map(obj => {
-          const relatedKRs = orgKRs.filter(k => k.objective_id === obj.id);
-          return {
-            id: obj.id,
-            name: obj.name,
-            biiType: (obj.bii_type || 'Improve') as BIIType,
-            status: obj.status || 'active',
-            period: obj.period || '',
-            krs: relatedKRs.map(kr => {
-              const progress = calcProgress(kr.current_value || 0, kr.target_value || 0);
-              return {
-                id: kr.id,
-                name: kr.name,
-                biiType: (kr.bii_type || 'Improve') as BIIType,
-                weight: kr.weight || 0,
-                targetValue: kr.target_value || 0,
-                currentValue: kr.current_value || 0,
-                unit: kr.unit || '',
-                progressPct: progress,
-                grade: calcGrade(progress, kr.grade_criteria),
-                perspective: kr.perspective || '',
-              };
-            }),
-          };
-        });
-
-        // stats 계산
-        const allOrgKRs = objectiveNodes.flatMap(o => o.krs);
-        const avgProg = allOrgKRs.length > 0
-          ? Math.round(allOrgKRs.reduce((s, k) => s + k.progressPct, 0) / allOrgKRs.length)
-          : 0;
-        const grades = allOrgKRs.map(k => k.grade).filter(g => g !== '-');
-        const topGrade = grades.length > 0
-          ? ['S', 'A', 'B', 'C', 'D'].find(g => grades.includes(g)) || '-'
-          : '-';
-
-        orgMap.set(org.id, {
-          id: org.id,
-          name: org.name,
-          level: org.level,
-          orgType: org.orgType || '',
-          parentOrgId: org.parentOrgId || null,
-          objectives: objectiveNodes,
-          children: [],
-          expanded: org.level === '전사',
-          stats: {
-            objectiveCount: objectiveNodes.length,
-            krCount: allOrgKRs.length,
-            avgProgress: avgProg,
-            topGrade,
-          },
-        });
-      }
-
-      // 부모-자식 연결
-      for (const node of orgMap.values()) {
-        if (node.parentOrgId && orgMap.has(node.parentOrgId)) {
-          orgMap.get(node.parentOrgId)!.children.push(node);
-        }
-      }
-
-      // 루트 노드 (전사 또는 parentOrgId가 null)
-      const roots = Array.from(orgMap.values()).filter(
-        n => !n.parentOrgId || !orgMap.has(n.parentOrgId)
-      );
-
-      setTree(roots);
-
-      // 기본 확장: 전사 + 본부
-      const initialExpanded = new Set<string>();
-      for (const node of orgMap.values()) {
-        if (node.level === '전사' || node.level === '본부') {
-          initialExpanded.add(node.id);
-        }
-      }
-      setExpandedOrgs(initialExpanded);
-
-    } catch (err) {
-      console.error('OKR Map 데이터 로드 실패:', err);
-    } finally {
-      setLoading(false);
-    }
-  }, [profile?.company_id, organizations]);
-
+  // ── Data fetch ──
   useEffect(() => {
-    fetchOKRTree();
-  }, [fetchOKRTree]);
+    if (organizations.length === 0) { setLoading(false); return; }
+    for (const org of organizations) { fetchObjectives(org.id); fetchKRs(org.id); }
+  }, [organizations.length]);
 
-  // ==================== Handlers ====================
+  // ── Build tree whenever store data changes ──
+  useEffect(() => {
+    if (organizations.length === 0) return;
 
-  const toggleOrg = (orgId: string) => {
-    setExpandedOrgs(prev => {
-      const next = new Set(prev);
-      if (next.has(orgId)) next.delete(orgId);
-      else next.add(orgId);
-      return next;
+    const orgMap = new Map<string, TreeNode>();
+
+    for (const org of organizations) {
+      const orgObjs = objectives.filter(o => o.orgId === org.id);
+      const orgKRs = krs.filter(k => k.orgId === org.id);
+
+      const objNodes: ObjData[] = orgObjs.map(obj => {
+        const oKRs = orgKRs.filter(k => k.objectiveId === obj.id);
+        return {
+          id: obj.id, name: obj.name, biiType: obj.biiType || 'Improve',
+          krs: oKRs.map(kr => {
+            const p = kr.targetValue ? Math.round((kr.currentValue / kr.targetValue) * 100) : 0;
+            return {
+              id: kr.id, name: kr.name, biiType: kr.biiType || 'Improve',
+              weight: kr.weight || 0, targetValue: kr.targetValue || 0,
+              currentValue: kr.currentValue || 0, unit: kr.unit || '',
+              progressPct: p, grade: calcGrade(p, kr.gradeCriteria),
+            };
+          }),
+        };
+      });
+
+      const allKR = objNodes.flatMap(o => o.krs);
+      const avg = allKR.length > 0
+        ? Math.round(allKR.reduce((s, k) => s + k.progressPct, 0) / allKR.length) : 0;
+      const gs = allKR.map(k => k.grade).filter(g => g !== '-');
+      const tg = gs.length > 0 ? (['S','A','B','C','D'].find(g => gs.includes(g)) || '-') : '-';
+      let st: TreeNode['stats']['status'] = 'not_started';
+      if (objNodes.length > 0) {
+        st = avg >= 80 ? 'on_track' : avg >= 40 ? 'in_progress' : 'at_risk';
+      }
+
+      orgMap.set(org.id, {
+        id: org.id, name: org.name, level: org.level,
+        orgType: org.orgType || '', parentOrgId: org.parentOrgId || null,
+        children: [], objectives: objNodes,
+        stats: { objCount: objNodes.length, krCount: allKR.length, avgProgress: avg, topGrade: tg, status: st },
+      });
+    }
+
+    for (const nd of orgMap.values()) {
+      if (nd.parentOrgId && orgMap.has(nd.parentOrgId) && !collapsedOrgs.has(nd.parentOrgId)) {
+        orgMap.get(nd.parentOrgId)!.children.push(nd);
+      }
+    }
+
+    const roots = Array.from(orgMap.values()).filter(n => !n.parentOrgId || !orgMap.has(n.parentOrgId));
+    setTree(roots);
+    setLoading(false);
+  }, [organizations, objectives, krs, collapsedOrgs]);
+
+  // ── Layouts ──
+  const layouts = useMemo(() => {
+    if (tree.length === 0) return [];
+    const out: NodeLayout[] = [];
+    let sx = 60;
+    for (const r of tree) {
+      const w = subtreeW(r);
+      out.push(doLayout(r, sx, 50));
+      sx += w + GAP_X * 3;
+    }
+    return out;
+  }, [tree]);
+
+  const bounds = useMemo(() => {
+    let mx = 900, my = 500;
+    const walk = (ls: NodeLayout[]) => {
+      for (const l of ls) {
+        mx = Math.max(mx, l.x + l.width + 60);
+        my = Math.max(my, l.y + l.height + 60);
+        walk(l.children);
+      }
+    };
+    walk(layouts);
+    return { w: mx, h: my };
+  }, [layouts]);
+
+  // ── Pan & Zoom ──
+  const onWheel = (e: React.WheelEvent) => {
+    e.preventDefault();
+    setZoom(z => Math.min(2.5, Math.max(0.25, z + (e.deltaY > 0 ? -0.08 : 0.08))));
+  };
+  const onMD = (e: React.MouseEvent) => {
+    if (e.button === 0 && ((e.target as HTMLElement).closest('svg') === e.currentTarget.querySelector('svg') || (e.target as HTMLElement).tagName === 'DIV')) {
+      setIsPanning(true);
+      setPanStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
+    }
+  };
+  const onMM = (e: React.MouseEvent) => { if (isPanning) setPan({ x: e.clientX - panStart.x, y: e.clientY - panStart.y }); };
+  const onMU = () => setIsPanning(false);
+  const resetView = () => { setZoom(1); setPan({ x: 0, y: 0 }); };
+
+  // ── Node click ──
+  const onNodeClick = (node: TreeNode, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (selectedNode?.id === node.id) { setSelectedNode(null); setPopupPos(null); return; }
+    setSelectedNode(node);
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (rect) {
+      const rawX = e.clientX - rect.left;
+      const rawY = e.clientY - rect.top + 16;
+      setPopupPos({
+        x: Math.max(8, Math.min(rawX, rect.width - 420)),
+        y: Math.max(8, Math.min(rawY, rect.height - 350)),
+      });
+    }
+  };
+
+  const toggleCollapse = (orgId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setCollapsedOrgs(prev => {
+      const n = new Set(prev);
+      n.has(orgId) ? n.delete(orgId) : n.add(orgId);
+      return n;
     });
   };
 
-  const expandAll = () => {
-    const all = new Set<string>();
-    const collect = (nodes: OrgNode[]) => {
-      for (const n of nodes) {
-        all.add(n.id);
-        collect(n.children);
-      }
-    };
-    collect(tree);
-    setExpandedOrgs(all);
-  };
+  // ── Render node cards as foreignObjects ──
+  const renderCards = (lay: NodeLayout): JSX.Element[] => {
+    const { node, x, y, width, height } = lay;
+    const ls = LEVEL_STYLES[node.level] || LEVEL_STYLES['팀'];
+    const gs = GRADE_STYLE[node.stats.topGrade] || GRADE_STYLE['-'];
+    const isSel = selectedNode?.id === node.id;
+    const isCol = collapsedOrgs.has(node.id);
+    const hasKids = organizations.some(o => o.parentOrgId === node.id);
 
-  const collapseAll = () => {
-    // 전사만 유지
-    const roots = new Set<string>();
-    tree.forEach(t => roots.add(t.id));
-    setExpandedOrgs(roots);
-  };
-
-  // ==================== Stats ====================
-
-  const allNodes: OrgNode[] = [];
-  const collectAll = (nodes: OrgNode[]) => {
-    for (const n of nodes) {
-      allNodes.push(n);
-      collectAll(n.children);
-    }
-  };
-  collectAll(tree);
-
-  const totalObjectives = allNodes.reduce((s, n) => s + n.stats.objectiveCount, 0);
-  const totalKRs = allNodes.reduce((s, n) => s + n.stats.krCount, 0);
-  const avgProgress = allNodes.length > 0
-    ? Math.round(allNodes.filter(n => n.stats.krCount > 0).reduce((s, n) => s + n.stats.avgProgress, 0) / Math.max(1, allNodes.filter(n => n.stats.krCount > 0).length))
-    : 0;
-  const orgsWithOKR = allNodes.filter(n => n.stats.objectiveCount > 0).length;
-
-  // ==================== OrgNode Renderer ====================
-
-  const renderOrgNode = (node: OrgNode, depth: number = 0) => {
-    const isExpanded = expandedOrgs.has(node.id);
-    const hasChildren = node.children.length > 0;
-    const isSelected = selectedOrg === node.id;
-    const lColor = levelColor[node.level] || levelColor['팀'];
-    const LevelIcon = levelIcon[node.level] || Users;
-
-    // Level filter
-    if (filterLevel !== 'all') {
-      if (filterLevel === '전사' && node.level !== '전사') return null;
-      if (filterLevel === '본부' && !['전사', '본부'].includes(node.level)) return null;
-    }
-
-    // BII filter on objectives
-    const filteredObjs = filterBII === 'all'
-      ? node.objectives
-      : node.objectives.filter(o => o.biiType === filterBII);
-
-    return (
-      <div key={node.id} className="relative">
-        {/* 연결선 */}
-        {depth > 0 && (
-          <div className="absolute left-0 top-0 bottom-0" style={{ width: `${depth * 48}px` }}>
-            <div
-              className="absolute border-l-2 border-b-2 border-slate-300 rounded-bl-xl"
-              style={{
-                left: `${(depth - 1) * 48 + 20}px`,
-                top: 0,
-                width: '28px',
-                height: '28px',
-              }}
-            />
-          </div>
-        )}
-
-        {/* 노드 카드 */}
+    const els: JSX.Element[] = [];
+    els.push(
+      <foreignObject key={node.id} x={x} y={y} width={width} height={height}
+        style={{ overflow: 'visible' }}>
         <div
-          className="relative"
-          style={{ marginLeft: `${depth * 48}px` }}
+          className={`h-full rounded-xl border-2 cursor-pointer transition-all duration-200
+            hover:shadow-xl hover:-translate-y-0.5
+            ${isSel ? `border-white/80 shadow-2xl ring-4 ${ls.ring} scale-[1.04]` : 'border-white/20 shadow-lg'}`}
+          style={{ background: 'white' }}
+          onClick={(e) => onNodeClick(node, e)}
         >
-          <div
-            className={`border-2 rounded-xl mb-3 transition-all duration-200 hover:shadow-lg cursor-pointer ${
-              isSelected
-                ? `${lColor.border} shadow-lg ring-2 ring-offset-1 ring-blue-300`
-                : 'border-slate-200 hover:border-slate-300'
-            }`}
-            onClick={() => setSelectedOrg(isSelected ? null : node.id)}
-          >
-            {/* 헤더 */}
-            <div className="flex items-center gap-3 px-4 py-3">
-              {/* 확장 버튼 */}
-              {hasChildren ? (
-                <button
-                  onClick={(e) => { e.stopPropagation(); toggleOrg(node.id); }}
-                  className="p-1 hover:bg-slate-100 rounded-lg transition-colors flex-shrink-0"
-                >
-                  {isExpanded
-                    ? <ChevronDown className="w-4 h-4 text-slate-500" />
-                    : <ChevronRight className="w-4 h-4 text-slate-500" />
-                  }
-                </button>
-              ) : (
-                <div className="w-6" />
-              )}
+          {/* Color strip */}
+          <div className={`h-1.5 rounded-t-[10px] bg-gradient-to-r ${ls.gradient}`} />
 
-              {/* 레벨 아이콘 */}
-              <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${lColor.bg}`}>
-                <LevelIcon className={`w-4 h-4 ${lColor.accent}`} />
+          <div className="px-3 py-2">
+            {/* Name row */}
+            <div className="flex items-center gap-2 mb-1.5">
+              <div className={`w-6 h-6 rounded-md flex items-center justify-center ${ls.iconBg} flex-shrink-0`}>
+                <ls.icon className="w-3.5 h-3.5 text-white" />
               </div>
-
-              {/* 조직 정보 */}
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <h3 className="font-semibold text-slate-900 text-sm truncate">{node.name}</h3>
-                  <span className="text-[10px] text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded flex-shrink-0">
-                    {node.level}
-                  </span>
-                  {node.orgType && (
-                    <span className="text-[10px] text-slate-400 flex-shrink-0">{node.orgType}</span>
-                  )}
-                </div>
-                {node.stats.objectiveCount > 0 && (
-                  <div className="flex items-center gap-3 mt-1">
-                    <span className="text-[11px] text-slate-500">
-                      <Target className="w-3 h-3 inline mr-0.5" />
-                      {node.stats.objectiveCount}개 목표
-                    </span>
-                    <span className="text-[11px] text-slate-500">
-                      <BarChart3 className="w-3 h-3 inline mr-0.5" />
-                      {node.stats.krCount}개 KR
-                    </span>
-                  </div>
-                )}
+                <div className="text-[13px] font-bold text-slate-900 truncate leading-tight">{node.name}</div>
+                <div className="text-[10px] text-slate-400 leading-tight">{node.level}</div>
               </div>
-
-              {/* 통계 뱃지 */}
-              <div className="flex items-center gap-2 flex-shrink-0">
-                {node.stats.krCount > 0 ? (
-                  <>
-                    {/* 진행률 */}
-                    <div className="text-right">
-                      <div className="text-[10px] text-slate-400">진행률</div>
-                      <div className={`text-sm font-bold ${
-                        node.stats.avgProgress >= 100 ? 'text-green-600' :
-                        node.stats.avgProgress >= 70 ? 'text-blue-600' :
-                        node.stats.avgProgress >= 40 ? 'text-amber-600' :
-                        'text-slate-500'
-                      }`}>
-                        {node.stats.avgProgress}%
-                      </div>
-                    </div>
-                    {/* Progress bar */}
-                    <div className="w-16 h-2 bg-slate-100 rounded-full overflow-hidden">
-                      <div
-                        className={`h-full rounded-full transition-all ${
-                          node.stats.avgProgress >= 100 ? 'bg-green-500' :
-                          node.stats.avgProgress >= 70 ? 'bg-blue-500' :
-                          node.stats.avgProgress >= 40 ? 'bg-amber-400' :
-                          'bg-slate-300'
-                        }`}
-                        style={{ width: `${Math.min(100, node.stats.avgProgress)}%` }}
-                      />
-                    </div>
-                    {/* 등급 */}
-                    <span className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold ${gradeColor[node.stats.topGrade]}`}>
-                      {node.stats.topGrade}
-                    </span>
-                  </>
-                ) : (
-                  <span className="text-[11px] text-slate-400 bg-slate-100 px-2 py-1 rounded-lg">
-                    미수립
-                  </span>
-                )}
+              <div className={`w-6 h-6 rounded-md flex items-center justify-center text-[10px] font-black ${gs.bg} ${gs.text} flex-shrink-0`}>
+                {node.stats.topGrade}
               </div>
             </div>
 
-            {/* 목표 목록 (선택 시) */}
-            {isSelected && filteredObjs.length > 0 && (
-              <div className="border-t border-slate-100 px-4 py-3 bg-slate-50/50 space-y-2">
-                {filteredObjs.map((obj, objIdx) => {
-                  const biiColor = getBIIColor(obj.biiType);
-                  return (
-                    <div key={obj.id}>
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="text-[10px] font-bold text-slate-400">O{objIdx + 1}</span>
-                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${biiColor.bg} ${biiColor.text}`}>
-                          {obj.biiType}
-                        </span>
-                        <span className="text-sm text-slate-800 font-medium truncate">{obj.name}</span>
-                      </div>
-
-                      {/* KR 목록 */}
-                      {showKRs && obj.krs.length > 0 && (
-                        <div className="ml-8 space-y-1 mb-2">
-                          {obj.krs.map((kr, krIdx) => (
-                            <div key={kr.id} className="flex items-center gap-2 text-[11px]">
-                              <span className="text-slate-400 w-8 flex-shrink-0">KR{krIdx + 1}</span>
-                              <span className="text-slate-700 truncate flex-1">{kr.name}</span>
-                              <span className="text-slate-400 flex-shrink-0">{kr.weight}%</span>
-                              <div className="w-12 h-1.5 bg-slate-200 rounded-full overflow-hidden flex-shrink-0">
-                                <div
-                                  className={`h-full rounded-full ${
-                                    kr.progressPct >= 100 ? 'bg-green-500' :
-                                    kr.progressPct >= 70 ? 'bg-blue-400' :
-                                    kr.progressPct >= 40 ? 'bg-amber-400' :
-                                    'bg-slate-300'
-                                  }`}
-                                  style={{ width: `${Math.min(100, kr.progressPct)}%` }}
-                                />
-                              </div>
-                              <span className="text-slate-500 w-8 text-right flex-shrink-0">{kr.progressPct}%</span>
-                              <span className={`w-5 h-5 rounded flex items-center justify-center text-[9px] font-bold ${gradeColor[kr.grade]} flex-shrink-0`}>
-                                {kr.grade}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+            {/* Progress bar */}
+            <div className="flex items-center gap-2">
+              <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                <div className={`h-full rounded-full transition-all duration-500 ${
+                  node.stats.avgProgress >= 80 ? 'bg-green-500' :
+                  node.stats.avgProgress >= 50 ? 'bg-blue-500' :
+                  node.stats.avgProgress >= 20 ? 'bg-amber-400' : 'bg-slate-300'
+                }`} style={{ width: `${Math.min(100, node.stats.avgProgress)}%` }} />
               </div>
-            )}
+              <span className={`text-[11px] font-bold tabular-nums w-8 text-right ${
+                node.stats.avgProgress >= 80 ? 'text-green-600' :
+                node.stats.avgProgress >= 50 ? 'text-blue-600' : 'text-slate-400'
+              }`}>{node.stats.avgProgress}%</span>
+            </div>
+
+            {/* Meta row */}
+            <div className="flex items-center justify-between mt-1.5">
+              <div className="flex items-center gap-2 text-[10px] text-slate-400">
+                <span>O:{node.stats.objCount}</span>
+                <span>KR:{node.stats.krCount}</span>
+              </div>
+              {hasKids && (
+                <button onClick={(e) => toggleCollapse(node.id, e)}
+                  className={`text-[9px] px-1.5 py-0.5 rounded-md transition-colors ${
+                    isCol ? 'bg-amber-100 text-amber-700 hover:bg-amber-200'
+                         : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                  }`}>
+                  {isCol ? `+${organizations.filter(o => o.parentOrgId === node.id).length} 하위` : '접기'}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      </foreignObject>
+    );
+
+    for (const kid of lay.children) els.push(...renderCards(kid));
+    return els;
+  };
+
+  // ── Detail Popup ──
+  const popup = () => {
+    if (!selectedNode || !popupPos) return null;
+    const nd = selectedNode;
+    const ls = LEVEL_STYLES[nd.level] || LEVEL_STYLES['팀'];
+
+    return (
+      <div className="absolute z-50 w-[400px] max-h-[480px] bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in-0 zoom-in-95 duration-200"
+        style={{ left: popupPos.x, top: popupPos.y }}
+        onClick={e => e.stopPropagation()}>
+        {/* Header */}
+        <div className={`bg-gradient-to-r ${ls.gradient} px-5 py-4 text-white`}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <ls.icon className="w-5 h-5 opacity-80" />
+              <div>
+                <h3 className="font-bold text-base">{nd.name}</h3>
+                <p className="text-xs opacity-70">{nd.level} · {nd.orgType}</p>
+              </div>
+            </div>
+            <button onClick={() => { setSelectedNode(null); setPopupPos(null); }}
+              className="p-1 hover:bg-white/20 rounded-lg transition-colors">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <div className="flex items-center gap-4 mt-3">
+            <div className="text-center"><div className="text-lg font-black">{nd.stats.objCount}</div><div className="text-[10px] opacity-60">목표</div></div>
+            <div className="text-center"><div className="text-lg font-black">{nd.stats.krCount}</div><div className="text-[10px] opacity-60">KR</div></div>
+            <div className="flex-1">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[10px] opacity-60">진행률</span>
+                <span className="text-sm font-black">{nd.stats.avgProgress}%</span>
+              </div>
+              <div className="h-2 bg-white/20 rounded-full overflow-hidden">
+                <div className="h-full bg-white rounded-full" style={{ width: `${Math.min(100, nd.stats.avgProgress)}%` }} />
+              </div>
+            </div>
+            <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-sm font-black ${GRADE_STYLE[nd.stats.topGrade]?.bg} ${GRADE_STYLE[nd.stats.topGrade]?.text}`}>
+              {nd.stats.topGrade}
+            </div>
           </div>
         </div>
 
-        {/* 자식 노드 재귀 */}
-        {isExpanded && hasChildren && (
-          <div>
-            {node.children.map(child => renderOrgNode(child, depth + 1))}
-          </div>
-        )}
+        {/* Objectives list */}
+        <div className="max-h-[300px] overflow-y-auto">
+          {nd.objectives.length === 0 ? (
+            <div className="py-8 text-center">
+              <AlertCircle className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+              <p className="text-sm text-slate-500">아직 수립된 목표가 없습니다</p>
+              <p className="text-xs text-slate-400 mt-1">목표 수립 위저드에서 OKR을 생성해주세요</p>
+            </div>
+          ) : (
+            <div className="p-4 space-y-3">
+              {nd.objectives.map((obj, oi) => {
+                const bc = getBIIColor(obj.biiType);
+                const oa = obj.krs.length > 0
+                  ? Math.round(obj.krs.reduce((s, k) => s + k.progressPct, 0) / obj.krs.length) : 0;
+
+                return (
+                  <div key={obj.id} className="border border-slate-100 rounded-xl p-3 hover:border-slate-200 transition-colors">
+                    <div className="flex items-start gap-2 mb-2">
+                      <span className="text-[11px] font-black text-slate-400 mt-0.5">O{oi + 1}</span>
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-0.5">
+                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${bc?.bg || 'bg-slate-100'} ${bc?.text || 'text-slate-600'}`}>
+                            {obj.biiType}
+                          </span>
+                          <span className="text-[10px] text-slate-400">{oa}%</span>
+                        </div>
+                        <p className="text-[13px] text-slate-800 font-medium leading-snug">{obj.name}</p>
+                      </div>
+                    </div>
+                    {obj.krs.length > 0 && (
+                      <div className="ml-5 space-y-1.5">
+                        {obj.krs.map((kr, ki) => (
+                          <div key={kr.id} className="flex items-center gap-2">
+                            <span className="text-[10px] text-slate-400 w-6 flex-shrink-0">KR{ki + 1}</span>
+                            <p className="flex-1 text-[11px] text-slate-700 truncate min-w-0">{kr.name}</p>
+                            <span className="text-[10px] text-slate-400 flex-shrink-0">{kr.weight}%</span>
+                            <div className="w-10 h-1.5 bg-slate-100 rounded-full overflow-hidden flex-shrink-0">
+                              <div className={`h-full rounded-full ${
+                                kr.progressPct >= 100 ? 'bg-green-500' : kr.progressPct >= 70 ? 'bg-blue-400' :
+                                kr.progressPct >= 40 ? 'bg-amber-400' : 'bg-slate-300'
+                              }`} style={{ width: `${Math.min(100, kr.progressPct)}%` }} />
+                            </div>
+                            <span className="text-[10px] text-slate-500 w-7 text-right tabular-nums flex-shrink-0">{kr.progressPct}%</span>
+                            <span className={`w-[18px] h-[18px] rounded text-[8px] font-black flex items-center justify-center flex-shrink-0 ${GRADE_STYLE[kr.grade]?.bg} ${GRADE_STYLE[kr.grade]?.text}`}>
+                              {kr.grade}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
     );
   };
+
+  // ── Summary stats ──
+  const allNodes = useMemo(() => {
+    const ns: TreeNode[] = [];
+    const w = (ls: TreeNode[]) => { for (const n of ls) { ns.push(n); w(n.children); } };
+    w(tree); return ns;
+  }, [tree]);
+
+  const tO = allNodes.reduce((s, n) => s + n.stats.objCount, 0);
+  const tK = allNodes.reduce((s, n) => s + n.stats.krCount, 0);
+  const wO = allNodes.filter(n => n.stats.objCount > 0).length;
+  const aP = (() => {
+    const withKR = allNodes.filter(n => n.stats.krCount > 0);
+    return withKR.length > 0 ? Math.round(withKR.reduce((s, n) => s + n.stats.avgProgress, 0) / withKR.length) : 0;
+  })();
 
   // ==================== Render ====================
 
   if (loading) {
     return (
-      <div className="p-6 flex items-center justify-center min-h-[60vh]">
+      <div className="flex items-center justify-center min-h-[60vh]">
         <div className="text-center">
-          <Loader2 className="w-10 h-10 text-blue-600 animate-spin mx-auto mb-3" />
-          <p className="text-slate-500 text-sm">OKR 구조를 불러오는 중...</p>
+          <Loader2 className="w-10 h-10 text-indigo-600 animate-spin mx-auto mb-3" />
+          <p className="text-slate-500 text-sm">OKR 구조를 분석하고 있습니다...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className={`${isFullscreen ? 'fixed inset-0 z-50 bg-white overflow-auto' : ''} p-6 max-w-7xl mx-auto`}>
-
-      {/* 헤더 */}
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-gradient-to-br from-indigo-600 to-violet-600 rounded-xl flex items-center justify-center">
-            <GitBranch className="w-5 h-5 text-white" />
+    <div className={`${isFullscreen ? 'fixed inset-0 z-50 bg-slate-50' : ''} flex flex-col h-full`}>
+      {/* ── Header ── */}
+      <div className="flex-shrink-0 bg-white border-b border-slate-200 px-6 py-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-gradient-to-br from-indigo-600 to-violet-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-200">
+              <GitBranch className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <h1 className="text-lg font-bold text-slate-900">OKR Cascading Map</h1>
+              <p className="text-[11px] text-slate-500">전사 목표 정렬 현황 · 노드를 클릭하면 상세를 볼 수 있습니다</p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-xl font-bold text-slate-900">OKR Cascading Map</h1>
-            <p className="text-xs text-slate-500">전사 목표 정렬 현황을 한눈에 확인합니다</p>
+
+          {/* Summary stats */}
+          <div className="flex items-center gap-6 mr-4">
+            <div className="text-center">
+              <div className="text-lg font-black text-slate-900">{wO}<span className="text-xs text-slate-400 font-normal">/{organizations.length}</span></div>
+              <div className="text-[10px] text-slate-400">참여 조직</div>
+            </div>
+            <div className="text-center">
+              <div className="text-lg font-black text-blue-600">{tO}</div>
+              <div className="text-[10px] text-slate-400">Objectives</div>
+            </div>
+            <div className="text-center">
+              <div className="text-lg font-black text-emerald-600">{tK}</div>
+              <div className="text-[10px] text-slate-400">Key Results</div>
+            </div>
+            <div className="text-center">
+              <div className={`text-lg font-black ${aP >= 70 ? 'text-green-600' : aP >= 40 ? 'text-amber-600' : 'text-slate-400'}`}>{aP}%</div>
+              <div className="text-[10px] text-slate-400">평균 진행률</div>
+            </div>
+          </div>
+
+          {/* Controls */}
+          <div className="flex items-center gap-1.5">
+            <button onClick={() => setZoom(z => Math.min(2.5, z + 0.15))} className="p-2 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors" title="확대">
+              <ZoomIn className="w-4 h-4 text-slate-600" />
+            </button>
+            <button onClick={() => setZoom(z => Math.max(0.25, z - 0.15))} className="p-2 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors" title="축소">
+              <ZoomOut className="w-4 h-4 text-slate-600" />
+            </button>
+            <button onClick={resetView} className="p-2 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors" title="리셋">
+              <RotateCcw className="w-4 h-4 text-slate-600" />
+            </button>
+            <div className="w-px h-6 bg-slate-200 mx-1" />
+            <button onClick={() => setIsFullscreen(!isFullscreen)} className="p-2 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">
+              {isFullscreen ? <Minimize2 className="w-4 h-4 text-slate-600" /> : <Maximize2 className="w-4 h-4 text-slate-600" />}
+            </button>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          {/* KR 표시 토글 */}
-          <button
-            onClick={() => setShowKRs(!showKRs)}
-            className={`px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors ${
-              showKRs
-                ? 'bg-blue-100 text-blue-700'
-                : 'bg-slate-100 text-slate-600'
-            }`}
-          >
-            {showKRs ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
-            KR 상세
-          </button>
-
-          {/* 펼침/접기 */}
-          <button
-            onClick={expandAll}
-            className="px-3 py-1.5 bg-slate-100 text-slate-600 rounded-lg text-xs font-medium hover:bg-slate-200 transition-colors"
-          >
-            전체 펼침
-          </button>
-          <button
-            onClick={collapseAll}
-            className="px-3 py-1.5 bg-slate-100 text-slate-600 rounded-lg text-xs font-medium hover:bg-slate-200 transition-colors"
-          >
-            접기
-          </button>
-
-          {/* 필터 */}
-          <select
-            value={filterLevel}
-            onChange={(e) => setFilterLevel(e.target.value)}
-            className="px-2 py-1.5 border border-slate-200 rounded-lg text-xs text-slate-600"
-          >
-            <option value="all">전체 레벨</option>
-            <option value="전사">전사만</option>
-            <option value="본부">전사+본부</option>
-          </select>
-
-          <select
-            value={filterBII}
-            onChange={(e) => setFilterBII(e.target.value)}
-            className="px-2 py-1.5 border border-slate-200 rounded-lg text-xs text-slate-600"
-          >
-            <option value="all">전체 BII</option>
-            <option value="Build">Build</option>
-            <option value="Innovate">Innovate</option>
-            <option value="Improve">Improve</option>
-          </select>
-
-          {/* 전체화면 */}
-          <button
-            onClick={() => setIsFullscreen(!isFullscreen)}
-            className="p-1.5 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 transition-colors"
-          >
-            {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
-          </button>
+        {/* Legend */}
+        <div className="flex items-center gap-5 mt-3 text-[10px] text-slate-400">
+          <span className="font-semibold text-slate-500">레벨:</span>
+          <span className="flex items-center gap-1"><span className="w-3 h-1.5 rounded-full bg-gradient-to-r from-slate-800 to-slate-900" /> 전사</span>
+          <span className="flex items-center gap-1"><span className="w-3 h-1.5 rounded-full bg-gradient-to-r from-blue-600 to-indigo-700" /> 본부</span>
+          <span className="flex items-center gap-1"><span className="w-3 h-1.5 rounded-full bg-gradient-to-r from-emerald-600 to-teal-700" /> 팀</span>
+          <span className="text-slate-300 mx-1">|</span>
+          <span className="font-semibold text-slate-500">연결선:</span>
+          <span className="flex items-center gap-1"><span className="w-3 h-1 rounded-full" style={{ background: STATUS_CLR.on_track }} /> 정상</span>
+          <span className="flex items-center gap-1"><span className="w-3 h-1 rounded-full" style={{ background: STATUS_CLR.in_progress }} /> 진행중</span>
+          <span className="flex items-center gap-1"><span className="w-3 h-1 rounded-full" style={{ background: STATUS_CLR.at_risk }} /> 주의</span>
+          <span className="flex items-center gap-1"><span className="w-3 h-1 rounded-full" style={{ background: STATUS_CLR.not_started }} /> 미시작</span>
+          <span className="text-slate-300 mx-1">|</span>
+          <span className="font-semibold text-slate-500">등급:</span>
+          {['S','A','B','C','D'].map(g => (
+            <span key={g} className={`w-4 h-4 rounded text-[8px] font-black flex items-center justify-center ${GRADE_STYLE[g].bg} ${GRADE_STYLE[g].text}`}>{g}</span>
+          ))}
         </div>
       </div>
 
-      {/* 요약 통계 */}
-      <div className="grid grid-cols-4 gap-4 mb-6">
-        <div className="bg-white border border-slate-200 rounded-xl p-4">
-          <div className="flex items-center gap-2 mb-1">
-            <Building2 className="w-4 h-4 text-slate-400" />
-            <span className="text-xs text-slate-500">참여 조직</span>
-          </div>
-          <div className="text-2xl font-bold text-slate-900">
-            {orgsWithOKR}<span className="text-sm text-slate-400 font-normal">/{allNodes.length}</span>
-          </div>
-        </div>
-        <div className="bg-white border border-slate-200 rounded-xl p-4">
-          <div className="flex items-center gap-2 mb-1">
-            <Target className="w-4 h-4 text-blue-500" />
-            <span className="text-xs text-slate-500">전체 목표</span>
-          </div>
-          <div className="text-2xl font-bold text-slate-900">{totalObjectives}</div>
-        </div>
-        <div className="bg-white border border-slate-200 rounded-xl p-4">
-          <div className="flex items-center gap-2 mb-1">
-            <BarChart3 className="w-4 h-4 text-emerald-500" />
-            <span className="text-xs text-slate-500">전체 KR</span>
-          </div>
-          <div className="text-2xl font-bold text-slate-900">{totalKRs}</div>
-        </div>
-        <div className="bg-white border border-slate-200 rounded-xl p-4">
-          <div className="flex items-center gap-2 mb-1">
-            <TrendingUp className="w-4 h-4 text-violet-500" />
-            <span className="text-xs text-slate-500">평균 진행률</span>
-          </div>
-          <div className={`text-2xl font-bold ${
-            avgProgress >= 80 ? 'text-green-600' : avgProgress >= 50 ? 'text-blue-600' : 'text-slate-500'
-          }`}>
-            {avgProgress}%
-          </div>
-        </div>
-      </div>
-
-      {/* 범례 */}
-      <div className="flex items-center gap-4 mb-4 px-2">
-        <span className="text-[11px] text-slate-400">레벨:</span>
-        <span className="flex items-center gap-1 text-[11px]">
-          <span className="w-3 h-3 rounded bg-slate-900" /> 전사
-        </span>
-        <span className="flex items-center gap-1 text-[11px]">
-          <span className="w-3 h-3 rounded bg-blue-600" /> 본부
-        </span>
-        <span className="flex items-center gap-1 text-[11px]">
-          <span className="w-3 h-3 rounded bg-emerald-600" /> 팀
-        </span>
-        <span className="text-slate-300 mx-2">|</span>
-        <span className="text-[11px] text-slate-400">등급:</span>
-        {['S', 'A', 'B', 'C', 'D'].map(g => (
-          <span key={g} className={`w-5 h-5 rounded flex items-center justify-center text-[9px] font-bold ${gradeColor[g]}`}>
-            {g}
-          </span>
-        ))}
-      </div>
-
-      {/* 트리 맵 */}
-      <div className="bg-white border border-slate-200 rounded-xl p-6 min-h-[400px]">
+      {/* ── Canvas ── */}
+      <div ref={canvasRef}
+        className="flex-1 overflow-hidden relative"
+        style={{
+          background: 'radial-gradient(circle at 1px 1px, #e2e8f0 1px, transparent 0)',
+          backgroundSize: '24px 24px',
+          cursor: isPanning ? 'grabbing' : 'grab',
+        }}
+        onWheel={onWheel} onMouseDown={onMD} onMouseMove={onMM} onMouseUp={onMU} onMouseLeave={onMU}
+        onClick={() => { setSelectedNode(null); setPopupPos(null); }}
+      >
         {tree.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16">
-            <GitBranch className="w-12 h-12 text-slate-300 mb-3" />
-            <p className="text-slate-500 text-sm mb-1">아직 등록된 OKR이 없습니다</p>
-            <p className="text-slate-400 text-xs">목표 수립 위저드에서 OKR을 생성해주세요</p>
+          <div className="flex flex-col items-center justify-center h-full">
+            <GitBranch className="w-16 h-16 text-slate-300 mb-4" />
+            <p className="text-slate-500 text-sm mb-1">조직 데이터가 없습니다</p>
+            <p className="text-slate-400 text-xs">조직 관리에서 조직을 먼저 등록해주세요</p>
           </div>
         ) : (
-          <div>
-            {tree.map(rootNode => renderOrgNode(rootNode, 0))}
-          </div>
+          <svg
+            width={bounds.w * zoom}
+            height={bounds.h * zoom}
+            viewBox={`0 0 ${bounds.w} ${bounds.h}`}
+            style={{ transform: `translate(${pan.x}px, ${pan.y}px)`, transformOrigin: '0 0' }}
+          >
+            {/* Connectors first (behind nodes) */}
+            <g>{layouts.flatMap(l => drawConnectors(l))}</g>
+            {/* Node cards */}
+            {layouts.flatMap(l => renderCards(l))}
+          </svg>
         )}
-      </div>
 
-      {/* 안내 문구 */}
-      <div className="mt-4 text-center">
-        <p className="text-[11px] text-slate-400">
-          카드를 클릭하면 해당 조직의 목표와 KR을 펼쳐볼 수 있습니다 · 화살표로 하위 조직을 열고 닫을 수 있습니다
-        </p>
+        {/* Detail popup */}
+        {popup()}
+
+        {/* Zoom indicator */}
+        <div className="absolute bottom-4 right-4 bg-white/80 backdrop-blur-sm border border-slate-200 rounded-lg px-3 py-1.5 text-[11px] text-slate-500 font-medium shadow-sm">
+          {Math.round(zoom * 100)}%
+        </div>
       </div>
     </div>
   );
