@@ -1,5 +1,6 @@
 // src/pages/AdminSettings.tsx
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Shield, Users, Layers, Lock, Settings as SettingsIcon, ChevronRight, Building2, Mail, CalendarClock } from 'lucide-react';
 import UserRolesManager from '../components/admin/UserRolesManager';
 import OrgStructureSettings from '../components/admin/OrgStructureSettings';
@@ -10,10 +11,32 @@ import PlanningCycleManager from '../components/PlanningCycleManager';
 
 type TabType = 'companies' | 'invite' | 'users' | 'roles' | 'structure' | 'permissions' | 'cycles';
 
+const TAB_ALIASES: Record<string, TabType> = {
+  'planning-cycles': 'cycles',
+  'cycles': 'cycles',
+  'users': 'users',
+  'invite': 'invite',
+  'roles': 'roles',
+  'structure': 'structure',
+  'permissions': 'permissions',
+  'companies': 'companies',
+};
+
 export default function AdminSettings() {
-  const [activeTab, setActiveTab] = useState<TabType>('companies');
+  const [searchParams] = useSearchParams();
+  const tabParam = searchParams.get('tab');
+  const initialTab: TabType = (tabParam && TAB_ALIASES[tabParam]) || 'companies';
+
+  const [activeTab, setActiveTab] = useState<TabType>(initialTab);
   const [userLevel, setUserLevel] = useState<number>(0);
   const [loading, setLoading] = useState(true);
+
+  // URL 파라미터 변경 시 탭 동기화
+  useEffect(() => {
+    if (tabParam && TAB_ALIASES[tabParam]) {
+      setActiveTab(TAB_ALIASES[tabParam]);
+    }
+  }, [tabParam]);
 
   useEffect(() => {
     checkUserPermissions();
@@ -214,4 +237,4 @@ function PermissionsList() {
       </div>
     </div>
   );
-} 
+}
