@@ -1,13 +1,14 @@
 // src/pages/AdminSettings.tsx
 import { useState, useEffect } from 'react';
-import { Shield, Users, Layers, Lock, Settings as SettingsIcon, ChevronRight, Building2, Mail } from 'lucide-react';
+import { Shield, Users, Layers, Lock, Settings as SettingsIcon, ChevronRight, Building2, Mail, CalendarClock } from 'lucide-react';
 import UserRolesManager from '../components/admin/UserRolesManager';
 import OrgStructureSettings from '../components/admin/OrgStructureSettings';
 import RolePermissionsManager from '../components/admin/RolePermissionsManager';
 import CompanyManagement from '../components/admin/CompanyManagement';
 import UserInvitation from '../components/admin/UserInvitation';
+import PlanningCycleManager from '../components/PlanningCycleManager';
 
-type TabType = 'companies' | 'invite' | 'users' | 'roles' | 'structure' | 'permissions';
+type TabType = 'companies' | 'invite' | 'users' | 'roles' | 'structure' | 'permissions' | 'cycles';
 
 export default function AdminSettings() {
   const [activeTab, setActiveTab] = useState<TabType>('companies');
@@ -55,6 +56,7 @@ export default function AdminSettings() {
     { id: 'companies' as TabType, name: '회사 관리', icon: Building2, description: '등록된 회사 목록 및 관리 (Super Admin)', minLevel: 100 },
     { id: 'invite' as TabType, name: '사용자 초대', icon: Mail, description: '새로운 팀원 초대 및 초대 관리', minLevel: 90 },
     { id: 'users' as TabType, name: '사용자 관리', icon: Users, description: '사용자별 역할 및 권한 할당', minLevel: 90 },
+    { id: 'cycles' as TabType, name: '수립 사이클', icon: CalendarClock, description: 'OKR 수립 기간 선언 및 관리', minLevel: 90 },
     { id: 'roles' as TabType, name: '역할 관리', icon: Shield, description: '역할별 권한 설정 및 수정', minLevel: 100 },
     { id: 'structure' as TabType, name: '조직 구조', icon: Layers, description: '조직 계층 템플릿 설정', minLevel: 90 },
     { id: 'permissions' as TabType, name: '권한 목록', icon: Lock, description: '전체 권한 목록 조회', minLevel: 100 },
@@ -119,6 +121,7 @@ export default function AdminSettings() {
                 {activeTab === 'roles' && '각 역할(팀장, 본부장 등)이 가질 수 있는 권한을 설정합니다.'}
                 {activeTab === 'structure' && '회사의 조직 계층 구조(전사-본부-팀 등)를 정의합니다.'}
                 {activeTab === 'permissions' && '시스템의 모든 권한 목록을 확인할 수 있습니다.'}
+                {activeTab === 'cycles' && 'OKR 수립 기간을 선언하고 진행 상황을 관리합니다. 수립 시작 → 마감 → 확정 순서로 사이클을 운영합니다.'}
               </p>
             </div>
           </div>
@@ -132,6 +135,7 @@ export default function AdminSettings() {
               {activeTab === 'roles' && <RoleManagement />}
               {activeTab === 'structure' && <StructureManagement />}
               {activeTab === 'permissions' && <PermissionsList />}
+              {activeTab === 'cycles' && <PlanningCycleManager />}
             </div>
           </div>
         </div>
