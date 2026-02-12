@@ -9,13 +9,15 @@ import {
   BookOpen,
   Inbox,
   Bell,
-  GitBranch
+  GitBranch,
+  Megaphone
 } from 'lucide-react';
 
 const navigation = [
   { name: '대시보드', href: '/', icon: Home },
   { name: '목표 수립', href: '/wizard', icon: Target },
-    { name: 'OKR Map', href: '/okr-map', icon: GitBranch },
+  { name: '수립 현황', href: '/okr-setup', icon: Megaphone },
+  { name: 'OKR Map', href: '/okr-map', icon: GitBranch },
   {
     name: 'OKR 현황',
     icon: TrendingUp,
@@ -25,7 +27,6 @@ const navigation = [
       { name: '팀별 OKR', href: '/okr/team' }
     ]
   },
-
   { name: '체크인', href: '/checkin', icon: CheckSquare },
   { name: '승인 대기함', href: '/approval-inbox', icon: Inbox },
   { name: '알림', href: '/notifications', icon: Bell },
