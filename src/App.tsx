@@ -18,6 +18,7 @@ import JoinCompany from './pages/JoinCompany';
 import MySettings from './pages/MySettings';
 import Notifications from './pages/Notifications';
 import ApprovalInbox from './pages/ApprovalInbox';
+import OKRMap from './pages/OKRMap';
 
 function App() {
   return (
@@ -65,6 +66,9 @@ function App() {
             <Route path="okr/company" element={<OKRStatus />} />
             <Route path="okr/division" element={<OKRStatus />} />
             <Route path="okr/team" element={<OKRStatus />} />
+            
+            {/* [NEW] OKR Cascading Map */}
+            <Route path="okr-map" element={<OKRMap />} />
             
             {/* 체크인 (실적 입력 및 KR 상세 관리) */}
             <Route path="checkin" element={<Checkin />} />
