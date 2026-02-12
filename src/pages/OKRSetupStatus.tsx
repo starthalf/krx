@@ -20,7 +20,7 @@ interface OrgStatus {
   level: string;
   headName: string | null;
   headId: string | null;
-  okrStatus: 'not_started' | 'draft' | 'submitted' | 'approved' | 'finalized';
+  okrStatus: 'not_started' | 'draft' | 'revision_requested' | 'submitted' | 'approved' | 'finalized';
   objectiveCount: number;
   krCount: number;
   submittedAt: string | null;
@@ -44,11 +44,12 @@ interface ActiveCycle {
 }
 
 const STATUS_CONFIG: Record<string, { label: string; cls: string; icon: any; order: number }> = {
-  not_started: { label: '미착수', cls: 'bg-slate-100 text-slate-600 border-slate-200', icon: XCircle, order: 0 },
-  draft:       { label: '작성중', cls: 'bg-amber-50 text-amber-700 border-amber-200', icon: FileEdit, order: 1 },
-  submitted:   { label: '제출됨', cls: 'bg-blue-50 text-blue-700 border-blue-200', icon: Send, order: 2 },
-  approved:    { label: '승인',   cls: 'bg-green-50 text-green-700 border-green-200', icon: Check, order: 3 },
-  finalized:   { label: '확정',   cls: 'bg-emerald-50 text-emerald-800 border-emerald-200', icon: CheckCircle2, order: 4 },
+  not_started:        { label: '미착수',   cls: 'bg-slate-100 text-slate-600 border-slate-200', icon: XCircle, order: 0 },
+  draft:              { label: '작성중',   cls: 'bg-amber-50 text-amber-700 border-amber-200', icon: FileEdit, order: 1 },
+  revision_requested: { label: '수정요청', cls: 'bg-orange-50 text-orange-700 border-orange-200', icon: AlertTriangle, order: 1.5 },
+  submitted:          { label: '제출됨',   cls: 'bg-blue-50 text-blue-700 border-blue-200', icon: Send, order: 2 },
+  approved:           { label: '승인',     cls: 'bg-green-50 text-green-700 border-green-200', icon: Check, order: 3 },
+  finalized:          { label: '확정',     cls: 'bg-emerald-50 text-emerald-800 border-emerald-200', icon: CheckCircle2, order: 4 },
 };
 
 // ─── Helpers ─────────────────────────────────────────────
@@ -134,7 +135,8 @@ export default function OKRSetupStatus() {
           if (s === 'finalized') status = 'finalized';
           else if (s === 'approved') status = 'approved';
           else if (s === 'submitted' || s === 'under_review') status = 'submitted';
-          else if (s === 'draft' || s === 'revision_requested') status = 'draft';
+          else if (s === 'revision_requested') status = 'revision_requested';
+          else if (s === 'draft') status = 'draft';
 
           return {
             id: row.org_id, name: row.org_name, level: row.org_level,
@@ -143,7 +145,7 @@ export default function OKRSetupStatus() {
             objectiveCount: row.objective_count || 0, krCount: row.kr_count || 0,
             submittedAt: row.submitted_at, approvedAt: row.approved_at,
             lastNudgedAt: null,
-            selected: status === 'not_started' || status === 'draft',
+            selected: status === 'not_started' || status === 'draft' || status === 'revision_requested',
           };
         });
 
@@ -197,7 +199,8 @@ export default function OKRSetupStatus() {
           if (okrSet?.status === 'finalized') status = 'finalized';
           else if (okrSet?.status === 'approved') status = 'approved';
           else if (okrSet?.status === 'submitted' || okrSet?.status === 'under_review') status = 'submitted';
-          else if (okrSet?.status === 'draft' || okrSet?.status === 'revision_requested') status = 'draft';
+          else if (okrSet?.status === 'revision_requested') status = 'revision_requested';
+          else if (okrSet?.status === 'draft') status = 'draft';
 
           statuses.push({
             id: org.id, name: org.name, level: org.level,
@@ -205,7 +208,7 @@ export default function OKRSetupStatus() {
             objectiveCount: objCount || 0, krCount: krCount || 0,
             submittedAt: okrSet?.submitted_at || null, approvedAt: okrSet?.reviewed_at || null,
             lastNudgedAt: lastNudge?.created_at || null,
-            selected: status === 'not_started' || status === 'draft',
+            selected: status === 'not_started' || status === 'draft' || status === 'revision_requested',
           });
         }
         setOrgStatuses(statuses);
@@ -232,10 +235,11 @@ export default function OKRSetupStatus() {
     const t = orgStatuses.length;
     const ns = orgStatuses.filter(o => o.okrStatus === 'not_started').length;
     const dr = orgStatuses.filter(o => o.okrStatus === 'draft').length;
+    const rv = orgStatuses.filter(o => o.okrStatus === 'revision_requested').length;
     const sb = orgStatuses.filter(o => o.okrStatus === 'submitted').length;
     const ap = orgStatuses.filter(o => o.okrStatus === 'approved').length;
     const fn = orgStatuses.filter(o => o.okrStatus === 'finalized').length;
-    return { total: t, notStarted: ns, draft: dr, submitted: sb, approved: ap, finalized: fn,
+    return { total: t, notStarted: ns, draft: dr, revisionRequested: rv, submitted: sb, approved: ap, finalized: fn,
       completionRate: t > 0 ? Math.round(((ap + fn) / t) * 100) : 0 };
   }, [orgStatuses]);
 
@@ -248,7 +252,7 @@ export default function OKRSetupStatus() {
       if (!can) return { ...o, selected: false };
       if (s === 'all') return { ...o, selected: true };
       if (s === 'none') return { ...o, selected: false };
-      return { ...o, selected: o.okrStatus === 'not_started' || o.okrStatus === 'draft' };
+      return { ...o, selected: o.okrStatus === 'not_started' || o.okrStatus === 'draft' || o.okrStatus === 'revision_requested' };
     }));
   };
 
@@ -422,9 +426,10 @@ export default function OKRSetupStatus() {
           const cfg = STATUS_CONFIG[key];
           const Icon = cfg.icon;
           const count = key === 'approved' ? stats.approved + stats.finalized
-            : key === 'not_started' ? stats.notStarted : key === 'draft' ? stats.draft : stats.submitted;
+            : key === 'not_started' ? stats.notStarted : key === 'draft' ? stats.draft + stats.revisionRequested : stats.submitted;
           const desc = key === 'not_started' ? '아직 시작하지 않은 조직'
-            : key === 'draft' ? '초안 작성 진행중' : key === 'submitted' ? '검토 대기중' : '수립 완료';
+            : key === 'draft' ? `초안 작성 / 수정요청${stats.revisionRequested > 0 ? ` (수정 ${stats.revisionRequested})` : ''}`
+            : key === 'submitted' ? '검토 대기중' : '수립 완료';
           const active = statusFilter === key;
           return (
             <button key={key} onClick={() => setStatusFilter(active ? 'all' : key)}
@@ -451,6 +456,7 @@ export default function OKRSetupStatus() {
             {stats.finalized > 0 && <div className="bg-emerald-500" style={{ width: `${(stats.finalized / stats.total) * 100}%` }} />}
             {stats.approved > 0 && <div className="bg-green-500" style={{ width: `${(stats.approved / stats.total) * 100}%` }} />}
             {stats.submitted > 0 && <div className="bg-blue-500" style={{ width: `${(stats.submitted / stats.total) * 100}%` }} />}
+            {stats.revisionRequested > 0 && <div className="bg-orange-400" style={{ width: `${(stats.revisionRequested / stats.total) * 100}%` }} />}
             {stats.draft > 0 && <div className="bg-amber-400" style={{ width: `${(stats.draft / stats.total) * 100}%` }} />}
             {stats.notStarted > 0 && <div className="bg-slate-300" style={{ width: `${(stats.notStarted / stats.total) * 100}%` }} />}
           </div>
@@ -458,6 +464,7 @@ export default function OKRSetupStatus() {
             <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />확정 {stats.finalized}</span>
             <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-green-500" />승인 {stats.approved}</span>
             <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-blue-500" />제출 {stats.submitted}</span>
+            {stats.revisionRequested > 0 && <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-orange-400" />수정요청 {stats.revisionRequested}</span>}
             <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-amber-400" />작성중 {stats.draft}</span>
             <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-slate-300" />미착수 {stats.notStarted}</span>
           </div>
@@ -574,6 +581,9 @@ export default function OKRSetupStatus() {
                               className="text-xs text-green-600 hover:text-green-700 font-medium inline-flex items-center gap-0.5">
                               승인 <CheckCircle2 className="w-3 h-3" />
                             </button>
+                          )}
+                          {org.okrStatus === 'revision_requested' && (
+                            <span className="text-xs text-orange-500 font-medium">수정 대기</span>
                           )}
                           <button onClick={() => navigate(`/wizard/${org.id}`)}
                             className="text-xs text-blue-600 hover:text-blue-700 font-medium inline-flex items-center gap-0.5">
