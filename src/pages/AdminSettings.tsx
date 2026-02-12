@@ -60,13 +60,15 @@ export default function AdminSettings() {
       const maxLevel = Math.max(...(roles?.map(r => r.role?.level || 0) || [0]));
       setUserLevel(maxLevel);
 
-      // 기본 탭 설정
-      if (maxLevel >= 100) {
-        setActiveTab('companies');
-      } else if (maxLevel >= 90) {
-        setActiveTab('invite');
-      } else {
-        setActiveTab('users');
+      // 기본 탭 설정 (URL 파라미터가 없을 때만)
+      if (!tabParam) {
+        if (maxLevel >= 100) {
+          setActiveTab('companies');
+        } else if (maxLevel >= 90) {
+          setActiveTab('invite');
+        } else {
+          setActiveTab('users');
+        }
       }
     } catch (error) {
       console.error('Failed to check permissions:', error);
