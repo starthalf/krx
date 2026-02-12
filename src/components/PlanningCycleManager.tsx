@@ -109,7 +109,10 @@ export default function PlanningCycleManager() {
 
   // ─── 데이터 로드 ─────────────────────────────────────
   const fetchCycles = useCallback(async () => {
-    if (!company?.id) return;
+    if (!company?.id) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const { data, error } = await supabase
@@ -120,8 +123,10 @@ export default function PlanningCycleManager() {
 
       if (error) throw error;
       setCycles(data || []);
-    } catch (err) {
-      console.error('사이클 조회 실패:', err);
+    } catch (err: any) {
+      // 테이블이 없거나 에러 → 빈 배열로 처리 (첫 사용 시 정상)
+      console.warn('사이클 조회:', err.message);
+      setCycles([]);
     } finally {
       setLoading(false);
     }
