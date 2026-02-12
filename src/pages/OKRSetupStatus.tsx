@@ -1,10 +1,11 @@
 // src/pages/OKRSetupStatus.tsx
 // OKR 수립 현황 관리 페이지 - CEO/본부장용
-import { useState, useEffect, useMemo } from 'react';
+// 활성 사이클 정보를 연동하여 마감일, D-day, 상태 표시
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Megaphone, Send, Clock, Check, AlertTriangle, RefreshCw,
   Zap, Search, ChevronRight, CheckCircle2, XCircle, FileEdit,
-  BarChart3, Building2
+  BarChart3, Building2, CalendarClock, Timer, ArrowRight
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -12,6 +13,7 @@ import { useStore } from '../store/useStore';
 import { useNavigate } from 'react-router-dom';
 import { getMyRoleLevel } from '../lib/permissions';
 
+// ─── Types ───────────────────────────────────────────────
 interface OrgStatus {
   id: string;
   name: string;
@@ -21,8 +23,24 @@ interface OrgStatus {
   okrStatus: 'not_started' | 'draft' | 'submitted' | 'approved' | 'finalized';
   objectiveCount: number;
   krCount: number;
+  submittedAt: string | null;
+  approvedAt: string | null;
   lastNudgedAt: string | null;
   selected: boolean;
+}
+
+interface ActiveCycle {
+  id: string;
+  period: string;
+  title: string;
+  status: 'planning' | 'in_progress' | 'closed' | 'finalized';
+  startsAt: string;
+  deadlineAt: string;
+  gracePeriodAt: string | null;
+  companyOkrFinalized: boolean;
+  message: string | null;
+  daysRemaining: number;
+  isOverdue: boolean;
 }
 
 const STATUS_CONFIG: Record<string, { label: string; cls: string; icon: any; order: number }> = {
@@ -33,6 +51,21 @@ const STATUS_CONFIG: Record<string, { label: string; cls: string; icon: any; ord
   finalized:   { label: '확정',   cls: 'bg-emerald-50 text-emerald-800 border-emerald-200', icon: CheckCircle2, order: 4 },
 };
 
+// ─── Helpers ─────────────────────────────────────────────
+function formatDate(d: string) {
+  return new Date(d).toLocaleDateString('ko-KR', { month: 'long', day: 'numeric', weekday: 'short' });
+}
+
+function timeAgo(d: string | null) {
+  if (!d) return null;
+  const m = Math.floor((Date.now() - new Date(d).getTime()) / 60000);
+  if (m < 60) return `${m}분 전`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}시간 전`;
+  return `${Math.floor(h / 24)}일 전`;
+}
+
+// ─── Component ───────────────────────────────────────────
 export default function OKRSetupStatus() {
   const { user } = useAuth();
   const { organizations, company } = useStore();
@@ -40,6 +73,7 @@ export default function OKRSetupStatus() {
   const navigate = useNavigate();
 
   const [orgStatuses, setOrgStatuses] = useState<OrgStatus[]>([]);
+  const [activeCycle, setActiveCycle] = useState<ActiveCycle | null>(null);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [nudgeMessage, setNudgeMessage] = useState('');
@@ -51,63 +85,139 @@ export default function OKRSetupStatus() {
 
   useEffect(() => { getMyRoleLevel().then(setRoleLevel); }, []);
 
-  const fetchOrgStatuses = async () => {
+  // ─── 활성 사이클 조회 ─────────────────────────────────
+  const fetchActiveCycle = useCallback(async () => {
+    if (!company?.id) return;
+    try {
+      const { data, error } = await supabase.rpc('get_active_planning_cycle', {
+        p_company_id: company.id,
+      });
+      if (error) throw error;
+      if (data && data.length > 0) {
+        const row = data[0];
+        setActiveCycle({
+          id: row.id,
+          period: row.period,
+          title: row.title,
+          status: row.status,
+          startsAt: row.starts_at,
+          deadlineAt: row.deadline_at,
+          gracePeriodAt: row.grace_period_at,
+          companyOkrFinalized: row.company_okr_finalized,
+          message: row.message,
+          daysRemaining: row.days_remaining,
+          isOverdue: row.is_overdue,
+        });
+      } else {
+        setActiveCycle(null);
+      }
+    } catch (err) {
+      console.warn('사이클 조회 실패:', err);
+      setActiveCycle(null);
+    }
+  }, [company?.id]);
+
+  // ─── 조직 상태 조회 (사이클 기반 RPC 또는 기존 방식) ──
+  const fetchOrgStatuses = useCallback(async () => {
     setLoading(true);
     try {
-      const subOrgs = organizations.filter(o => o.level !== '전사');
-      const statuses: OrgStatus[] = [];
-
-      for (const org of subOrgs) {
-        const { data: okrSet } = await supabase
-          .from('okr_sets').select('status')
-          .eq('org_id', org.id).eq('period', currentPeriod)
-          .order('version', { ascending: false }).limit(1).maybeSingle();
-
-        const { count: objCount } = await supabase
-          .from('objectives').select('*', { count: 'exact', head: true }).eq('org_id', org.id);
-        const { count: krCount } = await supabase
-          .from('key_results').select('*', { count: 'exact', head: true }).eq('org_id', org.id);
-
-        let headName: string | null = null;
-        let headId: string | null = null;
-        try {
-          const { data: hr } = await supabase
-            .from('user_roles').select('profile_id, role:roles!inner(name)')
-            .eq('org_id', org.id).in('roles.name', ['org_head', 'company_admin'])
-            .limit(1).maybeSingle();
-          if (hr?.profile_id) {
-            headId = hr.profile_id;
-            const { data: p } = await supabase.from('profiles').select('full_name').eq('id', hr.profile_id).single();
-            headName = p?.full_name || null;
-          }
-        } catch {}
-
-        const { data: lastNudge } = await supabase
-          .from('notifications').select('created_at')
-          .eq('type', 'okr_draft_reminder').eq('org_id', org.id)
-          .order('created_at', { ascending: false }).limit(1).maybeSingle();
-
-        let status: OrgStatus['okrStatus'] = 'not_started';
-        if (okrSet?.status === 'finalized') status = 'finalized';
-        else if (okrSet?.status === 'approved') status = 'approved';
-        else if (okrSet?.status === 'submitted' || okrSet?.status === 'under_review') status = 'submitted';
-        else if (okrSet?.status === 'draft' || okrSet?.status === 'revision_requested') status = 'draft';
-
-        statuses.push({
-          id: org.id, name: org.name, level: org.level,
-          headName, headId, okrStatus: status,
-          objectiveCount: objCount || 0, krCount: krCount || 0,
-          lastNudgedAt: lastNudge?.created_at || null,
-          selected: status === 'not_started' || status === 'draft',
+      if (activeCycle?.id) {
+        // 사이클 있으면 RPC로 한 번에 조회 (N+1 제거)
+        const { data, error } = await supabase.rpc('get_cycle_setup_stats', {
+          p_cycle_id: activeCycle.id,
         });
+        if (error) throw error;
+
+        const statuses: OrgStatus[] = (data || []).map((row: any) => {
+          let status: OrgStatus['okrStatus'] = 'not_started';
+          const s = row.okr_set_status;
+          if (s === 'finalized') status = 'finalized';
+          else if (s === 'approved') status = 'approved';
+          else if (s === 'submitted' || s === 'under_review') status = 'submitted';
+          else if (s === 'draft' || s === 'revision_requested') status = 'draft';
+
+          return {
+            id: row.org_id, name: row.org_name, level: row.org_level,
+            headName: row.head_name, headId: row.head_profile_id,
+            okrStatus: status,
+            objectiveCount: row.objective_count || 0, krCount: row.kr_count || 0,
+            submittedAt: row.submitted_at, approvedAt: row.approved_at,
+            lastNudgedAt: null,
+            selected: status === 'not_started' || status === 'draft',
+          };
+        });
+
+        // 독촉 시간 일괄 조회
+        const orgIds = statuses.map(s => s.id);
+        if (orgIds.length > 0) {
+          const { data: nudges } = await supabase
+            .from('notifications').select('org_id, created_at')
+            .eq('type', 'okr_draft_reminder').in('org_id', orgIds)
+            .order('created_at', { ascending: false });
+          if (nudges) {
+            const nudgeMap = new Map<string, string>();
+            for (const n of nudges) {
+              if (n.org_id && !nudgeMap.has(n.org_id)) nudgeMap.set(n.org_id, n.created_at);
+            }
+            for (const s of statuses) s.lastNudgedAt = nudgeMap.get(s.id) || null;
+          }
+        }
+        setOrgStatuses(statuses);
+      } else {
+        // 사이클 없으면 기존 방식
+        const subOrgs = organizations.filter(o => o.level !== '전사');
+        const statuses: OrgStatus[] = [];
+        for (const org of subOrgs) {
+          const { data: okrSet } = await supabase
+            .from('okr_sets').select('status, submitted_at, reviewed_at')
+            .eq('org_id', org.id).eq('period', currentPeriod)
+            .order('version', { ascending: false }).limit(1).maybeSingle();
+          const { count: objCount } = await supabase
+            .from('objectives').select('*', { count: 'exact', head: true }).eq('org_id', org.id);
+          const { count: krCount } = await supabase
+            .from('key_results').select('*', { count: 'exact', head: true }).eq('org_id', org.id);
+          let headName: string | null = null, headId: string | null = null;
+          try {
+            const { data: hr } = await supabase
+              .from('user_roles').select('profile_id, role:roles!inner(name)')
+              .eq('org_id', org.id).in('roles.name', ['org_head', 'company_admin'])
+              .limit(1).maybeSingle();
+            if (hr?.profile_id) {
+              headId = hr.profile_id;
+              const { data: p } = await supabase.from('profiles').select('full_name').eq('id', hr.profile_id).single();
+              headName = p?.full_name || null;
+            }
+          } catch {}
+          const { data: lastNudge } = await supabase
+            .from('notifications').select('created_at')
+            .eq('type', 'okr_draft_reminder').eq('org_id', org.id)
+            .order('created_at', { ascending: false }).limit(1).maybeSingle();
+
+          let status: OrgStatus['okrStatus'] = 'not_started';
+          if (okrSet?.status === 'finalized') status = 'finalized';
+          else if (okrSet?.status === 'approved') status = 'approved';
+          else if (okrSet?.status === 'submitted' || okrSet?.status === 'under_review') status = 'submitted';
+          else if (okrSet?.status === 'draft' || okrSet?.status === 'revision_requested') status = 'draft';
+
+          statuses.push({
+            id: org.id, name: org.name, level: org.level,
+            headName, headId, okrStatus: status,
+            objectiveCount: objCount || 0, krCount: krCount || 0,
+            submittedAt: okrSet?.submitted_at || null, approvedAt: okrSet?.reviewed_at || null,
+            lastNudgedAt: lastNudge?.created_at || null,
+            selected: status === 'not_started' || status === 'draft',
+          });
+        }
+        setOrgStatuses(statuses);
       }
-      setOrgStatuses(statuses);
     } catch (err) { console.warn('조직 상태 조회 실패:', err); }
     finally { setLoading(false); }
-  };
+  }, [activeCycle, organizations, currentPeriod]);
 
-  useEffect(() => { if (organizations.length > 0) fetchOrgStatuses(); }, [organizations, currentPeriod]);
+  useEffect(() => { if (company?.id) fetchActiveCycle(); }, [company?.id, fetchActiveCycle]);
+  useEffect(() => { if (organizations.length > 0) fetchOrgStatuses(); }, [organizations, activeCycle, fetchOrgStatuses]);
 
+  // ─── 필터/통계 ────────────────────────────────────────
   const filteredOrgs = useMemo(() => {
     let list = [...orgStatuses];
     if (searchQuery) {
@@ -131,10 +241,7 @@ export default function OKRSetupStatus() {
 
   const selectedCount = orgStatuses.filter(o => o.selected).length;
 
-  const toggleSelect = (id: string) => {
-    setOrgStatuses(p => p.map(o => o.id === id ? { ...o, selected: !o.selected } : o));
-  };
-
+  const toggleSelect = (id: string) => setOrgStatuses(p => p.map(o => o.id === id ? { ...o, selected: !o.selected } : o));
   const selectByStatus = (s: 'all' | 'incomplete' | 'none') => {
     setOrgStatuses(p => p.map(o => {
       const can = o.headId && o.okrStatus !== 'finalized' && o.okrStatus !== 'approved';
@@ -152,11 +259,12 @@ export default function OKRSetupStatus() {
     setSending(true);
     try {
       const { data: me } = await supabase.from('profiles').select('full_name').eq('id', user?.id).single();
-      const msg = nudgeMessage.trim() || `${currentPeriod} OKR 수립 기한이 임박했습니다. 빠른 시일 내에 목표를 수립하고 제출해 주세요.`;
+      const period = activeCycle?.period || currentPeriod;
+      const msg = nudgeMessage.trim() || `${period} OKR 수립 기한이 임박했습니다. 빠른 시일 내에 목표를 수립하고 제출해 주세요.`;
       for (const org of targets) {
         await supabase.from('notifications').insert({
           recipient_id: org.headId, type: 'okr_draft_reminder',
-          title: `📢 ${currentPeriod} OKR 수립 요청`,
+          title: `📢 ${period} OKR 수립 요청`,
           message: `${me?.full_name || 'CEO'}님의 메시지: ${msg}`,
           priority: 'high', action_url: `/wizard/${org.id}`,
           sender_id: user?.id, sender_name: me?.full_name || 'CEO', org_id: org.id,
@@ -170,15 +278,7 @@ export default function OKRSetupStatus() {
     finally { setSending(false); }
   };
 
-  const timeAgo = (d: string | null) => {
-    if (!d) return null;
-    const m = Math.floor((Date.now() - new Date(d).getTime()) / 60000);
-    if (m < 60) return `${m}분 전`;
-    const h = Math.floor(m / 60);
-    if (h < 24) return `${h}시간 전`;
-    return `${Math.floor(h / 24)}일 전`;
-  };
-
+  // ─── 권한 체크 ────────────────────────────────────────
   if (roleLevel > 0 && roleLevel < 50) {
     return (
       <div className="p-6 max-w-7xl mx-auto text-center py-20">
@@ -188,6 +288,15 @@ export default function OKRSetupStatus() {
       </div>
     );
   }
+
+  const dDayColor = !activeCycle ? 'text-slate-500'
+    : activeCycle.isOverdue ? 'text-red-600'
+    : activeCycle.daysRemaining <= 3 ? 'text-amber-600'
+    : activeCycle.daysRemaining <= 7 ? 'text-blue-600' : 'text-slate-700';
+
+  const dDayText = !activeCycle ? ''
+    : activeCycle.isOverdue ? `마감 ${Math.abs(activeCycle.daysRemaining)}일 초과`
+    : activeCycle.daysRemaining === 0 ? '오늘 마감' : `D-${activeCycle.daysRemaining}`;
 
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
@@ -199,14 +308,102 @@ export default function OKRSetupStatus() {
           </div>
           <div>
             <h1 className="text-2xl font-bold text-slate-900">OKR 수립 현황</h1>
-            <p className="text-sm text-slate-500">{currentPeriod} · {company?.name || ''}</p>
+            <p className="text-sm text-slate-500">
+              {activeCycle ? activeCycle.title : `${currentPeriod} · ${company?.name || ''}`}
+            </p>
           </div>
         </div>
-        <button onClick={fetchOrgStatuses} disabled={loading}
+        <button onClick={() => { fetchActiveCycle(); fetchOrgStatuses(); }} disabled={loading}
           className="px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-600 hover:bg-slate-50 flex items-center gap-1.5">
           <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /> 새로고침
         </button>
       </div>
+
+      {/* ─── 사이클 정보 카드 ─────────────────────────── */}
+      {activeCycle && (
+        <div className={`rounded-xl border p-5 ${
+          activeCycle.isOverdue ? 'bg-red-50 border-red-200' :
+          activeCycle.daysRemaining <= 3 ? 'bg-amber-50 border-amber-200' :
+          'bg-blue-50 border-blue-200'
+        }`}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className={`text-center px-4 py-2 rounded-lg ${
+                activeCycle.isOverdue ? 'bg-red-100' :
+                activeCycle.daysRemaining <= 3 ? 'bg-amber-100' : 'bg-blue-100'
+              }`}>
+                <div className={`text-2xl font-black ${dDayColor}`}>{dDayText}</div>
+                <div className="text-xs text-slate-500 mt-0.5">마감까지</div>
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-center gap-3 text-sm">
+                  <span className="flex items-center gap-1.5 text-slate-600">
+                    <CalendarClock className="w-4 h-4" />시작: {formatDate(activeCycle.startsAt)}
+                  </span>
+                  <ArrowRight className="w-3 h-3 text-slate-400" />
+                  <span className={`flex items-center gap-1.5 font-medium ${dDayColor}`}>
+                    <Timer className="w-4 h-4" />마감: {formatDate(activeCycle.deadlineAt)}
+                  </span>
+                  {activeCycle.gracePeriodAt && (
+                    <>
+                      <span className="text-slate-300">|</span>
+                      <span className="text-xs text-slate-400 flex items-center gap-1">
+                        <AlertTriangle className="w-3 h-3" />유예: {formatDate(activeCycle.gracePeriodAt)}
+                      </span>
+                    </>
+                  )}
+                </div>
+                <div className="flex items-center gap-3 text-sm">
+                  <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                    activeCycle.status === 'planning' ? 'bg-slate-200 text-slate-700' :
+                    activeCycle.status === 'in_progress' ? 'bg-blue-200 text-blue-800' :
+                    activeCycle.status === 'closed' ? 'bg-amber-200 text-amber-800' : 'bg-green-200 text-green-800'
+                  }`}>
+                    {activeCycle.status === 'planning' ? '전사 OKR 수립중' :
+                     activeCycle.status === 'in_progress' ? '하위 조직 수립 진행중' :
+                     activeCycle.status === 'closed' ? '마감' : '확정'}
+                  </span>
+                  {activeCycle.companyOkrFinalized && (
+                    <span className="text-xs text-green-600 flex items-center gap-1">
+                      <CheckCircle2 className="w-3.5 h-3.5" /> 전사 OKR 확정됨
+                    </span>
+                  )}
+                </div>
+                {activeCycle.message && (
+                  <p className="text-xs text-slate-500 flex items-start gap-1 mt-1">
+                    <Megaphone className="w-3 h-3 mt-0.5 shrink-0" />{activeCycle.message}
+                  </p>
+                )}
+              </div>
+            </div>
+            <div className="text-center">
+              <div className={`text-3xl font-black ${stats.completionRate >= 80 ? 'text-green-600' : stats.completionRate >= 50 ? 'text-blue-600' : dDayColor}`}>
+                {stats.completionRate}%
+              </div>
+              <div className="text-xs text-slate-500">승인 완료</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 사이클 없을 때 안내 */}
+      {!activeCycle && !loading && (
+        <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <CalendarClock className="w-8 h-8 text-slate-300" />
+            <div>
+              <p className="text-sm font-medium text-slate-700">활성 수립 사이클이 없습니다</p>
+              <p className="text-xs text-slate-400">관리자 설정에서 새 수립 사이클을 만들어주세요</p>
+            </div>
+          </div>
+          {roleLevel >= 90 && (
+            <button onClick={() => navigate('/admin')}
+              className="px-3 py-2 text-sm text-blue-600 hover:bg-blue-50 rounded-lg transition-colors flex items-center gap-1">
+              설정으로 이동 <ChevronRight className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+      )}
 
       {/* 요약 카드 5개 */}
       <div className="grid grid-cols-5 gap-4">
@@ -225,11 +422,9 @@ export default function OKRSetupStatus() {
           const cfg = STATUS_CONFIG[key];
           const Icon = cfg.icon;
           const count = key === 'approved' ? stats.approved + stats.finalized
-            : key === 'not_started' ? stats.notStarted
-            : key === 'draft' ? stats.draft : stats.submitted;
+            : key === 'not_started' ? stats.notStarted : key === 'draft' ? stats.draft : stats.submitted;
           const desc = key === 'not_started' ? '아직 시작하지 않은 조직'
-            : key === 'draft' ? '초안 작성 진행중'
-            : key === 'submitted' ? '검토 대기중' : '수립 완료';
+            : key === 'draft' ? '초안 작성 진행중' : key === 'submitted' ? '검토 대기중' : '수립 완료';
           const active = statusFilter === key;
           return (
             <button key={key} onClick={() => setStatusFilter(active ? 'all' : key)}
@@ -250,9 +445,7 @@ export default function OKRSetupStatus() {
         <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
           <div className="flex items-center justify-between mb-3">
             <span className="text-sm font-semibold text-slate-700">수립 진행 현황</span>
-            {statusFilter !== 'all' && (
-              <button onClick={() => setStatusFilter('all')} className="text-xs text-blue-600 hover:underline">필터 초기화</button>
-            )}
+            {statusFilter !== 'all' && <button onClick={() => setStatusFilter('all')} className="text-xs text-blue-600 hover:underline">필터 초기화</button>}
           </div>
           <div className="flex gap-0.5 h-4 rounded-full overflow-hidden bg-slate-100">
             {stats.finalized > 0 && <div className="bg-emerald-500" style={{ width: `${(stats.finalized / stats.total) * 100}%` }} />}
@@ -273,7 +466,6 @@ export default function OKRSetupStatus() {
 
       {/* 테이블 영역 */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-        {/* 툴바 */}
         <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between gap-4 flex-wrap">
           <div className="flex items-center gap-3 flex-1 min-w-0">
             <div className="relative flex-1 max-w-sm">
@@ -307,7 +499,6 @@ export default function OKRSetupStatus() {
           </div>
         )}
 
-        {/* 테이블 */}
         <div className="overflow-x-auto">
           {loading ? (
             <div className="py-16 text-center">
@@ -377,10 +568,18 @@ export default function OKRSetupStatus() {
                           : <span className="text-xs text-slate-300">—</span>}
                       </td>
                       <td className="pr-6 pl-3 py-3 text-center">
-                        <button onClick={() => navigate(`/wizard/${org.id}`)}
-                          className="text-xs text-blue-600 hover:text-blue-700 font-medium inline-flex items-center gap-0.5">
-                          보기 <ChevronRight className="w-3 h-3" />
-                        </button>
+                        <div className="flex items-center justify-center gap-2">
+                          {org.okrStatus === 'submitted' && (
+                            <button onClick={() => navigate('/approval-inbox')}
+                              className="text-xs text-green-600 hover:text-green-700 font-medium inline-flex items-center gap-0.5">
+                              승인 <CheckCircle2 className="w-3 h-3" />
+                            </button>
+                          )}
+                          <button onClick={() => navigate(`/wizard/${org.id}`)}
+                            className="text-xs text-blue-600 hover:text-blue-700 font-medium inline-flex items-center gap-0.5">
+                            보기 <ChevronRight className="w-3 h-3" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
