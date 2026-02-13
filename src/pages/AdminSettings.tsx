@@ -1,7 +1,7 @@
 // src/pages/AdminSettings.tsx
 import { useState, useEffect } from 'react';
-import { useSearchParams } from 'react-router-dom';
-import { Shield, Users, Layers, Lock, Settings as SettingsIcon, ChevronRight, Building2, Mail, CalendarClock } from 'lucide-react';
+import { useSearchParams, useNavigate } from 'react-router-dom';
+import { Shield, Users, Layers, Lock, Settings as SettingsIcon, ChevronRight, Building2, Mail, CalendarClock, ArrowLeft, X } from 'lucide-react';
 import UserRolesManager from '../components/admin/UserRolesManager';
 import OrgStructureSettings from '../components/admin/OrgStructureSettings';
 import RolePermissionsManager from '../components/admin/RolePermissionsManager';
@@ -24,6 +24,7 @@ const TAB_ALIASES: Record<string, TabType> = {
 
 export default function AdminSettings() {
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const tabParam = searchParams.get('tab');
   const initialTab: TabType = (tabParam && TAB_ALIASES[tabParam]) || 'companies';
 
@@ -92,7 +93,7 @@ export default function AdminSettings() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-20">
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
       </div>
     );
@@ -101,16 +102,38 @@ export default function AdminSettings() {
   return (
     <div className="min-h-screen bg-slate-50">
       {/* 헤더 */}
-      <div className="bg-white border-b border-slate-200">
-        <div className="max-w-7xl mx-auto px-6 py-6">
-          <div className="flex items-center gap-3 mb-2">
-            <div className="p-2 bg-purple-100 rounded-lg">
-              <SettingsIcon className="w-6 h-6 text-purple-600" />
+      <div className="bg-white border-b border-slate-200 sticky top-0 z-10">
+        <div className="max-w-7xl mx-auto px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              {/* 뒤로가기 버튼 */}
+              <button
+                onClick={() => navigate('/')}
+                className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
+                title="대시보드로 돌아가기"
+              >
+                <ArrowLeft className="w-5 h-5 text-slate-600" />
+              </button>
+              
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-purple-100 rounded-lg">
+                  <SettingsIcon className="w-6 h-6 text-purple-600" />
+                </div>
+                <div>
+                  <h1 className="text-xl font-bold text-slate-900">관리자 설정</h1>
+                  <p className="text-sm text-slate-600">권한 및 조직 구조 관리</p>
+                </div>
+              </div>
             </div>
-            <div>
-              <h1 className="text-2xl font-bold text-slate-900">관리자 설정</h1>
-              <p className="text-sm text-slate-600 mt-1">권한 및 조직 구조 관리</p>
-            </div>
+            
+            {/* 닫기 버튼 */}
+            <button
+              onClick={() => navigate('/')}
+              className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
+              title="닫기"
+            >
+              <X className="w-5 h-5 text-slate-600" />
+            </button>
           </div>
         </div>
       </div>
@@ -147,6 +170,8 @@ export default function AdminSettings() {
                 {activeTab === 'structure' && '회사의 조직 계층 구조(전사-본부-팀 등)를 정의합니다.'}
                 {activeTab === 'permissions' && '시스템의 모든 권한 목록을 확인할 수 있습니다.'}
                 {activeTab === 'cycles' && 'OKR 수립 기간을 선언하고 진행 상황을 관리합니다. 수립 시작 → 마감 → 확정 순서로 사이클을 운영합니다.'}
+                {activeTab === 'companies' && '등록된 회사 목록을 관리하고 새 회사를 추가할 수 있습니다.'}
+                {activeTab === 'invite' && '이메일로 새로운 팀원을 초대하거나 팀 초대 링크를 생성할 수 있습니다.'}
               </p>
             </div>
           </div>
@@ -239,4 +264,4 @@ function PermissionsList() {
       </div>
     </div>
   );
-} 
+}
