@@ -10,7 +10,7 @@ import CompanyManagement from '../components/admin/CompanyManagement';
 import UserInvitation from '../components/admin/UserInvitation';
 import PlanningCycleManager from '../components/PlanningCycleManager';
 
-type TabType = 'companies' | 'invite' | 'users' | 'roles' | 'structure' | 'permissions' | 'cycles';
+type TabType = 'companies' | 'invite' | 'users' | 'roles' | 'structure' | 'levels' | 'permissions' | 'cycles';
 
 const TAB_ALIASES: Record<string, TabType> = {
   'planning-cycles': 'cycles',
@@ -19,6 +19,7 @@ const TAB_ALIASES: Record<string, TabType> = {
   'invite': 'invite',
   'roles': 'roles',
   'structure': 'structure',
+  'levels': 'levels',
   'permissions': 'permissions',
   'companies': 'companies',
 };
@@ -84,8 +85,9 @@ export default function AdminSettings() {
     { id: 'invite' as TabType, name: '사용자 초대', icon: Mail, description: '새로운 팀원 초대 및 초대 관리', minLevel: 90 },
     { id: 'users' as TabType, name: '사용자 관리', icon: Users, description: '사용자별 역할 및 권한 할당', minLevel: 90 },
     { id: 'cycles' as TabType, name: '수립 사이클', icon: CalendarClock, description: 'OKR 수립 기간 선언 및 관리', minLevel: 90 },
+    { id: 'structure' as TabType, name: '조직 편집', icon: Building2, description: '조직 추가/수정/삭제 및 AI 생성', minLevel: 90 },
+    { id: 'levels' as TabType, name: '조직 계층', icon: Layers, description: '조직 계층 구조 템플릿 설정', minLevel: 90 },
     { id: 'roles' as TabType, name: '역할 관리', icon: Shield, description: '역할별 권한 설정 및 수정', minLevel: 100 },
-    { id: 'structure' as TabType, name: '조직 구조', icon: Layers, description: '조직 계층 템플릿 설정', minLevel: 90 },
     { id: 'permissions' as TabType, name: '권한 목록', icon: Lock, description: '전체 권한 목록 조회', minLevel: 100 },
   ];
 
@@ -168,7 +170,8 @@ export default function AdminSettings() {
               <p className="text-xs text-purple-700 leading-relaxed">
                 {activeTab === 'users' && '사용자에게 역할을 할당하거나 특정 조직에서의 권한을 설정할 수 있습니다.'}
                 {activeTab === 'roles' && '각 역할(팀장, 본부장 등)이 가질 수 있는 권한을 설정합니다.'}
-                {activeTab === 'structure' && '회사의 조직 계층 구조(전사-본부-팀 등)를 정의합니다.'}
+                {activeTab === 'structure' && '조직을 추가, 수정, 삭제하거나 AI로 자동 생성할 수 있습니다.'}
+                {activeTab === 'levels' && '회사의 조직 계층 구조(전사-본부-팀 등)를 정의합니다.'}
                 {activeTab === 'permissions' && '시스템의 모든 권한 목록을 확인할 수 있습니다.'}
                 {activeTab === 'cycles' && 'OKR 수립 기간을 선언하고 진행 상황을 관리합니다. 수립 시작 → 마감 → 확정 순서로 사이클을 운영합니다.'}
                 {activeTab === 'companies' && '등록된 회사 목록을 관리하고 새 회사를 추가할 수 있습니다.'}
@@ -185,6 +188,7 @@ export default function AdminSettings() {
               {activeTab === 'users' && <UserManagement />}
               {activeTab === 'roles' && <RoleManagement />}
               {activeTab === 'structure' && <StructureManagement />}
+              {activeTab === 'levels' && <LevelSettings />}
               {activeTab === 'permissions' && <PermissionsList />}
               {activeTab === 'cycles' && <PlanningCycleManager />}
             </div>
@@ -210,10 +214,17 @@ function RoleManagement() {
 }
 
 // ============================================
-// 3. 조직 구조 관리 컴포넌트
+// 3. 조직 구조 관리 컴포넌트 (조직 추가/수정/삭제)
 // ============================================
 function StructureManagement() {
   return <OrgStructureManager />;
+}
+
+// ============================================
+// 3-1. 조직 계층 설정 컴포넌트 (계층 템플릿)
+// ============================================
+function LevelSettings() {
+  return <OrgStructureSettings />;
 }
 
 // ============================================
