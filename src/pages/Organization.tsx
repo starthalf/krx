@@ -1,498 +1,420 @@
-// src/components/admin/OrgStructureSettings.tsx
-import { useEffect, useState, useCallback } from 'react';
-import { useStore } from '../../store/useStore';
-import { 
-  getOrgLevelTemplate, 
-  OrgLevelTemplate 
-} from '../../lib/permissions';
-import { getMyRoleLevel } from '../../lib/permissions';
-import { supabase } from '../../lib/supabase';
-import { 
-  Layers, Plus, Trash2, Save, AlertCircle, Check, Building2, 
-  GripVertical, AlertTriangle 
+// src/pages/Organization.tsx
+// 조회 전용 - 편집은 관리자 설정에서 가능
+import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import {
+  ChevronRight, ChevronDown, Building2, Users, Target,
+  Settings, Loader2, Search, Filter, LayoutGrid, List
 } from 'lucide-react';
+import { useStore } from '../store/useStore';
+import { getOrgTypeColor } from '../utils/helpers';
+import type { Organization } from '../types';
 
-interface LevelInput {
-  level_order: number;
-  level_name: string;
-  level_code: string;
-  is_required: boolean;
-}
+export default function OrganizationPage() {
+  const navigate = useNavigate();
+  const { organizations, loading, company } = useStore();
 
-interface Company {
-  id: string;
-  name: string;
-}
+  const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null);
+  const [expandedOrgs, setExpandedOrgs] = useState<Set<string>>(new Set());
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterType, setFilterType] = useState<'all' | 'Front' | 'Middle' | 'Back'>('all');
+  const [viewMode, setViewMode] = useState<'tree' | 'grid'>('tree');
 
-export default function OrgStructureSettings() {
-  const { organizations } = useStore();
-  const [roleLevel, setRoleLevel] = useState<number>(0);
-  const [companies, setCompanies] = useState<Company[]>([]);
-  const [selectedCompanyId, setSelectedCompanyId] = useState<string>('');
-  const [template, setTemplate] = useState<OrgLevelTemplate[]>([]);
-  const [editMode, setEditMode] = useState(false);
-  const [editedLevels, setEditedLevels] = useState<LevelInput[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [saveSuccess, setSaveSuccess] = useState(false);
-  
-  // 드래그 상태
-  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
-  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
-
-  // 역할 레벨 확인
+  // 초기 선택 및 확장
   useEffect(() => {
-    const checkRole = async () => {
-      const level = await getMyRoleLevel();
-      setRoleLevel(level);
-    };
-    checkRole();
-  }, []);
+    if (organizations.length > 0 && !selectedOrgId) {
+      const rootOrg = organizations.find(o => !o.parentOrgId) || organizations[0];
+      if (rootOrg) {
+        setSelectedOrgId(rootOrg.id);
+        // 루트와 1단계 하위까지 확장
+        const toExpand = new Set([rootOrg.id]);
+        organizations.filter(o => o.parentOrgId === rootOrg.id).forEach(o => toExpand.add(o.id));
+        setExpandedOrgs(toExpand);
+      }
+    }
+  }, [organizations, selectedOrgId]);
 
-  // 회사 목록 로딩
-  useEffect(() => {
-    const loadCompanies = async () => {
-      try {
-        if (roleLevel >= 100) {
-          const { data, error } = await supabase
-            .from('companies')
-            .select('id, name')
-            .order('name');
+  const selectedOrg = organizations.find(org => org.id === selectedOrgId);
+
+  // 트리 토글
+  const toggleExpand = (orgId: string) => {
+    const newExpanded = new Set(expandedOrgs);
+    if (newExpanded.has(orgId)) newExpanded.delete(orgId);
+    else newExpanded.add(orgId);
+    setExpandedOrgs(newExpanded);
+  };
+
+  const getChildOrgs = (parentId: string | null) =>
+    organizations.filter(org => org.parentOrgId === parentId);
+
+  // 검색 필터링
+  const filteredOrganizations = organizations.filter(org => {
+    const matchesSearch = !searchQuery || 
+      org.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      org.mission?.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesType = filterType === 'all' || org.orgType === filterType;
+    return matchesSearch && matchesType;
+  });
+
+  // 통계 계산
+  const stats = {
+    total: organizations.length,
+    front: organizations.filter(o => o.orgType === 'Front').length,
+    middle: organizations.filter(o => o.orgType === 'Middle').length,
+    back: organizations.filter(o => o.orgType === 'Back').length,
+    totalHeadcount: organizations.reduce((sum, o) => sum + (o.headcount || 0), 0),
+  };
+
+  // 트리 렌더링
+  const renderOrgTree = (org: Organization, level: number = 0) => {
+    // 검색 중이면 필터된 결과만 표시
+    if (searchQuery && !filteredOrganizations.some(fo => fo.id === org.id)) {
+      return null;
+    }
+
+    const children = getChildOrgs(org.id);
+    const hasChildren = children.length > 0;
+    const isExpanded = expandedOrgs.has(org.id);
+    const isSelected = selectedOrgId === org.id;
+
+    return (
+      <div key={org.id}>
+        <div
+          onClick={() => setSelectedOrgId(org.id)}
+          className={`flex items-center gap-2 px-3 py-2.5 rounded-lg cursor-pointer transition-all ${
+            isSelected 
+              ? 'bg-blue-50 text-blue-700 border border-blue-200' 
+              : 'hover:bg-slate-50 border border-transparent'
+          }`}
+          style={{ paddingLeft: `${level * 20 + 12}px` }}
+        >
+          {hasChildren ? (
+            <button 
+              onClick={(e) => { e.stopPropagation(); toggleExpand(org.id); }} 
+              className="p-0.5 hover:bg-slate-200 rounded"
+            >
+              {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+            </button>
+          ) : (
+            <div className="w-5" />
+          )}
           
-          if (error) throw error;
-          setCompanies(data || []);
-          
-          if (data && data.length > 0 && !selectedCompanyId) {
-            setSelectedCompanyId(data[0].id);
-          }
-        } else {
-          if (organizations.length > 0) {
-            const myCompanyId = organizations[0].companyId;
-            
-            const { data, error } = await supabase
-              .from('companies')
-              .select('id, name')
-              .eq('id', myCompanyId)
-              .single();
-            
-            if (error) throw error;
-            if (data) {
-              setCompanies([data]);
-              setSelectedCompanyId(data.id);
-            }
-          }
-        }
-      } catch (error) {
-        console.error('Failed to load companies:', error);
-      }
-    };
-
-    if (roleLevel > 0) {
-      loadCompanies();
-    }
-  }, [roleLevel, organizations]);
-
-  // 템플릿 로딩
-  useEffect(() => {
-    const loadTemplate = async () => {
-      if (!selectedCompanyId) return;
-      try {
-        setLoading(true);
-        const data = await getOrgLevelTemplate(selectedCompanyId);
-        setTemplate(data);
-        setEditedLevels(data.map(t => ({
-          level_order: t.level_order,
-          level_name: t.level_name,
-          level_code: t.level_code,
-          is_required: t.is_required
-        })));
-      } catch (error) {
-        console.error('Failed to load template:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-    loadTemplate();
-  }, [selectedCompanyId]);
-
-  // 레벨 추가
-  const handleAddLevel = () => {
-    const newOrder = editedLevels.length + 1;
-    setEditedLevels([...editedLevels, {
-      level_order: newOrder, 
-      level_name: '', 
-      level_code: '', 
-      is_required: true
-    }]);
+          <div className="flex-1 min-w-0">
+            <div className="font-medium text-sm truncate">{org.name}</div>
+            <div className="flex items-center gap-2 mt-0.5">
+              <span className={`px-1.5 py-0.5 text-xs rounded border ${getOrgTypeColor(org.orgType)}`}>
+                {org.orgType}
+              </span>
+              <span className="text-xs text-slate-500">{org.level}</span>
+              {org.headcount > 0 && (
+                <span className="text-xs text-slate-400 flex items-center gap-0.5">
+                  <Users className="w-3 h-3" /> {org.headcount}
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+        
+        {hasChildren && isExpanded && (
+          <div>{children.map(child => renderOrgTree(child, level + 1))}</div>
+        )}
+      </div>
+    );
   };
 
-  // 레벨 삭제
-  const handleRemoveLevel = (index: number) => {
-    const updated = editedLevels.filter((_, i) => i !== index);
-    // 순서 재정렬
-    setEditedLevels(updated.map((level, i) => ({
-      ...level,
-      level_order: i + 1
-    })));
-  };
+  // 그리드 카드 렌더링
+  const renderOrgCard = (org: Organization) => (
+    <div
+      key={org.id}
+      onClick={() => setSelectedOrgId(org.id)}
+      className={`p-4 rounded-xl border-2 cursor-pointer transition-all hover:shadow-md ${
+        selectedOrgId === org.id
+          ? 'border-blue-500 bg-blue-50'
+          : 'border-slate-200 hover:border-slate-300'
+      }`}
+    >
+      <div className="flex items-start justify-between mb-2">
+        <h3 className="font-semibold text-slate-900 truncate">{org.name}</h3>
+        <span className={`px-2 py-0.5 text-xs rounded-full border ${getOrgTypeColor(org.orgType)}`}>
+          {org.orgType}
+        </span>
+      </div>
+      <p className="text-xs text-slate-500 mb-2">{org.level}</p>
+      {org.mission && (
+        <p className="text-sm text-slate-600 line-clamp-2 mb-2">{org.mission}</p>
+      )}
+      <div className="flex items-center gap-3 text-xs text-slate-500">
+        <span className="flex items-center gap-1">
+          <Users className="w-3.5 h-3.5" /> {org.headcount || 0}명
+        </span>
+        <span className="flex items-center gap-1">
+          <Target className="w-3.5 h-3.5" /> {getChildOrgs(org.id).length}개 하위
+        </span>
+      </div>
+    </div>
+  );
 
-  // 레벨 수정
-  const handleUpdateLevel = (index: number, field: keyof LevelInput, value: any) => {
-    const updated = [...editedLevels];
-    updated[index] = { ...updated[index], [field]: value };
-    setEditedLevels(updated);
-  };
+  const rootOrgs = organizations.filter(org => org.parentOrgId === null);
 
-  // ─── 드래그 앤 드롭 핸들러 ───────────────────────────
-  const handleDragStart = (e: React.DragEvent, index: number) => {
-    setDraggedIndex(index);
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/html', ''); // Firefox 호환
-  };
+  // 로딩
+  if (loading && organizations.length === 0) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+      </div>
+    );
+  }
 
-  const handleDragOver = (e: React.DragEvent, index: number) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    if (draggedIndex !== index) {
-      setDragOverIndex(index);
-    }
-  };
-
-  const handleDragLeave = () => {
-    setDragOverIndex(null);
-  };
-
-  const handleDrop = (e: React.DragEvent, dropIndex: number) => {
-    e.preventDefault();
-    if (draggedIndex === null || draggedIndex === dropIndex) {
-      setDraggedIndex(null);
-      setDragOverIndex(null);
-      return;
-    }
-
-    const updated = [...editedLevels];
-    const [draggedItem] = updated.splice(draggedIndex, 1);
-    updated.splice(dropIndex, 0, draggedItem);
-
-    // 순서 재정렬
-    setEditedLevels(updated.map((level, i) => ({
-      ...level,
-      level_order: i + 1
-    })));
-
-    setDraggedIndex(null);
-    setDragOverIndex(null);
-  };
-
-  const handleDragEnd = () => {
-    setDraggedIndex(null);
-    setDragOverIndex(null);
-  };
-
-  // ─── 중복 코드 검사 ─────────────────────────────────
-  const getDuplicateCodes = useCallback(() => {
-    const codes = editedLevels.map(l => l.level_code.toUpperCase().trim()).filter(Boolean);
-    const duplicates = codes.filter((code, index) => codes.indexOf(code) !== index);
-    return [...new Set(duplicates)];
-  }, [editedLevels]);
-
-  // ─── 저장 (직접 구현) ──────────────────────────────
-  const handleSave = async () => {
-    // 빈 값 검사
-    const hasEmpty = editedLevels.some(l => !l.level_name.trim() || !l.level_code.trim());
-    if (hasEmpty) {
-      alert('모든 레벨의 이름과 코드를 입력해주세요');
-      return;
-    }
-
-    // 중복 코드 검사
-    const duplicates = getDuplicateCodes();
-    if (duplicates.length > 0) {
-      alert(`중복된 레벨 코드가 있습니다: ${duplicates.join(', ')}\n각 레벨은 고유한 코드를 가져야 합니다.`);
-      return;
-    }
-
-    try {
-      setLoading(true);
-
-      // 1. 기존 템플릿 전체 삭제
-      const { error: deleteError } = await supabase
-        .from('org_level_templates')
-        .delete()
-        .eq('company_id', selectedCompanyId);
-
-      if (deleteError) {
-        console.error('Delete error:', deleteError);
-        throw new Error('기존 데이터 삭제 실패: ' + deleteError.message);
-      }
-
-      // 2. 새 템플릿 삽입 (순서대로)
-      const insertData = editedLevels.map((l, index) => ({
-        company_id: selectedCompanyId,
-        level_order: index + 1,
-        level_name: l.level_name.trim(),
-        level_code: l.level_code.toUpperCase().trim(),
-        is_required: l.is_required
-      }));
-
-      const { error: insertError } = await supabase
-        .from('org_level_templates')
-        .insert(insertData);
-
-      if (insertError) {
-        console.error('Insert error:', insertError);
-        throw new Error('새 데이터 저장 실패: ' + insertError.message);
-      }
-
-      // 3. 새로 로드
-      const updated = await getOrgLevelTemplate(selectedCompanyId);
-      setTemplate(updated);
-      setEditedLevels(updated.map(t => ({
-        level_order: t.level_order,
-        level_name: t.level_name,
-        level_code: t.level_code,
-        is_required: t.is_required
-      })));
-      
-      setEditMode(false);
-      setSaveSuccess(true);
-      setTimeout(() => setSaveSuccess(false), 3000);
-    } catch (error: any) {
-      console.error('Failed to save template:', error);
-      alert('저장에 실패했습니다: ' + error.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleCancel = () => {
-    setEditedLevels(template.map(t => ({
-      level_order: t.level_order, 
-      level_name: t.level_name,
-      level_code: t.level_code, 
-      is_required: t.is_required
-    })));
-    setEditMode(false);
-  };
-
-  const duplicateCodes = getDuplicateCodes();
+  // 빈 상태
+  if (!loading && organizations.length === 0) {
+    return (
+      <div className="p-6">
+        <div className="bg-slate-50 border border-slate-200 rounded-xl p-8 text-center">
+          <Building2 className="w-12 h-12 text-slate-400 mx-auto mb-4" />
+          <h3 className="text-lg font-semibold text-slate-900 mb-2">조직이 없습니다</h3>
+          <p className="text-slate-600 mb-6">관리자 설정에서 조직 구조를 먼저 등록해주세요.</p>
+          <button
+            onClick={() => navigate('/admin?tab=structure')}
+            className="px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium inline-flex items-center gap-2"
+          >
+            <Settings className="w-4 h-4" /> 관리자 설정으로 이동
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div>
-      {/* 회사 선택 (Super Admin만) */}
-      {roleLevel >= 100 && companies.length > 1 && (
-        <div className="mb-6 p-4 bg-purple-50 border border-purple-200 rounded-lg">
-          <label className="block text-sm font-medium text-purple-900 mb-2 flex items-center gap-2">
-            <Building2 className="w-4 h-4" />
-            회사 선택 (Super Admin)
-          </label>
+    <div className="p-6 h-full flex flex-col">
+      {/* 헤더 */}
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">조직 관리</h1>
+          <p className="text-slate-600 mt-1">조직도 조회 및 정보 확인</p>
+        </div>
+        <button
+          onClick={() => navigate('/admin?tab=structure')}
+          className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors text-sm font-medium flex items-center gap-2"
+        >
+          <Settings className="w-4 h-4" /> 조직 편집
+        </button>
+      </div>
+
+      {/* 통계 카드 */}
+      <div className="grid grid-cols-5 gap-4 mb-6">
+        <div className="bg-white rounded-xl border border-slate-200 p-4">
+          <div className="text-2xl font-bold text-slate-900">{stats.total}</div>
+          <div className="text-sm text-slate-600">전체 조직</div>
+        </div>
+        <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-xl border border-green-200 p-4">
+          <div className="text-2xl font-bold text-green-700">{stats.front}</div>
+          <div className="text-sm text-green-600">Front</div>
+        </div>
+        <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl border border-blue-200 p-4">
+          <div className="text-2xl font-bold text-blue-700">{stats.middle}</div>
+          <div className="text-sm text-blue-600">Middle</div>
+        </div>
+        <div className="bg-gradient-to-br from-purple-50 to-violet-50 rounded-xl border border-purple-200 p-4">
+          <div className="text-2xl font-bold text-purple-700">{stats.back}</div>
+          <div className="text-sm text-purple-600">Back</div>
+        </div>
+        <div className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-xl border border-amber-200 p-4">
+          <div className="text-2xl font-bold text-amber-700">{stats.totalHeadcount}</div>
+          <div className="text-sm text-amber-600">총 인원</div>
+        </div>
+      </div>
+
+      {/* 검색 및 필터 */}
+      <div className="flex items-center gap-4 mb-4">
+        <div className="relative flex-1 max-w-md">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="조직명 또는 미션으로 검색..."
+            className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+          />
+        </div>
+        
+        <div className="flex items-center gap-2">
+          <Filter className="w-4 h-4 text-slate-400" />
           <select
-            value={selectedCompanyId}
-            onChange={(e) => {
-              setSelectedCompanyId(e.target.value);
-              setEditMode(false);
-            }}
-            className="w-full px-4 py-2 border border-purple-300 rounded-lg bg-white focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-none"
+            value={filterType}
+            onChange={(e) => setFilterType(e.target.value as any)}
+            className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
           >
-            <option value="">-- 회사를 선택하세요 --</option>
-            {companies.map((company) => (
-              <option key={company.id} value={company.id}>
-                {company.name}
-              </option>
-            ))}
+            <option value="all">전체 유형</option>
+            <option value="Front">Front</option>
+            <option value="Middle">Middle</option>
+            <option value="Back">Back</option>
           </select>
         </div>
-      )}
 
-      {/* 현재 회사 표시 (Company Admin) */}
-      {roleLevel >= 90 && roleLevel < 100 && companies.length > 0 && (
-        <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-          <div className="flex items-center gap-2 text-blue-900">
-            <Building2 className="w-5 h-5" />
-            <span className="font-semibold">현재 회사: {companies[0].name}</span>
-          </div>
+        <div className="flex border border-slate-300 rounded-lg overflow-hidden">
+          <button
+            onClick={() => setViewMode('tree')}
+            className={`px-3 py-2 text-sm ${viewMode === 'tree' ? 'bg-blue-50 text-blue-700' : 'text-slate-600 hover:bg-slate-50'}`}
+          >
+            <List className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => setViewMode('grid')}
+            className={`px-3 py-2 text-sm border-l ${viewMode === 'grid' ? 'bg-blue-50 text-blue-700' : 'text-slate-600 hover:bg-slate-50'}`}
+          >
+            <LayoutGrid className="w-4 h-4" />
+          </button>
         </div>
-      )}
+      </div>
 
-      {!selectedCompanyId ? (
-        <div className="text-center py-20 bg-slate-50 rounded-lg border border-slate-200">
-          <Building2 className="w-12 h-12 text-slate-400 mx-auto mb-3" />
-          <p className="text-slate-600">회사를 선택해주세요</p>
-        </div>
-      ) : (
-        <>
-          <div className="flex items-center justify-between mb-6">
-            <div>
-              <h2 className="text-xl font-bold text-slate-900 mb-2">조직 계층 구조 설정</h2>
-              <p className="text-sm text-slate-600">회사의 조직 계층을 정의합니다 (드래그로 순서 변경)</p>
-            </div>
-            {!editMode ? (
-              <button 
-                onClick={() => setEditMode(true)} 
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium"
-              >
-                수정하기
-              </button>
+      {/* 메인 콘텐츠 */}
+      <div className="flex-1 grid grid-cols-5 gap-6 min-h-0">
+        {/* 왼쪽: 조직 목록 */}
+        <div className="col-span-2 bg-white rounded-xl border border-slate-200 p-4 overflow-y-auto">
+          <h2 className="font-semibold text-slate-900 mb-4 flex items-center gap-2">
+            <Building2 className="w-4 h-4 text-slate-400" />
+            조직 트리
+            <span className="text-xs text-slate-500 font-normal ml-auto">
+              {filteredOrganizations.length}개
+            </span>
+          </h2>
+          
+          {viewMode === 'tree' ? (
+            rootOrgs.length > 0 ? (
+              rootOrgs.map(rootOrg => renderOrgTree(rootOrg))
             ) : (
-              <div className="flex gap-2">
-                <button 
-                  onClick={handleCancel} 
-                  className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 text-sm font-medium"
-                >
-                  취소
-                </button>
-                <button 
-                  onClick={handleSave} 
-                  disabled={loading || duplicateCodes.length > 0}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <Save className="w-4 h-4" />
-                  {loading ? '저장 중...' : '저장'}
-                </button>
-              </div>
-            )}
-          </div>
-
-          {saveSuccess && (
-            <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg flex items-center gap-2 text-green-800">
-              <Check className="w-5 h-5" />
-              <span className="text-sm font-medium">성공적으로 저장되었습니다!</span>
+              <div className="text-center text-slate-500 py-10">조직이 없습니다</div>
+            )
+          ) : (
+            <div className="grid grid-cols-1 gap-3">
+              {filteredOrganizations.map(org => renderOrgCard(org))}
             </div>
           )}
+        </div>
 
-          {/* 중복 경고 */}
-          {editMode && duplicateCodes.length > 0 && (
-            <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg flex items-center gap-2 text-red-800">
-              <AlertTriangle className="w-5 h-5" />
-              <span className="text-sm font-medium">
-                중복된 레벨 코드: {duplicateCodes.join(', ')} - 저장하기 전에 수정해주세요
-              </span>
-            </div>
-          )}
-
-          <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-            <div className="flex gap-2">
-              <AlertCircle className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
-              <div className="text-sm text-blue-800">
-                <p className="font-semibold mb-1">💡 조직 계층 구조</p>
-                <ul className="space-y-1 text-xs">
-                  <li>• 2~7단계 자유롭게 설정 가능</li>
-                  <li>• 예: 전사 → 본부 → 팀 → 개인 (4단계)</li>
-                  <li>• <strong>드래그 앤 드롭</strong>으로 순서를 쉽게 변경할 수 있습니다</li>
-                </ul>
-              </div>
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            {(editMode ? editedLevels : template).map((level, index) => {
-              const isDragging = draggedIndex === index;
-              const isDragOver = dragOverIndex === index;
-              const isCodeDuplicate = editMode && duplicateCodes.includes(level.level_code.toUpperCase().trim());
-              
-              return (
-                <div
-                  key={index}
-                  draggable={editMode}
-                  onDragStart={(e) => editMode && handleDragStart(e, index)}
-                  onDragOver={(e) => editMode && handleDragOver(e, index)}
-                  onDragLeave={handleDragLeave}
-                  onDrop={(e) => editMode && handleDrop(e, index)}
-                  onDragEnd={handleDragEnd}
-                  className={`flex items-center gap-4 p-4 bg-white rounded-lg border-2 transition-all ${
-                    isDragging 
-                      ? 'opacity-50 border-blue-400 bg-blue-50' 
-                      : isDragOver 
-                        ? 'border-blue-500 border-dashed bg-blue-50'
-                        : isCodeDuplicate
-                          ? 'border-red-300 bg-red-50'
-                          : 'border-slate-200'
-                  } ${editMode ? 'cursor-move' : ''}`}
-                >
-                  {/* 드래그 핸들 */}
-                  {editMode && (
-                    <div className="text-slate-400 hover:text-slate-600 cursor-grab active:cursor-grabbing">
-                      <GripVertical className="w-5 h-5" />
-                    </div>
-                  )}
-                  
-                  {/* 순서 번호 */}
-                  <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                    <span className="text-lg font-bold text-blue-600">{index + 1}</span>
+        {/* 오른쪽: 상세 정보 (조회 전용) */}
+        <div className="col-span-3 bg-white rounded-xl border border-slate-200 p-6 overflow-y-auto">
+          {selectedOrg ? (
+            <div className="space-y-6">
+              {/* 헤더 */}
+              <div className="flex items-start justify-between">
+                <div>
+                  <h2 className="text-xl font-bold text-slate-900">{selectedOrg.name}</h2>
+                  <div className="flex items-center gap-2 mt-2">
+                    <span className={`px-2 py-1 text-sm rounded-lg border ${getOrgTypeColor(selectedOrg.orgType)}`}>
+                      {selectedOrg.orgType}
+                    </span>
+                    <span className="text-sm text-slate-500">{selectedOrg.level}</span>
                   </div>
-                  
-                  {editMode ? (
-                    <>
-                      <div className="flex-1 grid grid-cols-2 gap-3">
-                        <div>
-                          <label className="block text-xs font-medium text-slate-600 mb-1">레벨 이름 *</label>
-                          <input 
-                            type="text" 
-                            value={level.level_name}
-                            onChange={(e) => handleUpdateLevel(index, 'level_name', e.target.value)}
-                            placeholder="예: 본부, 팀" 
-                            className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" 
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-xs font-medium text-slate-600 mb-1">
-                            레벨 코드 * 
-                            {isCodeDuplicate && <span className="text-red-500 ml-1">(중복!)</span>}
-                          </label>
-                          <input 
-                            type="text" 
-                            value={level.level_code}
-                            onChange={(e) => handleUpdateLevel(index, 'level_code', e.target.value.toUpperCase())}
-                            placeholder="예: DIVISION" 
-                            className={`w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none ${
-                              isCodeDuplicate ? 'border-red-400 bg-red-50' : 'border-slate-300'
-                            }`}
-                          />
-                        </div>
-                      </div>
-                      <label className="flex items-center gap-2 cursor-pointer flex-shrink-0">
-                        <input 
-                          type="checkbox" 
-                          checked={level.is_required}
-                          onChange={(e) => handleUpdateLevel(index, 'is_required', e.target.checked)}
-                          className="w-4 h-4 text-blue-600 rounded" 
-                        />
-                        <span className="text-sm text-slate-700">필수</span>
-                      </label>
-                      <button 
-                        onClick={() => handleRemoveLevel(index)} 
-                        className="p-2 text-red-600 hover:bg-red-50 rounded-lg flex-shrink-0" 
-                        title="삭제"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      <div className="flex-1">
-                        <div className="font-semibold text-slate-900">{level.level_name}</div>
-                        <div className="text-sm text-slate-500 mt-1">
-                          코드: {level.level_code} • {level.is_required ? '필수' : '선택'}
-                        </div>
-                      </div>
-                      <Layers className="w-5 h-5 text-slate-400" />
-                    </>
-                  )}
                 </div>
-              );
-            })}
-            
-            {editMode && (
-              <button 
-                onClick={handleAddLevel} 
-                className="w-full flex items-center justify-center gap-2 p-4 border-2 border-dashed border-slate-300 rounded-lg text-slate-600 hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
-              >
-                <Plus className="w-5 h-5" />
-                <span className="font-medium">레벨 추가</span>
-              </button>
-            )}
-          </div>
-        </>
-      )}
+                <div className="text-right">
+                  <div className="text-2xl font-bold text-slate-900">{selectedOrg.headcount || 0}</div>
+                  <div className="text-sm text-slate-500">인원</div>
+                </div>
+              </div>
+
+              {/* 미션 */}
+              {selectedOrg.mission && (
+                <div className="bg-blue-50 border border-blue-100 rounded-lg p-4">
+                  <h3 className="text-sm font-semibold text-blue-900 mb-1">미션</h3>
+                  <p className="text-blue-800">{selectedOrg.mission}</p>
+                </div>
+              )}
+
+              {/* 정보 그리드 */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="bg-slate-50 rounded-lg p-4">
+                  <h4 className="text-sm font-medium text-slate-700 mb-2">조직 유형</h4>
+                  <p className="text-slate-900">
+                    {selectedOrg.orgType === 'Front' && '🎯 Front - 매출 직접 기여 (영업/마케팅)'}
+                    {selectedOrg.orgType === 'Middle' && '⚙️ Middle - 가치 창출 (기획/개발/생산)'}
+                    {selectedOrg.orgType === 'Back' && '🛡️ Back - 지원 기능 (인사/재무/총무)'}
+                  </p>
+                </div>
+                <div className="bg-slate-50 rounded-lg p-4">
+                  <h4 className="text-sm font-medium text-slate-700 mb-2">상위 조직</h4>
+                  <p className="text-slate-900">
+                    {selectedOrg.parentOrgId
+                      ? organizations.find(o => o.id === selectedOrg.parentOrgId)?.name || '-'
+                      : '(최상위 조직)'}
+                  </p>
+                </div>
+              </div>
+
+              {/* 기능 태그 */}
+              {selectedOrg.functionTags && selectedOrg.functionTags.length > 0 && (
+                <div>
+                  <h4 className="text-sm font-medium text-slate-700 mb-2">핵심 기능</h4>
+                  <div className="flex flex-wrap gap-2">
+                    {selectedOrg.functionTags.map((tag, idx) => (
+                      <span key={idx} className="px-3 py-1 bg-slate-100 text-slate-700 rounded-full text-sm">
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* 하위 조직 목록 */}
+              {(() => {
+                const children = getChildOrgs(selectedOrg.id);
+                if (children.length === 0) return null;
+                return (
+                  <div>
+                    <h4 className="text-sm font-medium text-slate-700 mb-3">
+                      하위 조직 ({children.length}개)
+                    </h4>
+                    <div className="grid grid-cols-2 gap-2">
+                      {children.map(child => (
+                        <button
+                          key={child.id}
+                          onClick={() => {
+                            setSelectedOrgId(child.id);
+                            setExpandedOrgs(prev => new Set([...prev, selectedOrg.id]));
+                          }}
+                          className="flex items-center gap-2 p-3 bg-slate-50 rounded-lg hover:bg-slate-100 transition-colors text-left"
+                        >
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium text-sm text-slate-900 truncate">{child.name}</div>
+                            <div className="text-xs text-slate-500">{child.level} · {child.headcount || 0}명</div>
+                          </div>
+                          <span className={`px-1.5 py-0.5 text-xs rounded border ${getOrgTypeColor(child.orgType)}`}>
+                            {child.orgType}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* 편집 안내 */}
+              <div className="pt-4 border-t">
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-start gap-3">
+                  <Settings className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-medium text-amber-900">조직 정보를 수정하려면?</p>
+                    <p className="text-sm text-amber-700 mt-1">
+                      관리자 설정에서 조직 구조를 편집할 수 있습니다.
+                    </p>
+                    <button
+                      onClick={() => navigate('/admin?tab=structure')}
+                      className="mt-2 text-sm text-amber-800 font-medium hover:underline"
+                    >
+                      관리자 설정으로 이동 →
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center h-full text-slate-500">
+              <Building2 className="w-12 h-12 text-slate-300 mb-3" />
+              <p>왼쪽에서 조직을 선택하세요</p>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
