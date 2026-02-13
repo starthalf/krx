@@ -4,6 +4,7 @@ import { useSearchParams, useNavigate } from 'react-router-dom';
 import { Shield, Users, Layers, Lock, Settings as SettingsIcon, ChevronRight, Building2, Mail, CalendarClock, ArrowLeft, X } from 'lucide-react';
 import UserRolesManager from '../components/admin/UserRolesManager';
 import OrgStructureSettings from '../components/admin/OrgStructureSettings';
+import OrgStructureManager from '../components/admin/OrgStructureManager';
 import RolePermissionsManager from '../components/admin/RolePermissionsManager';
 import CompanyManagement from '../components/admin/CompanyManagement';
 import UserInvitation from '../components/admin/UserInvitation';
@@ -212,7 +213,7 @@ function RoleManagement() {
 // 3. 조직 구조 관리 컴포넌트
 // ============================================
 function StructureManagement() {
-  return <OrgStructureSettings />;
+  return <OrgStructureManager />;
 }
 
 // ============================================
