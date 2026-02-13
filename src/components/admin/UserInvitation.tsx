@@ -292,30 +292,115 @@ export default function UserInvitation() {
 }
 
 // ============================================
-// 개별 초대 모달 — 새로운 역할 체계
+// 개별 초대 모달 — 여러 명 동시 초대
 // ============================================
+interface InviteEntry {
+  id: string;
+  email: string;
+  full_name: string;
+  role_type: 'org_head' | 'team_member' | '';
+  org_id: string;
+}
+
 interface InviteModalProps {
   organizations: any[];
   loading: boolean;
-  onSubmit: (data: InvitationForm) => void;
+  onSubmit: (data: InvitationForm) => Promise<void>;
   onClose: () => void;
 }
 
 function InviteModal({ organizations, loading, onSubmit, onClose }: InviteModalProps) {
-  const [formData, setFormData] = useState<InvitationForm>({
-    email: '',
-    full_name: '',
-    role_type: '',
-    org_id: ''
-  });
+  const [entries, setEntries] = useState<InviteEntry[]>([
+    { id: crypto.randomUUID(), email: '', full_name: '', role_type: '', org_id: '' }
+  ]);
+  const [submitting, setSubmitting] = useState(false);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [results, setResults] = useState<{ email: string; success: boolean; error?: string }[]>([]);
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!formData.email) {
-      alert('이메일을 입력해주세요');
-      return;
+  // 엔트리 추가
+  const addEntry = () => {
+    setEntries([...entries, { 
+      id: crypto.randomUUID(), 
+      email: '', 
+      full_name: '', 
+      role_type: '', 
+      org_id: '' 
+    }]);
+  };
+
+  // 엔트리 삭제
+  const removeEntry = (id: string) => {
+    if (entries.length === 1) return;
+    setEntries(entries.filter(e => e.id !== id));
+  };
+
+  // 엔트리 업데이트
+  const updateEntry = (id: string, field: keyof InviteEntry, value: string) => {
+    setEntries(entries.map(e => 
+      e.id === id ? { ...e, [field]: value } : e
+    ));
+  };
+
+  // 전체 역할/조직 일괄 적용
+  const applyToAll = (field: 'role_type' | 'org_id', value: string) => {
+    setEntries(entries.map(e => ({ ...e, [field]: value })));
+  };
+
+  // 유효성 검사
+  const validateEntries = (): boolean => {
+    for (const entry of entries) {
+      if (!entry.email) {
+        alert('모든 이메일을 입력해주세요');
+        return false;
+      }
+      if (!entry.org_id) {
+        alert(`${entry.email}: 소속 조직을 선택해주세요`);
+        return false;
+      }
+      if (!entry.role_type) {
+        alert(`${entry.email}: 역할을 선택해주세요`);
+        return false;
+      }
     }
-    onSubmit(formData);
+    return true;
+  };
+
+  // 제출
+  const handleSubmit = async () => {
+    if (!validateEntries()) return;
+
+    setSubmitting(true);
+    setResults([]);
+    
+    const newResults: typeof results = [];
+
+    for (let i = 0; i < entries.length; i++) {
+      const entry = entries[i];
+      setCurrentIndex(i);
+      
+      try {
+        await onSubmit({
+          email: entry.email,
+          full_name: entry.full_name,
+          role_type: entry.role_type as 'org_head' | 'team_member',
+          org_id: entry.org_id
+        });
+        newResults.push({ email: entry.email, success: true });
+      } catch (error) {
+        newResults.push({ email: entry.email, success: false, error: (error as Error).message });
+      }
+    }
+
+    setResults(newResults);
+    setSubmitting(false);
+
+    // 모두 성공하면 닫기
+    if (newResults.every(r => r.success)) {
+      setTimeout(() => {
+        alert(`${newResults.length}명의 초대가 완료되었습니다!`);
+        onClose();
+      }, 500);
+    }
   };
 
   // 조직을 계층별로 그룹핑
@@ -326,182 +411,226 @@ function InviteModal({ organizations, loading, onSubmit, onClose }: InviteModalP
     return acc;
   }, {} as Record<string, typeof organizations>);
 
+  // 결과 화면
+  if (results.length > 0) {
+    const successCount = results.filter(r => r.success).length;
+    const failCount = results.filter(r => !r.success).length;
+
+    return (
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+        <div className="bg-white rounded-xl max-w-md w-full p-6">
+          <h3 className="text-xl font-bold text-slate-900 mb-4">초대 결과</h3>
+          
+          <div className="mb-4 p-4 bg-slate-50 rounded-lg">
+            <div className="flex gap-4 text-center">
+              <div className="flex-1">
+                <div className="text-2xl font-bold text-green-600">{successCount}</div>
+                <div className="text-sm text-slate-600">성공</div>
+              </div>
+              {failCount > 0 && (
+                <div className="flex-1">
+                  <div className="text-2xl font-bold text-red-600">{failCount}</div>
+                  <div className="text-sm text-slate-600">실패</div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="space-y-2 max-h-60 overflow-y-auto mb-4">
+            {results.map((result, idx) => (
+              <div 
+                key={idx}
+                className={`flex items-center gap-2 p-2 rounded-lg ${
+                  result.success ? 'bg-green-50' : 'bg-red-50'
+                }`}
+              >
+                {result.success ? (
+                  <Check className="w-4 h-4 text-green-600" />
+                ) : (
+                  <X className="w-4 h-4 text-red-600" />
+                )}
+                <span className={`text-sm ${result.success ? 'text-green-800' : 'text-red-800'}`}>
+                  {result.email}
+                </span>
+                {result.error && (
+                  <span className="text-xs text-red-600 ml-auto">{result.error}</span>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <button
+            onClick={onClose}
+            className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+          >
+            닫기
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl max-w-md w-full p-6 max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between mb-6">
-          <h3 className="text-xl font-bold text-slate-900">사용자 초대</h3>
+      <div className="bg-white rounded-xl max-w-2xl w-full p-6 max-h-[90vh] overflow-hidden flex flex-col">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="text-xl font-bold text-slate-900">사용자 초대</h3>
+            <p className="text-sm text-slate-600">{entries.length}명</p>
+          </div>
           <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-lg">
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-5">
-          {/* 이메일 */}
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">
-              이메일 *
-            </label>
-            <input
-              type="email"
-              value={formData.email}
-              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-              placeholder="user@example.com"
-              className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-              required
-            />
-          </div>
-
-          {/* 이름 */}
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">
-              이름 <span className="text-slate-400">(선택)</span>
-            </label>
-            <input
-              type="text"
-              value={formData.full_name}
-              onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
-              placeholder="홍길동"
-              className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-            />
-          </div>
-
-          {/* 소속 조직 */}
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">
-              소속 조직 <span className="text-slate-400">(선택)</span>
-            </label>
+        {/* 일괄 적용 */}
+        <div className="flex gap-3 mb-4 p-3 bg-slate-50 rounded-lg">
+          <div className="flex-1">
+            <label className="block text-xs font-medium text-slate-600 mb-1">일괄 조직 적용</label>
             <select
-              value={formData.org_id}
-              onChange={(e) => setFormData({ ...formData, org_id: e.target.value })}
-              className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+              onChange={(e) => applyToAll('org_id', e.target.value)}
+              className="w-full px-3 py-1.5 border border-slate-300 rounded-lg text-sm"
             >
-              <option value="">-- 나중에 지정 --</option>
+              <option value="">선택...</option>
               {Object.entries(groupedOrgs).map(([level, orgs]) => (
-                <optgroup key={level} label={`━━ ${level} ━━`}>
+                <optgroup key={level} label={level}>
                   {(orgs as any[]).map((org) => (
-                    <option key={org.id} value={org.id}>
-                      {org.name}
-                    </option>
+                    <option key={org.id} value={org.id}>{org.name}</option>
                   ))}
                 </optgroup>
               ))}
             </select>
           </div>
+          <div className="flex-1">
+            <label className="block text-xs font-medium text-slate-600 mb-1">일괄 역할 적용</label>
+            <select
+              onChange={(e) => applyToAll('role_type', e.target.value)}
+              className="w-full px-3 py-1.5 border border-slate-300 rounded-lg text-sm"
+            >
+              <option value="">선택...</option>
+              <option value="org_head">👑 조직장</option>
+              <option value="team_member">👤 구성원</option>
+            </select>
+          </div>
+        </div>
 
-          {/* 역할 선택 — 카드 형태 */}
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-3">
-              역할 <span className="text-slate-400">(선택)</span>
-            </label>
-            <div className="space-y-2">
-              {/* 조직장 */}
-              <button
-                type="button"
-                onClick={() => setFormData({ ...formData, role_type: 'org_head' })}
-                className={`w-full text-left p-4 rounded-lg border-2 transition-all ${
-                  formData.role_type === 'org_head'
-                    ? 'border-amber-500 bg-amber-50'
-                    : 'border-slate-200 hover:border-slate-300'
-                }`}
-              >
-                <div className="flex items-center gap-3">
-                  <div className={`p-2 rounded-lg ${
-                    formData.role_type === 'org_head' ? 'bg-amber-100' : 'bg-slate-100'
-                  }`}>
-                    <Crown className={`w-5 h-5 ${
-                      formData.role_type === 'org_head' ? 'text-amber-600' : 'text-slate-500'
-                    }`} />
-                  </div>
-                  <div className="flex-1">
-                    <div className="font-semibold text-slate-900">조직장</div>
-                    <div className="text-xs text-slate-500 mt-0.5">
-                      조직 OKR 관리, 하위 조직 승인/독촉
-                    </div>
-                  </div>
-                  {formData.role_type === 'org_head' && (
-                    <Check className="w-5 h-5 text-amber-600" />
-                  )}
-                </div>
-              </button>
+        {/* 엔트리 목록 */}
+        <div className="flex-1 overflow-y-auto space-y-3 min-h-0 mb-4">
+          {entries.map((entry, index) => (
+            <div key={entry.id} className="p-4 bg-slate-50 rounded-lg border border-slate-200">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-sm font-medium text-slate-700">#{index + 1}</span>
+                {entries.length > 1 && (
+                  <button
+                    onClick={() => removeEntry(entry.id)}
+                    className="p-1 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
 
-              {/* 구성원 */}
-              <button
-                type="button"
-                onClick={() => setFormData({ ...formData, role_type: 'team_member' })}
-                className={`w-full text-left p-4 rounded-lg border-2 transition-all ${
-                  formData.role_type === 'team_member'
-                    ? 'border-blue-500 bg-blue-50'
-                    : 'border-slate-200 hover:border-slate-300'
-                }`}
-              >
-                <div className="flex items-center gap-3">
-                  <div className={`p-2 rounded-lg ${
-                    formData.role_type === 'team_member' ? 'bg-blue-100' : 'bg-slate-100'
-                  }`}>
-                    <User className={`w-5 h-5 ${
-                      formData.role_type === 'team_member' ? 'text-blue-600' : 'text-slate-500'
-                    }`} />
-                  </div>
-                  <div className="flex-1">
-                    <div className="font-semibold text-slate-900">구성원</div>
-                    <div className="text-xs text-slate-500 mt-0.5">
-                      개인 OKR 수립, 체크인
-                    </div>
-                  </div>
-                  {formData.role_type === 'team_member' && (
-                    <Check className="w-5 h-5 text-blue-600" />
-                  )}
+              <div className="grid grid-cols-2 gap-3">
+                {/* 이메일 */}
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">이메일 *</label>
+                  <input
+                    type="email"
+                    value={entry.email}
+                    onChange={(e) => updateEntry(entry.id, 'email', e.target.value)}
+                    placeholder="user@example.com"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                  />
                 </div>
-              </button>
 
-              {/* 나중에 지정 */}
-              <button
-                type="button"
-                onClick={() => setFormData({ ...formData, role_type: '' })}
-                className={`w-full text-left p-3 rounded-lg border-2 transition-all ${
-                  formData.role_type === ''
-                    ? 'border-slate-400 bg-slate-50'
-                    : 'border-slate-200 hover:border-slate-300'
-                }`}
-              >
-                <div className="text-sm text-slate-600 text-center">
-                  나중에 지정
+                {/* 이름 */}
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">이름</label>
+                  <input
+                    type="text"
+                    value={entry.full_name}
+                    onChange={(e) => updateEntry(entry.id, 'full_name', e.target.value)}
+                    placeholder="홍길동"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                  />
                 </div>
-              </button>
+
+                {/* 소속 조직 */}
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">소속 조직 *</label>
+                  <select
+                    value={entry.org_id}
+                    onChange={(e) => updateEntry(entry.id, 'org_id', e.target.value)}
+                    className={`w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none ${
+                      entry.org_id ? 'border-slate-300' : 'border-amber-300 bg-amber-50'
+                    }`}
+                  >
+                    <option value="">선택하세요</option>
+                    {Object.entries(groupedOrgs).map(([level, orgs]) => (
+                      <optgroup key={level} label={level}>
+                        {(orgs as any[]).map((org) => (
+                          <option key={org.id} value={org.id}>{org.name}</option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </select>
+                </div>
+
+                {/* 역할 */}
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">역할 *</label>
+                  <select
+                    value={entry.role_type}
+                    onChange={(e) => updateEntry(entry.id, 'role_type', e.target.value)}
+                    className={`w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none ${
+                      entry.role_type ? 'border-slate-300' : 'border-amber-300 bg-amber-50'
+                    }`}
+                  >
+                    <option value="">선택하세요</option>
+                    <option value="org_head">👑 조직장</option>
+                    <option value="team_member">👤 구성원</option>
+                  </select>
+                </div>
+              </div>
             </div>
-          </div>
+          ))}
+        </div>
 
-          {/* 안내 */}
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-            <p className="text-xs text-blue-800">
-              <strong>💡 팁:</strong> 초대 링크가 생성되며, 상대방이 링크를 통해 가입하면 자동으로 역할이 부여됩니다.
-            </p>
-          </div>
+        {/* 추가 버튼 */}
+        <button
+          onClick={addEntry}
+          className="w-full py-2 border-2 border-dashed border-slate-300 text-slate-600 rounded-lg hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50 transition-colors mb-4 flex items-center justify-center gap-2"
+        >
+          <Plus className="w-4 h-4" />
+          사용자 추가
+        </button>
 
-          {/* 버튼 */}
-          <div className="flex gap-3 pt-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 px-4 py-2.5 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors"
-            >
-              취소
-            </button>
-            <button
-              type="submit"
-              disabled={loading}
-              className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
-            >
-              {loading ? '발송 중...' : (
-                <>
-                  <Send className="w-4 h-4" />
-                  초대 보내기
-                </>
-              )}
-            </button>
-          </div>
-        </form>
+        {/* 하단 버튼 */}
+        <div className="flex gap-3 pt-4 border-t">
+          <button
+            onClick={onClose}
+            className="flex-1 px-4 py-2.5 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50"
+          >
+            취소
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={submitting}
+            className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2"
+          >
+            {submitting ? (
+              <>
+                <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" />
+                {currentIndex + 1}/{entries.length} 처리 중...
+              </>
+            ) : (
+              <>
+                <Send className="w-4 h-4" />
+                {entries.length}명 초대하기
+              </>
+            )}
+          </button>
+        </div>
       </div>
     </div>
   );
