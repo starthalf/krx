@@ -1,6 +1,6 @@
 // src/components/admin/UserInvitation.tsx
 import { useState, useEffect } from 'react';
-import { UserPlus, Mail, Send, X, Copy, Check, Crown, User, AlertCircle } from 'lucide-react';
+import { UserPlus, Mail, Send, X, Copy, Check, Crown, User, AlertCircle, Plus } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 import { supabase } from '../../lib/supabase';
 
