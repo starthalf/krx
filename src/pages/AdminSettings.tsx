@@ -1,7 +1,7 @@
 // src/pages/AdminSettings.tsx
 import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Shield, Users, Layers, Lock, Settings as SettingsIcon, ChevronRight, Building2, Mail, CalendarClock } from 'lucide-react';
+import { Shield, Users, Layers, Lock, Settings as SettingsIcon, Building2, Mail, CalendarClock } from 'lucide-react';
 import UserRolesManager from '../components/admin/UserRolesManager';
 import OrgStructureSettings from '../components/admin/OrgStructureSettings';
 import RolePermissionsManager from '../components/admin/RolePermissionsManager';
@@ -102,8 +102,8 @@ export default function AdminSettings() {
     <div className="min-h-screen bg-slate-50">
       {/* 헤더 */}
       <div className="bg-white border-b border-slate-200">
-        <div className="max-w-7xl mx-auto px-6 py-6">
-          <div className="flex items-center gap-3 mb-2">
+        <div className="px-8 py-6">
+          <div className="flex items-center gap-3">
             <div className="p-2 bg-purple-100 rounded-lg">
               <SettingsIcon className="w-6 h-6 text-purple-600" />
             </div>
@@ -115,54 +115,49 @@ export default function AdminSettings() {
         </div>
       </div>
 
+      {/* 탭 네비게이션 */}
+      <div className="bg-white border-b border-slate-200">
+        <div className="px-8">
+          <div className="flex gap-8 overflow-x-auto">
+            {visibleTabs.map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`flex items-center gap-2 px-4 py-4 border-b-2 whitespace-nowrap transition-colors ${
+                  activeTab === tab.id
+                    ? 'border-blue-600 text-blue-600'
+                    : 'border-transparent text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                <tab.icon className="w-5 h-5" />
+                <span className="font-medium">{tab.name}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
       {/* 메인 컨텐츠 */}
-      <div className="max-w-7xl mx-auto px-6 py-8">
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-          {/* 왼쪽 사이드바 - 탭 메뉴 */}
-          <div className="lg:col-span-1">
-            <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-2">
-              {visibleTabs.map((tab) => (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${
-                    activeTab === tab.id
-                      ? 'bg-blue-50 text-blue-700 font-medium'
-                      : 'text-slate-700 hover:bg-slate-50'
-                  }`}
-                >
-                  <tab.icon className={`w-5 h-5 ${activeTab === tab.id ? 'text-blue-600' : 'text-slate-400'}`} />
-                  <span className="flex-1 text-left text-sm">{tab.name}</span>
-                  {activeTab === tab.id && <ChevronRight className="w-4 h-4" />}
-                </button>
-              ))}
-            </div>
+      <div className="px-8 py-8">
+        {/* 탭 설명 */}
+        <div className="mb-6 p-4 bg-gradient-to-br from-purple-50 to-blue-50 rounded-xl border border-purple-100">
+          <h3 className="text-sm font-semibold text-purple-900 mb-1">
+            {visibleTabs.find(t => t.id === activeTab)?.name}
+          </h3>
+          <p className="text-xs text-purple-700">
+            {visibleTabs.find(t => t.id === activeTab)?.description}
+          </p>
+        </div>
 
-            {/* 도움말 카드 */}
-            <div className="mt-6 bg-gradient-to-br from-purple-50 to-blue-50 rounded-xl border border-purple-100 p-4">
-              <h3 className="text-sm font-semibold text-purple-900 mb-2">💡 도움말</h3>
-              <p className="text-xs text-purple-700 leading-relaxed">
-                {activeTab === 'users' && '사용자에게 역할을 할당하거나 특정 조직에서의 권한을 설정할 수 있습니다.'}
-                {activeTab === 'roles' && '각 역할(팀장, 본부장 등)이 가질 수 있는 권한을 설정합니다.'}
-                {activeTab === 'structure' && '회사의 조직 계층 구조(전사-본부-팀 등)를 정의합니다.'}
-                {activeTab === 'permissions' && '시스템의 모든 권한 목록을 확인할 수 있습니다.'}
-                {activeTab === 'cycles' && 'OKR 수립 기간을 선언하고 진행 상황을 관리합니다. 수립 시작 → 마감 → 확정 순서로 사이클을 운영합니다.'}
-              </p>
-            </div>
-          </div>
-
-          {/* 오른쪽 컨텐츠 영역 */}
-          <div className="lg:col-span-3">
-            <div className="bg-white rounded-xl border border-slate-200 p-6">
-              {activeTab === 'companies' && <CompanyManagement />}
-              {activeTab === 'invite' && <UserInvitation />}
-              {activeTab === 'users' && <UserManagement />}
-              {activeTab === 'roles' && <RoleManagement />}
-              {activeTab === 'structure' && <StructureManagement />}
-              {activeTab === 'permissions' && <PermissionsList />}
-              {activeTab === 'cycles' && <PlanningCycleManager />}
-            </div>
-          </div>
+        {/* 컨텐츠 영역 */}
+        <div className="bg-white rounded-xl border border-slate-200 p-8">
+          {activeTab === 'companies' && <CompanyManagement />}
+          {activeTab === 'invite' && <UserInvitation />}
+          {activeTab === 'users' && <UserManagement />}
+          {activeTab === 'roles' && <RoleManagement />}
+          {activeTab === 'structure' && <StructureManagement />}
+          {activeTab === 'permissions' && <PermissionsList />}
+          {activeTab === 'cycles' && <PlanningCycleManager />}
         </div>
       </div>
     </div>
