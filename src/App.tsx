@@ -45,6 +45,28 @@ function App() {
             }
           />
           
+          {/* 관리자 설정 (인증 필요, 전체 화면 - Layout 없음) */}
+          <Route
+            path="/admin"
+            element={
+              <ProtectedRoute>
+                <WithOnboardingCheck>
+                  <AdminSettings />
+                </WithOnboardingCheck>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/settings"
+            element={
+              <ProtectedRoute>
+                <WithOnboardingCheck>
+                  <AdminSettings />
+                </WithOnboardingCheck>
+              </ProtectedRoute>
+            }
+          />
+          
           {/* 인증 필요한 페이지들 */}
           <Route
             path="/"
@@ -95,10 +117,6 @@ function App() {
             
             {/* 내 설정 */}
             <Route path="my-settings" element={<MySettings />} />
-            
-            {/* 관리자 설정 */}
-            <Route path="admin" element={<AdminSettings />} />
-            <Route path="admin/settings" element={<AdminSettings />} />
           </Route>
           
           {/* 없는 경로 → 대시보드로 리다이렉트 */}
