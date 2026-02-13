@@ -18,7 +18,7 @@ export default function UserInvitation() {
   const [invitations, setInvitations] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
-  const [company, setCompany] = useState<any>(null); 
+  const [company, setCompany] = useState<any>(null);
 
   useEffect(() => {
     loadInvitations();
