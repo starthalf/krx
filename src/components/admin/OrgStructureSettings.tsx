@@ -9,7 +9,7 @@ import { getMyRoleLevel } from '../../lib/permissions';
 import { supabase } from '../../lib/supabase';
 import { 
   Layers, Plus, Trash2, Save, AlertCircle, Check, Building2, 
-  GripVertical, AlertTriangle 
+  GripVertical, AlertTriangle, Wand2
 } from 'lucide-react';
 
 interface LevelInput {
@@ -22,6 +22,47 @@ interface LevelInput {
 interface Company {
   id: string;
   name: string;
+}
+
+// ─── 레벨 이름 → 코드 기본 매핑 ───────────────────────
+const DEFAULT_LEVEL_CODES: Record<string, string> = {
+  // 한글
+  '전사': 'COMPANY',
+  '회사': 'COMPANY',
+  '그룹': 'GROUP',
+  '부문': 'SECTOR',
+  '사업부': 'BUSINESS_UNIT',
+  '사업부문': 'BUSINESS_UNIT',
+  '본부': 'DIVISION',
+  '센터': 'CENTER',
+  '연구소': 'LAB',
+  '실': 'DEPARTMENT',
+  '부': 'DEPARTMENT',
+  '팀': 'TEAM',
+  '파트': 'PART',
+  '셀': 'CELL',
+  '유닛': 'UNIT',
+  '개인': 'INDIVIDUAL',
+  '담당': 'INDIVIDUAL',
+};
+
+// 자동 코드 추천 함수
+function getAutoCode(levelName: string): string | null {
+  const trimmed = levelName.trim();
+  
+  // 정확히 일치하는 경우
+  if (DEFAULT_LEVEL_CODES[trimmed]) {
+    return DEFAULT_LEVEL_CODES[trimmed];
+  }
+  
+  // 부분 일치 (예: "마케팅본부" → "본부" 매칭)
+  for (const [name, code] of Object.entries(DEFAULT_LEVEL_CODES)) {
+    if (trimmed.endsWith(name) || trimmed.includes(name)) {
+      return code;
+    }
+  }
+  
+  return null;
 }
 
 export default function OrgStructureSettings() {
@@ -139,7 +180,27 @@ export default function OrgStructureSettings() {
   const handleUpdateLevel = (index: number, field: keyof LevelInput, value: any) => {
     const updated = [...editedLevels];
     updated[index] = { ...updated[index], [field]: value };
+    
+    // 레벨 이름 변경 시 코드가 비어있으면 자동 추천
+    if (field === 'level_name') {
+      const autoCode = getAutoCode(value);
+      if (autoCode && !updated[index].level_code) {
+        updated[index].level_code = autoCode;
+      }
+    }
+    
     setEditedLevels(updated);
+  };
+
+  // 레벨 이름에서 코드 자동 추천 (버튼 클릭)
+  const handleAutoFillCode = (index: number) => {
+    const level = editedLevels[index];
+    const autoCode = getAutoCode(level.level_name);
+    if (autoCode) {
+      handleUpdateLevel(index, 'level_code', autoCode);
+    } else {
+      alert('인식할 수 없는 레벨 이름입니다.\n직접 코드를 입력해주세요.');
+    }
   };
 
   // ─── 드래그 앤 드롭 핸들러 ───────────────────────────
@@ -376,9 +437,15 @@ export default function OrgStructureSettings() {
                 <p className="font-semibold mb-1">💡 조직 계층 구조</p>
                 <ul className="space-y-1 text-xs">
                   <li>• 2~7단계 자유롭게 설정 가능</li>
-                  <li>• 예: 전사 → 본부 → 팀 → 개인 (4단계)</li>
                   <li>• <strong>드래그 앤 드롭</strong>으로 순서를 쉽게 변경할 수 있습니다</li>
+                  <li>• 레벨 이름 입력 시 코드가 자동으로 추천됩니다 (직접 수정 가능)</li>
                 </ul>
+                <div className="mt-2 pt-2 border-t border-blue-200">
+                  <p className="font-medium mb-1">기본 코드 매핑:</p>
+                  <p className="text-xs text-blue-700">
+                    전사=COMPANY, 부문=SECTOR, 본부=DIVISION, 실/부=DEPARTMENT, 팀=TEAM, 파트=PART, 개인=INDIVIDUAL
+                  </p>
+                </div>
               </div>
             </div>
           </div>
@@ -438,15 +505,25 @@ export default function OrgStructureSettings() {
                             레벨 코드 * 
                             {isCodeDuplicate && <span className="text-red-500 ml-1">(중복!)</span>}
                           </label>
-                          <input 
-                            type="text" 
-                            value={level.level_code}
-                            onChange={(e) => handleUpdateLevel(index, 'level_code', e.target.value.toUpperCase())}
-                            placeholder="예: DIVISION" 
-                            className={`w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none ${
-                              isCodeDuplicate ? 'border-red-400 bg-red-50' : 'border-slate-300'
-                            }`}
-                          />
+                          <div className="flex gap-1">
+                            <input 
+                              type="text" 
+                              value={level.level_code}
+                              onChange={(e) => handleUpdateLevel(index, 'level_code', e.target.value.toUpperCase())}
+                              placeholder="예: DIVISION" 
+                              className={`flex-1 px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none ${
+                                isCodeDuplicate ? 'border-red-400 bg-red-50' : 'border-slate-300'
+                              }`}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleAutoFillCode(index)}
+                              className="px-2 py-2 border border-slate-300 rounded-lg hover:bg-slate-50 text-slate-500 hover:text-blue-600 transition-colors"
+                              title="레벨 이름으로 코드 자동 추천"
+                            >
+                              <Wand2 className="w-4 h-4" />
+                            </button>
+                          </div>
                         </div>
                       </div>
                       <label className="flex items-center gap-2 cursor-pointer flex-shrink-0">
