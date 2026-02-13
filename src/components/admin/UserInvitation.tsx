@@ -472,7 +472,7 @@ function InviteModal({ organizations, loading, onSubmit, onClose }: InviteModalP
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl max-w-2xl w-full p-6 max-h-[90vh] overflow-hidden flex flex-col">
+      <div className="bg-white rounded-xl max-w-4xl w-full p-6 max-h-[90vh] overflow-hidden flex flex-col">
         <div className="flex items-center justify-between mb-4">
           <div>
             <h3 className="text-xl font-bold text-slate-900">사용자 초대</h3>
@@ -514,84 +514,85 @@ function InviteModal({ organizations, loading, onSubmit, onClose }: InviteModalP
           </div>
         </div>
 
-        {/* 엔트리 목록 */}
-        <div className="flex-1 overflow-y-auto space-y-3 min-h-0 mb-4">
+        {/* 테이블 헤더 */}
+        <div className="grid grid-cols-[40px_1fr_1fr_1fr_1fr_40px] gap-2 px-2 py-2 bg-slate-100 rounded-t-lg text-xs font-medium text-slate-600">
+          <div>#</div>
+          <div>이메일 *</div>
+          <div>이름</div>
+          <div>소속 조직 *</div>
+          <div>역할 *</div>
+          <div></div>
+        </div>
+
+        {/* 엔트리 목록 - 리스트 형태 */}
+        <div className="flex-1 overflow-y-auto border border-slate-200 rounded-b-lg mb-4">
           {entries.map((entry, index) => (
-            <div key={entry.id} className="p-4 bg-slate-50 rounded-lg border border-slate-200">
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-sm font-medium text-slate-700">#{index + 1}</span>
-                {entries.length > 1 && (
-                  <button
-                    onClick={() => removeEntry(entry.id)}
-                    className="p-1 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                )}
-              </div>
+            <div 
+              key={entry.id} 
+              className={`grid grid-cols-[40px_1fr_1fr_1fr_1fr_40px] gap-2 px-2 py-2 items-center ${
+                index % 2 === 0 ? 'bg-white' : 'bg-slate-50'
+              } ${index !== entries.length - 1 ? 'border-b border-slate-100' : ''}`}
+            >
+              {/* 번호 */}
+              <div className="text-sm text-slate-500 text-center">{index + 1}</div>
 
-              <div className="grid grid-cols-2 gap-3">
-                {/* 이메일 */}
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">이메일 *</label>
-                  <input
-                    type="email"
-                    value={entry.email}
-                    onChange={(e) => updateEntry(entry.id, 'email', e.target.value)}
-                    placeholder="user@example.com"
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                  />
-                </div>
+              {/* 이메일 */}
+              <input
+                type="email"
+                value={entry.email}
+                onChange={(e) => updateEntry(entry.id, 'email', e.target.value)}
+                placeholder="user@example.com"
+                className="px-2 py-1.5 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+              />
 
-                {/* 이름 */}
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">이름</label>
-                  <input
-                    type="text"
-                    value={entry.full_name}
-                    onChange={(e) => updateEntry(entry.id, 'full_name', e.target.value)}
-                    placeholder="홍길동"
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                  />
-                </div>
+              {/* 이름 */}
+              <input
+                type="text"
+                value={entry.full_name}
+                onChange={(e) => updateEntry(entry.id, 'full_name', e.target.value)}
+                placeholder="홍길동"
+                className="px-2 py-1.5 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+              />
 
-                {/* 소속 조직 */}
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">소속 조직 *</label>
-                  <select
-                    value={entry.org_id}
-                    onChange={(e) => updateEntry(entry.id, 'org_id', e.target.value)}
-                    className={`w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none ${
-                      entry.org_id ? 'border-slate-300' : 'border-amber-300 bg-amber-50'
-                    }`}
-                  >
-                    <option value="">선택하세요</option>
-                    {Object.entries(groupedOrgs).map(([level, orgs]) => (
-                      <optgroup key={level} label={level}>
-                        {(orgs as any[]).map((org) => (
-                          <option key={org.id} value={org.id}>{org.name}</option>
-                        ))}
-                      </optgroup>
+              {/* 소속 조직 */}
+              <select
+                value={entry.org_id}
+                onChange={(e) => updateEntry(entry.id, 'org_id', e.target.value)}
+                className={`px-2 py-1.5 border rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none ${
+                  entry.org_id ? 'border-slate-300' : 'border-amber-400 bg-amber-50'
+                }`}
+              >
+                <option value="">선택</option>
+                {Object.entries(groupedOrgs).map(([level, orgs]) => (
+                  <optgroup key={level} label={level}>
+                    {(orgs as any[]).map((org) => (
+                      <option key={org.id} value={org.id}>{org.name}</option>
                     ))}
-                  </select>
-                </div>
+                  </optgroup>
+                ))}
+              </select>
 
-                {/* 역할 */}
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">역할 *</label>
-                  <select
-                    value={entry.role_type}
-                    onChange={(e) => updateEntry(entry.id, 'role_type', e.target.value)}
-                    className={`w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none ${
-                      entry.role_type ? 'border-slate-300' : 'border-amber-300 bg-amber-50'
-                    }`}
-                  >
-                    <option value="">선택하세요</option>
-                    <option value="org_head">👑 조직장</option>
-                    <option value="team_member">👤 구성원</option>
-                  </select>
-                </div>
-              </div>
+              {/* 역할 */}
+              <select
+                value={entry.role_type}
+                onChange={(e) => updateEntry(entry.id, 'role_type', e.target.value)}
+                className={`px-2 py-1.5 border rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none ${
+                  entry.role_type ? 'border-slate-300' : 'border-amber-400 bg-amber-50'
+                }`}
+              >
+                <option value="">선택</option>
+                <option value="org_head">👑 조직장</option>
+                <option value="team_member">👤 구성원</option>
+              </select>
+
+              {/* 삭제 버튼 */}
+              <button
+                onClick={() => removeEntry(entry.id)}
+                disabled={entries.length === 1}
+                className="p-1 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                <X className="w-4 h-4" />
+              </button>
             </div>
           ))}
         </div>
