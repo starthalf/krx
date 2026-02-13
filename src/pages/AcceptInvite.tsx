@@ -1,14 +1,25 @@
 // src/pages/AcceptInvite.tsx
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Mail, CheckCircle, XCircle, Loader2 } from 'lucide-react';
+import { Mail, CheckCircle, XCircle, Loader2, Crown, User, Building2 } from 'lucide-react';
+import { supabase } from '../lib/supabase';
 
 interface InvitationData {
+  company_id: string;
   company_name: string;
   email: string;
   full_name?: string;
+  role_id?: string;
   role_name?: string;
+  org_id?: string;
+  org_name?: string;
   invited_by_name?: string;
+}
+
+interface Organization {
+  id: string;
+  name: string;
+  level: string;
 }
 
 export default function AcceptInvite() {
@@ -24,6 +35,11 @@ export default function AcceptInvite() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [fullName, setFullName] = useState('');
 
+  // 조직/역할 선택 (초대에 지정 안 됐을 때만 사용)
+  const [organizations, setOrganizations] = useState<Organization[]>([]);
+  const [selectedOrgId, setSelectedOrgId] = useState('');
+  const [selectedRoleType, setSelectedRoleType] = useState<'org_head' | 'team_member' | ''>('');
+
   // 초대 정보 로딩
   useEffect(() => {
     if (token) {
@@ -34,12 +50,11 @@ export default function AcceptInvite() {
   const loadInvitation = async () => {
     try {
       setLoading(true);
-      const { supabase } = await import('../lib/supabase');
 
       console.log('Loading invitation with token:', token);
 
       // 초대 정보 조회
-      const { data: invitation, error: inviteError } = await supabase
+      const { data: invitationData, error: inviteError } = await supabase
         .from('invitations')
         .select(`
           email,
@@ -48,26 +63,27 @@ export default function AcceptInvite() {
           expires_at,
           company_id,
           role_id,
+          org_id,
           invited_by
         `)
         .eq('token', token)
         .single();
 
-      console.log('Invitation data:', invitation);
+      console.log('Invitation data:', invitationData);
       console.log('Invitation error:', inviteError);
 
-      if (inviteError || !invitation) {
+      if (inviteError || !invitationData) {
         console.error('Invitation not found:', inviteError);
         throw new Error('초대를 찾을 수 없습니다');
       }
 
       // 만료 확인
-      if (new Date(invitation.expires_at) < new Date()) {
+      if (new Date(invitationData.expires_at) < new Date()) {
         throw new Error('초대가 만료되었습니다');
       }
 
       // 이미 수락됨
-      if (invitation.status === 'accepted') {
+      if (invitationData.status === 'accepted') {
         throw new Error('이미 수락된 초대입니다');
       }
 
@@ -75,43 +91,64 @@ export default function AcceptInvite() {
       const { data: company } = await supabase
         .from('companies')
         .select('name')
-        .eq('id', invitation.company_id)
+        .eq('id', invitationData.company_id)
         .single();
 
       // 역할 정보 가져오기
       let roleName = '';
-      if (invitation.role_id) {
+      if (invitationData.role_id) {
         const { data: role } = await supabase
           .from('roles')
           .select('display_name')
-          .eq('id', invitation.role_id)
+          .eq('id', invitationData.role_id)
           .single();
         roleName = role?.display_name || '';
       }
 
+      // 조직 정보 가져오기
+      let orgName = '';
+      if (invitationData.org_id) {
+        const { data: org } = await supabase
+          .from('organizations')
+          .select('name')
+          .eq('id', invitationData.org_id)
+          .single();
+        orgName = org?.name || '';
+      }
+
       // 초대한 사람 정보
       let invitedByName = '';
-      if (invitation.invited_by) {
+      if (invitationData.invited_by) {
         const { data: inviter } = await supabase
           .from('profiles')
           .select('full_name')
-          .eq('id', invitation.invited_by)
+          .eq('id', invitationData.invited_by)
           .single();
         invitedByName = inviter?.full_name || '';
       }
 
       setInvitation({
+        company_id: invitationData.company_id,
         company_name: company?.name || '회사',
-        email: invitation.email,
-        full_name: invitation.full_name,
+        email: invitationData.email,
+        full_name: invitationData.full_name,
+        role_id: invitationData.role_id,
         role_name: roleName,
+        org_id: invitationData.org_id,
+        org_name: orgName,
         invited_by_name: invitedByName
       });
       
       // 초대에 이름이 있으면 자동 입력
-      if (invitation.full_name) {
-        setFullName(invitation.full_name);
+      if (invitationData.full_name) {
+        setFullName(invitationData.full_name);
       }
+
+      // 조직/역할이 지정 안 됐으면 선택 목록 로드
+      if (!invitationData.org_id || !invitationData.role_id) {
+        await loadOrganizations(invitationData.company_id);
+      }
+
     } catch (err) {
       console.error('Failed to load invitation:', err);
       setError((err as Error).message);
@@ -119,6 +156,20 @@ export default function AcceptInvite() {
       setLoading(false);
     }
   };
+
+  // 회사의 조직 목록 로드
+  const loadOrganizations = async (companyId: string) => {
+    const { data: orgs } = await supabase
+      .from('organizations')
+      .select('id, name, level')
+      .eq('company_id', companyId)
+      .order('name');
+
+    setOrganizations(orgs || []);
+  };
+
+  // 조직/역할 선택이 필요한지 확인
+  const needsOrgRoleSelection = !invitation?.org_id || !invitation?.role_id;
 
   const handleAccept = async () => {
     if (!token || !invitation) return;
@@ -139,9 +190,20 @@ export default function AcceptInvite() {
       return;
     }
 
+    // 조직/역할 선택이 필요한 경우 검증
+    if (needsOrgRoleSelection) {
+      if (!selectedOrgId) {
+        alert('소속 조직을 선택해주세요');
+        return;
+      }
+      if (!selectedRoleType) {
+        alert('역할을 선택해주세요');
+        return;
+      }
+    }
+
     try {
       setAccepting(true);
-      const { supabase } = await import('../lib/supabase');
 
       // 1. 회원가입
       const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
@@ -173,14 +235,50 @@ export default function AcceptInvite() {
       // 2. 잠시 대기 (Supabase Auth 처리 시간)
       await new Promise(resolve => setTimeout(resolve, 1000));
 
-      // 3. 초대 수락
-      const { data: acceptData, error: acceptError } = await supabase.rpc('accept_invitation', {
-        invitation_token: token
+      // 3. 초대 수락 (조직/역할 포함)
+      const { data: acceptData, error: acceptError } = await supabase.rpc('accept_invitation_with_org', {
+        invitation_token: token,
+        selected_org_id: needsOrgRoleSelection ? selectedOrgId : null,
+        selected_role_type: needsOrgRoleSelection ? selectedRoleType : null
       });
 
-      if (acceptError) throw acceptError;
+      // accept_invitation_with_org가 없으면 기존 함수 사용
+      if (acceptError?.message?.includes('function') || acceptError?.message?.includes('does not exist')) {
+        // 기존 accept_invitation 호출
+        const { data: fallbackData, error: fallbackError } = await supabase.rpc('accept_invitation', {
+          invitation_token: token
+        });
 
-      if (!acceptData.success) {
+        if (fallbackError) throw fallbackError;
+
+        if (!fallbackData.success) {
+          throw new Error(fallbackData.error || '초대 수락에 실패했습니다');
+        }
+
+        // 조직/역할 수동 할당
+        if (needsOrgRoleSelection) {
+          const { data: { user } } = await supabase.auth.getUser();
+          if (user) {
+            // 역할 ID 찾기
+            const { data: roleData } = await supabase
+              .from('roles')
+              .select('id')
+              .eq('name', selectedRoleType)
+              .single();
+
+            if (roleData) {
+              await supabase.from('user_roles').insert({
+                profile_id: user.id,
+                org_id: selectedOrgId,
+                role_id: roleData.id,
+                granted_by: user.id
+              });
+            }
+          }
+        }
+      } else if (acceptError) {
+        throw acceptError;
+      } else if (acceptData && !acceptData.success) {
         throw new Error(acceptData.error || '초대 수락에 실패했습니다');
       }
 
@@ -195,24 +293,22 @@ export default function AcceptInvite() {
           `)
           .eq('profile_id', user.id);
 
-        const maxLevel = Math.max(...(userRoles?.map(r => r.role?.level || 0) || [0]));
+        const maxLevel = Math.max(...(userRoles?.map(r => (r.role as any)?.level || 0) || [0]));
         const isCompanyAdmin = maxLevel >= 90;
 
         await supabase
           .from('profiles')
           .update({ 
-            onboarding_completed: !isCompanyAdmin, // Company Admin은 false, 일반 팀원은 true
+            onboarding_completed: !isCompanyAdmin,
             full_name: fullName
           })
           .eq('id', user.id);
 
         // 5. 리다이렉트
         if (isCompanyAdmin) {
-          // Company Admin → 온보딩
           alert('가입이 완료되었습니다! 조직 구조를 설정해주세요.');
           navigate('/onboarding');
         } else {
-          // 일반 팀원 → 대시보드
           alert('가입 및 초대 수락이 완료되었습니다!');
           navigate('/dashboard');
         }
@@ -224,6 +320,14 @@ export default function AcceptInvite() {
       setAccepting(false);
     }
   };
+
+  // 조직을 계층별로 그룹핑
+  const groupedOrgs = organizations.reduce((acc, org) => {
+    const level = org.level || '기타';
+    if (!acc[level]) acc[level] = [];
+    acc[level].push(org);
+    return acc;
+  }, {} as Record<string, Organization[]>);
 
   if (loading) {
     return (
@@ -286,23 +390,29 @@ export default function AcceptInvite() {
             <span className="text-slate-600">이메일</span>
             <span className="font-medium text-slate-900">{invitation.email}</span>
           </div>
+          <div className="flex justify-between text-sm">
+            <span className="text-slate-600">회사</span>
+            <span className="font-medium text-slate-900">{invitation.company_name}</span>
+          </div>
+          {invitation.org_name && (
+            <div className="flex justify-between text-sm">
+              <span className="text-slate-600">소속 조직</span>
+              <span className="font-medium text-slate-900">{invitation.org_name}</span>
+            </div>
+          )}
           {invitation.role_name && (
             <div className="flex justify-between text-sm">
               <span className="text-slate-600">역할</span>
               <span className="font-medium text-slate-900">{invitation.role_name}</span>
             </div>
           )}
-          <div className="flex justify-between text-sm">
-            <span className="text-slate-600">회사</span>
-            <span className="font-medium text-slate-900">{invitation.company_name}</span>
-          </div>
         </div>
 
         {/* 회원가입 폼 */}
         <div className="space-y-4 mb-6">
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-2">
-              이름
+              이름 *
             </label>
             <input
               type="text"
@@ -316,7 +426,7 @@ export default function AcceptInvite() {
 
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-2">
-              비밀번호
+              비밀번호 *
             </label>
             <input
               type="password"
@@ -332,7 +442,7 @@ export default function AcceptInvite() {
 
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-2">
-              비밀번호 확인
+              비밀번호 확인 *
             </label>
             <input
               type="password"
@@ -345,6 +455,98 @@ export default function AcceptInvite() {
             />
           </div>
         </div>
+
+        {/* 조직/역할 선택 (필요한 경우만) */}
+        {needsOrgRoleSelection && (
+          <div className="space-y-4 mb-6 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+            <div className="flex items-center gap-2 text-amber-800 mb-2">
+              <Building2 className="w-5 h-5" />
+              <span className="font-semibold text-sm">소속 정보를 선택해주세요</span>
+            </div>
+
+            {/* 조직 선택 */}
+            {!invitation.org_id && (
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">
+                  소속 조직 *
+                </label>
+                <select
+                  value={selectedOrgId}
+                  onChange={(e) => setSelectedOrgId(e.target.value)}
+                  className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                  required
+                >
+                  <option value="">조직을 선택하세요</option>
+                  {Object.entries(groupedOrgs).map(([level, orgs]) => (
+                    <optgroup key={level} label={`━━ ${level} ━━`}>
+                      {orgs.map((org) => (
+                        <option key={org.id} value={org.id}>
+                          {org.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* 역할 선택 */}
+            {!invitation.role_id && (
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">
+                  역할 *
+                </label>
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedRoleType('org_head')}
+                    className={`w-full text-left p-3 rounded-lg border-2 transition-all ${
+                      selectedRoleType === 'org_head'
+                        ? 'border-amber-500 bg-amber-100'
+                        : 'border-slate-200 bg-white hover:border-slate-300'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <Crown className={`w-5 h-5 ${
+                        selectedRoleType === 'org_head' ? 'text-amber-600' : 'text-slate-400'
+                      }`} />
+                      <div>
+                        <div className="font-medium text-slate-900">조직장</div>
+                        <div className="text-xs text-slate-500">조직 OKR 관리, 하위 승인/독촉</div>
+                      </div>
+                      {selectedRoleType === 'org_head' && (
+                        <CheckCircle className="w-5 h-5 text-amber-600 ml-auto" />
+                      )}
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setSelectedRoleType('team_member')}
+                    className={`w-full text-left p-3 rounded-lg border-2 transition-all ${
+                      selectedRoleType === 'team_member'
+                        ? 'border-blue-500 bg-blue-100'
+                        : 'border-slate-200 bg-white hover:border-slate-300'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <User className={`w-5 h-5 ${
+                        selectedRoleType === 'team_member' ? 'text-blue-600' : 'text-slate-400'
+                      }`} />
+                      <div>
+                        <div className="font-medium text-slate-900">구성원</div>
+                        <div className="text-xs text-slate-500">개인 OKR 수립, 체크인</div>
+                      </div>
+                      {selectedRoleType === 'team_member' && (
+                        <CheckCircle className="w-5 h-5 text-blue-600 ml-auto" />
+                      )}
+                    </div>
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* 안내 메시지 */}
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
