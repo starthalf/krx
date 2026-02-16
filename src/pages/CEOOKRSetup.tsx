@@ -3,7 +3,7 @@
 // Phase 1~3 통합: 컨텍스트 입력 → 전사 OKR 확정 → 전 조직 초안 → 사이클 시작
 
 import { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom'; 
 import {
   Building2, Bot, Target, ChevronRight, ChevronLeft, Check, CheckCircle2,
   RefreshCw, Pencil, Trash2, Plus, X, Loader2, ArrowLeft, Send,
