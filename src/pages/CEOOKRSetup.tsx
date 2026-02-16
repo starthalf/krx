@@ -1500,7 +1500,7 @@ export default function CEOOKRSetup() {
               )}
             </div>
 
-            {/* 네비게이션 */}
+            {/* 네비게이션 */} 
             {!cycleStarted && (
               <div className="flex justify-start max-w-2xl mx-auto">
                 <button onClick={() => setCurrentStep(2)} className="px-6 py-2.5 border border-slate-300 text-slate-700 rounded-lg font-medium hover:bg-slate-50 flex items-center gap-2">
