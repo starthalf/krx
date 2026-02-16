@@ -748,13 +748,17 @@ export default function CEOOKRSetup() {
       const notifications = [];
 
       for (const org of childOrgs) {
-        // 조직에 속한 사용자 중 리더 찾기 (간단히: 해당 org의 user_roles에서 높은 레벨)
+        // 조직장 찾기: user_roles → roles 조인
         const { data: orgMembers } = await supabase
           .from('user_roles')
-          .select('profile_id, role:roles(level)')
+          .select('profile_id, role_id, roles!inner(name, level)')
           .eq('org_id', org.id);
 
-        const leaders = orgMembers?.filter((m: any) => m.role?.level >= 70) || [];
+        const leaders = orgMembers?.filter((m: any) => {
+          const role = m.roles;
+          // org_head(60) 이상이면 조직장급
+          return role && role.level >= 50;
+        }) || [];
 
         for (const leader of leaders) {
           notifications.push({
@@ -1500,7 +1504,7 @@ export default function CEOOKRSetup() {
               )}
             </div>
 
-            {/* 네비게이션 */} 
+            {/* 네비게이션 */}
             {!cycleStarted && (
               <div className="flex justify-start max-w-2xl mx-auto">
                 <button onClick={() => setCurrentStep(2)} className="px-6 py-2.5 border border-slate-300 text-slate-700 rounded-lg font-medium hover:bg-slate-50 flex items-center gap-2">
