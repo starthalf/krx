@@ -166,12 +166,127 @@ export default function CEOOKRSetup() {
     loadCompany();
   }, [user?.id, company]);
 
-  // 컨텍스트 로딩은 company 세팅 후
+  // 컨텍스트 + 기존 진행 상태 복원
   useEffect(() => {
     if (company?.id) {
       loadExistingContext();
+      loadExistingProgress();
     }
   }, [company?.id]);
+
+  // 기존 진행 상태 복원 (전사 OKR 확정 여부, 조직 초안 생성 여부)
+  const loadExistingProgress = async () => {
+    if (!company?.id) return;
+    try {
+      const companyOrg = organizations.find(o => o.level === '전사');
+      if (!companyOrg) return;
+
+      // 1. 전사 OKR 확정 여부 확인
+      const { data: companyObjs } = await supabase
+        .from('objectives')
+        .select(`
+          id, name, bii_type, approval_status, sort_order,
+          key_results(id, name, definition, formula, unit, weight, target_value, indicator_type, perspective, bii_type, measurement_cycle, grade_criteria, quarterly_targets)
+        `)
+        .eq('org_id', companyOrg.id)
+        .eq('period', '2025-H1')
+        .order('sort_order');
+
+      if (companyObjs && companyObjs.length > 0) {
+        // 전사 OKR이 있으면 복원
+        const restored: GeneratedObjective[] = companyObjs.map((obj: any, idx: number) => ({
+          id: obj.id,
+          name: obj.name,
+          biiType: obj.bii_type || 'Improve',
+          perspective: obj.key_results?.[0]?.perspective || '재무',
+          rationale: '',
+          selected: true,
+          keyResults: (obj.key_results || []).map((kr: any, kIdx: number) => ({
+            id: kr.id,
+            name: kr.name,
+            definition: kr.definition || '',
+            formula: kr.formula || '',
+            unit: kr.unit || '%',
+            targetValue: kr.target_value || 100,
+            weight: kr.weight || 30,
+            indicatorType: kr.indicator_type || '결과',
+            perspective: kr.perspective || '재무',
+            biiType: kr.bii_type || obj.bii_type || 'Improve',
+            measurementCycle: kr.measurement_cycle || '월',
+            gradeCriteria: kr.grade_criteria || { S: 120, A: 110, B: 100, C: 90, D: 0 },
+            quarterlyTargets: kr.quarterly_targets || { Q1: 0, Q2: 0, Q3: 0, Q4: 0 },
+          })),
+        }));
+
+        setObjectives(restored);
+
+        // finalized 상태면 확정 완료
+        const isFinalized = companyObjs.some((o: any) => o.approval_status === 'finalized');
+        if (isFinalized) {
+          setCompanyOKRFinalized(true);
+          setCurrentStep(1); // Step 1로 이동 (확정 완료 상태)
+        } else {
+          setCurrentStep(1); // OKR이 있지만 아직 확정 전
+        }
+      }
+
+      // 2. 하위 조직 초안 생성 여부 확인
+      const childOrgs = organizations.filter(o => o.level !== '전사');
+      if (childOrgs.length > 0) {
+        let allDone = true;
+        const statuses: OrgDraftStatus[] = [];
+
+        for (const org of childOrgs) {
+          const { data: orgObjs, count } = await supabase
+            .from('objectives')
+            .select('id', { count: 'exact' })
+            .eq('org_id', org.id)
+            .eq('period', '2025-H1')
+            .eq('source', 'ai_draft');
+
+          const objCount = count || 0;
+          if (objCount > 0) {
+            statuses.push({
+              orgId: org.id,
+              orgName: org.name,
+              level: org.level,
+              status: 'done',
+              objectiveCount: objCount,
+            });
+          } else {
+            allDone = false;
+          }
+        }
+
+        if (statuses.length > 0) {
+          setOrgDraftStatuses(statuses);
+          if (allDone && statuses.length === childOrgs.length) {
+            setAllDraftsComplete(true);
+            if (companyObjs && companyObjs.some((o: any) => o.approval_status === 'finalized')) {
+              setCurrentStep(2); // 전사 확정 + 조직 초안 완료 → Step 2
+            }
+          }
+        }
+      }
+
+      // 3. 사이클 시작 여부 확인
+      const { data: cycles } = await supabase
+        .from('okr_planning_cycles')
+        .select('*')
+        .eq('company_id', company.id)
+        .eq('period', '2025-H1')
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      if (cycles && cycles.length > 0 && cycles[0].cycle_started_at) {
+        setCycleStarted(true);
+        setCurrentStep(3);
+      }
+
+    } catch (err) {
+      console.error('진행 상태 복원 실패:', err);
+    }
+  };
 
   const loadExistingContext = async () => {
     if (!company?.id) return;
@@ -181,19 +296,19 @@ export default function CEOOKRSetup() {
         .select('*')
         .eq('company_id', company.id)
         .order('created_at', { ascending: false })
-        .limit(1)
-        .single();
+        .limit(1);
 
-      if (data) {
+      if (data && data.length > 0) {
+        const row = data[0];
         setContext({
-          currentSituation: data.current_situation || '',
-          annualGoals: data.annual_goals || '',
-          keyStrategies: data.key_strategies || '',
-          challenges: data.challenges || '',
-          competitiveLandscape: data.competitive_landscape || '',
-          additionalContext: data.additional_context || '',
+          currentSituation: row.current_situation || '',
+          annualGoals: row.annual_goals || '',
+          keyStrategies: row.key_strategies || '',
+          challenges: row.challenges || '',
+          competitiveLandscape: row.competitive_landscape || '',
+          additionalContext: row.additional_context || '',
         });
-        if (data.status === 'finalized') {
+        if (row.status === 'finalized') {
           setContextSaved(true);
         }
       }
@@ -208,63 +323,42 @@ export default function CEOOKRSetup() {
     if (!company?.id || !user?.id) return;
 
     try {
-      // upsert: 같은 회사+기간에 기존 것이 있으면 업데이트
-      const { error } = await supabase
+      // 기존 레코드 확인
+      const { data: existing } = await supabase
         .from('company_okr_contexts')
-        .upsert({
-          company_id: company.id,
-          period: '2025-H1', // TODO: 동적으로
-          current_situation: context.currentSituation,
-          annual_goals: context.annualGoals,
-          key_strategies: context.keyStrategies,
-          challenges: context.challenges,
-          competitive_landscape: context.competitiveLandscape,
-          additional_context: context.additionalContext,
-          status: 'draft',
-        }, {
-          onConflict: 'company_id,period',
-          ignoreDuplicates: false,
-        });
+        .select('id')
+        .eq('company_id', company.id)
+        .order('created_at', { ascending: false })
+        .limit(1);
 
-      // onConflict가 안 되면 그냥 insert 시도
-      if (error) {
-        // 기존 레코드 업데이트
-        const { data: existing } = await supabase
+      if (existing && existing.length > 0) {
+        // 업데이트
+        await supabase
           .from('company_okr_contexts')
-          .select('id')
-          .eq('company_id', company.id)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .single();
-
-        if (existing) {
-          await supabase
-            .from('company_okr_contexts')
-            .update({
-              current_situation: context.currentSituation,
-              annual_goals: context.annualGoals,
-              key_strategies: context.keyStrategies,
-              challenges: context.challenges,
-              competitive_landscape: context.competitiveLandscape,
-              additional_context: context.additionalContext,
-            })
-            .eq('id', existing.id);
-        } else {
-          // 신규 생성
-          await supabase
-            .from('company_okr_contexts')
-            .insert({
-              company_id: company.id,
-              period: '2025-H1',
-              current_situation: context.currentSituation,
-              annual_goals: context.annualGoals,
-              key_strategies: context.keyStrategies,
-              challenges: context.challenges,
-              competitive_landscape: context.competitiveLandscape,
-              additional_context: context.additionalContext,
-              status: 'draft',
-            });
-        }
+          .update({
+            current_situation: context.currentSituation,
+            annual_goals: context.annualGoals,
+            key_strategies: context.keyStrategies,
+            challenges: context.challenges,
+            competitive_landscape: context.competitiveLandscape,
+            additional_context: context.additionalContext,
+          })
+          .eq('id', existing[0].id);
+      } else {
+        // 신규 생성
+        await supabase
+          .from('company_okr_contexts')
+          .insert({
+            company_id: company.id,
+            period: '2025-H1',
+            current_situation: context.currentSituation,
+            annual_goals: context.annualGoals,
+            key_strategies: context.keyStrategies,
+            challenges: context.challenges,
+            competitive_landscape: context.competitiveLandscape,
+            additional_context: context.additionalContext,
+            status: 'draft',
+          });
       }
 
       setContextSaved(true);
@@ -1223,17 +1317,35 @@ export default function CEOOKRSetup() {
               {orgDraftStatuses.length > 0 && (
                 <div className="space-y-3">
                   {/* 진행률 */}
-                  <div className="flex items-center gap-3 mb-4">
-                    <div className="flex-1 h-3 bg-slate-200 rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-indigo-600 rounded-full transition-all duration-500"
-                        style={{ width: `${(orgDraftStatuses.filter(s => s.status === 'done' || s.status === 'error').length / orgDraftStatuses.length) * 100}%` }}
-                      />
-                    </div>
-                    <span className="text-sm font-medium text-slate-700">
-                      {orgDraftStatuses.filter(s => s.status === 'done').length} / {orgDraftStatuses.length}
-                    </span>
-                  </div>
+                  {(() => {
+                    const doneCount = orgDraftStatuses.filter(s => s.status === 'done' || s.status === 'error').length;
+                    const total = orgDraftStatuses.length;
+                    const pct = Math.round((doneCount / total) * 100);
+                    const generatingOrg = orgDraftStatuses.find(s => s.status === 'generating');
+                    return (
+                      <div className="mb-4">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-sm text-slate-700">
+                            {generatingOrg ? (
+                              <><Loader2 className="w-4 h-4 inline animate-spin mr-1 text-indigo-600" /><span className="font-medium">{generatingOrg.orgName}</span> 생성 중...</>
+                            ) : doneCount === total ? (
+                              <span className="text-green-700 font-medium">✅ 전체 완료</span>
+                            ) : (
+                              '대기 중...'
+                            )}
+                          </span>
+                          <span className="text-sm font-bold text-slate-700">{doneCount} / {total} ({pct}%)</span>
+                        </div>
+                        <div className="h-3 bg-slate-200 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-indigo-600 rounded-full transition-all duration-700 ease-out"
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                        {isGeneratingAllDrafts && <p className="text-xs text-slate-400 mt-1">조직당 약 20~40초 소요됩니다</p>}
+                      </div>
+                    );
+                  })()}
 
                   {/* 조직별 상태 */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
