@@ -164,8 +164,12 @@ export default function CEOOKRSetup() {
 
   // ─── Step 0: 컨텍스트 저장 ─────────────────────────────
 
-  const handleSaveContext = async () => {
-    if (!company?.id || !user?.id) return;
+const handleSaveContext = async () => {
+    console.log('=== SAVE DEBUG ===', { companyId: company?.id, userId: user?.id });
+    if (!company?.id || !user?.id) {
+      console.log('company or user is null!');
+      return;
+    }
 
     try {
       // upsert: 같은 회사+기간에 기존 것이 있으면 업데이트
