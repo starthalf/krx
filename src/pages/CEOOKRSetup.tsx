@@ -906,12 +906,22 @@ export default function CEOOKRSetup() {
             {/* 로딩 */}
             {isAIGenerating && (
               <div className="bg-white rounded-xl border border-slate-200 p-12 text-center">
-                <Bot className="w-16 h-16 text-blue-600 mx-auto mb-4 animate-pulse" />
+                <Bot className="w-16 h-16 text-blue-600 mx-auto mb-4 animate-bounce" />
                 <h3 className="text-xl font-bold text-slate-900 mb-2">AI가 전사 OKR을 생성하고 있습니다...</h3>
-                <p className="text-slate-600 mb-4">{company?.industry} 업종 KPI DB를 참조하여 최적의 목표를 설계 중</p>
-                <div className="h-2 bg-slate-200 rounded-full max-w-xs mx-auto overflow-hidden">
-                  <div className="h-full bg-blue-600 rounded-full animate-pulse" style={{ width: '60%' }} />
+                <p className="text-slate-600 mb-6">{company?.industry} 업종 KPI DB를 참조하여 최적의 목표를 설계 중</p>
+                <div className="max-w-xs mx-auto mb-3">
+                  <div className="h-2 bg-slate-200 rounded-full overflow-hidden">
+                    <div className="h-full bg-gradient-to-r from-blue-500 via-violet-500 to-blue-500 rounded-full animate-[shimmer_2s_infinite]"
+                      style={{ width: '100%', backgroundSize: '200% 100%', animation: 'shimmer 2s linear infinite' }} />
+                  </div>
                 </div>
+                <p className="text-xs text-slate-400">보통 15~30초 소요됩니다</p>
+                <style>{`
+                  @keyframes shimmer {
+                    0% { background-position: 200% 0; }
+                    100% { background-position: -200% 0; }
+                  }
+                `}</style>
               </div>
             )}
 
