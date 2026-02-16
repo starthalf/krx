@@ -15,7 +15,14 @@ import {
 
 const navigation = [
   { name: '대시보드', href: '/', icon: Home },
-  { name: '목표 수립', href: '/wizard', icon: Target },
+  {
+     name: '목표 수립',
+     icon: Target,
+     children: [
+       { name: '전사 OKR 수립', href: '/ceo-okr-setup' },
+       { name: '조직 OKR 수립', href: '/wizard' },
+     ]
+   },
   { name: '수립 현황', href: '/okr-setup', icon: Megaphone },
   { name: 'OKR Map', href: '/okr-map', icon: GitBranch },
   {
