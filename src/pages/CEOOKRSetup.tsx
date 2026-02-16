@@ -236,8 +236,12 @@ export default function CEOOKRSetup() {
 
   // ─── Step 1: AI 전사 OKR 생성 ─────────────────────────
 
-  const handleGenerateCompanyOKR = async () => {
-    if (!company) return;
+const handleGenerateCompanyOKR = async () => {
+    console.log('=== DEBUG ===', { company, user: user?.id, context });
+    if (!company) {
+      console.log('company is null!');
+      return;
+    }
 
     setIsAIGenerating(true);
     try {
