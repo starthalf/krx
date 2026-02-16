@@ -101,6 +101,7 @@ function App() {
             <Route path="checkin" element={<Checkin />} />
             
             {/* 목표 수립 위저드 */}
+            <Route path="ceo-okr-setup" element={<CEOOKRSetup />} />
             <Route path="wizard" element={<Wizard />} />
             <Route path="wizard/:orgId" element={<Wizard />} />
             
