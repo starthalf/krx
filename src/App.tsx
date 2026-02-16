@@ -20,6 +20,7 @@ import MySettings from './pages/MySettings';
 import Notifications from './pages/Notifications';
 import ApprovalInbox from './pages/ApprovalInbox';
 import OKRMap from './pages/OKRMap';
+import CEOOKRSetup from './pages/CEOOKRSetup';
 
 function App() {
   return (
