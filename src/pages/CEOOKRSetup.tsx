@@ -181,19 +181,19 @@ export default function CEOOKRSetup() {
         .select('*')
         .eq('company_id', company.id)
         .order('created_at', { ascending: false })
-        .limit(1)
-        .single();
+        .limit(1);
 
-      if (data) {
+      if (data && data.length > 0) {
+        const row = data[0];
         setContext({
-          currentSituation: data.current_situation || '',
-          annualGoals: data.annual_goals || '',
-          keyStrategies: data.key_strategies || '',
-          challenges: data.challenges || '',
-          competitiveLandscape: data.competitive_landscape || '',
-          additionalContext: data.additional_context || '',
+          currentSituation: row.current_situation || '',
+          annualGoals: row.annual_goals || '',
+          keyStrategies: row.key_strategies || '',
+          challenges: row.challenges || '',
+          competitiveLandscape: row.competitive_landscape || '',
+          additionalContext: row.additional_context || '',
         });
-        if (data.status === 'finalized') {
+        if (row.status === 'finalized') {
           setContextSaved(true);
         }
       }
