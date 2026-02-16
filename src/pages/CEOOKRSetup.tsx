@@ -326,7 +326,7 @@ export default function CEOOKRSetup() {
         }));
 
         setObjectives(generated);
-        setExpandedObjId(generated[0]?.id || null);
+        setExpandedObjId(null);
       }
     } catch (err: any) {
       console.error('AI 생성 실패:', err);
@@ -964,7 +964,7 @@ export default function CEOOKRSetup() {
                             onChange={() => toggleObjective(obj.id)}
                             className="w-5 h-5 mt-1 rounded border-slate-300 text-blue-600"
                           />
-                          <div className="flex-1 min-w-0">
+                          <div className="flex-1 min-w-0 cursor-pointer" onClick={() => setExpandedObjId(isExpanded ? null : obj.id)}>
                             <div className="flex items-center gap-2 mb-1">
                               <span className="text-base font-extrabold text-blue-600 italic font-serif">O{idx + 1}</span>
                               <span className={`px-2 py-0.5 rounded text-xs font-medium ${biiColor.bg} ${biiColor.text}`}>{obj.biiType}</span>
