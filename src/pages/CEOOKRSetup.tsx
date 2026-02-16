@@ -977,10 +977,10 @@ export default function CEOOKRSetup() {
 
                         {/* ── 펼친 영역 ── */}
                         {isExpanded && (
-                          <div className="border-t border-slate-100 px-5 pb-5">
+                          <div className="px-5 pb-5">
 
-                            {/* Objective 수정 영역 */}
-                            <div className="pt-4 pb-3">
+                            {/* Objective 수정 버튼 - 헤더에 바로 연결 */}
+                            <div className="pl-9 pb-4">
                               {isObjEditing ? (
                                 <div className="space-y-3 bg-blue-50 rounded-lg p-4 border border-blue-200">
                                   <div>
@@ -1019,14 +1019,14 @@ export default function CEOOKRSetup() {
                                 </div>
                               ) : (
                                 <button onClick={() => setEditingObjId(obj.id)}
-                                  className="px-4 py-1.5 border border-slate-300 text-slate-600 text-xs rounded-lg font-medium hover:bg-slate-50 flex items-center gap-1.5">
-                                  <Pencil className="w-3.5 h-3.5" /> 목표 수정
+                                  className="px-3 py-1 text-blue-600 text-xs rounded-lg font-medium hover:bg-blue-50 flex items-center gap-1.5 -mt-1">
+                                  <Pencil className="w-3 h-3" /> 목표 수정
                                 </button>
                               )}
                             </div>
 
-                            {/* KR 리스트 */}
-                            <div className="pt-2">
+                            {/* KR 리스트 - 여기에만 구분선 */}
+                            <div className="border-t border-slate-100 pt-4">
                               <div className="flex items-center justify-between mb-3">
                                 <span className="text-sm font-medium text-slate-700">
                                   핵심결과 (KR) · 가중치 합계: <span className={totalWeight === 100 ? 'text-green-600 font-bold' : 'text-red-600 font-bold'}>{totalWeight}%</span>
