@@ -3,7 +3,7 @@
 // Phase 1~3 통합: 컨텍스트 입력 → 전사 OKR 확정 → 전 조직 초안 → 사이클 시작
 
 import { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom'; 
+import { useNavigate } from 'react-router-dom';
 import {
   Building2, Bot, Target, ChevronRight, ChevronLeft, Check, CheckCircle2,
   RefreshCw, Pencil, Trash2, Plus, X, Loader2, ArrowLeft, Send,
@@ -14,7 +14,7 @@ import { supabase } from '../lib/supabase';
 import { useStore } from '../store/useStore';
 import { useAuth } from '../contexts/AuthContext';
 import { getBIIColor } from '../utils/helpers';
-import type { BIIType } from '../types';
+import type { BIIType, Company } from '../types';
 
 // ─── Types ───────────────────────────────────────────────
 
@@ -128,9 +128,49 @@ export default function CEOOKRSetup() {
   const [isCycleStarting, setIsCycleStarting] = useState(false);
   const [cycleStarted, setCycleStarted] = useState(false);
 
-  // 기존 컨텍스트 로딩
+  // company가 없으면 자동 로딩
   useEffect(() => {
-    loadExistingContext();
+    const loadCompany = async () => {
+      if (!user?.id) return;
+      if (company) return; // 이미 있으면 스킵
+      
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('company_id')
+        .eq('id', user.id)
+        .single();
+      
+      if (profile?.company_id) {
+        const { data: companyData } = await supabase
+          .from('companies')
+          .select('*')
+          .eq('id', profile.company_id)
+          .single();
+        
+        if (companyData) {
+          useStore.getState().setCompany({
+            id: companyData.id,
+            name: companyData.name,
+            industry: companyData.industry,
+            size: companyData.size,
+            vision: companyData.vision || '',
+          } as Company);
+          
+          if (organizations.length === 0) {
+            await useStore.getState().fetchOrganizations(companyData.id);
+          }
+        }
+      }
+    };
+    
+    loadCompany();
+  }, [user?.id, company]);
+
+  // 컨텍스트 로딩은 company 세팅 후
+  useEffect(() => {
+    if (company?.id) {
+      loadExistingContext();
+    }
   }, [company?.id]);
 
   const loadExistingContext = async () => {
@@ -164,12 +204,8 @@ export default function CEOOKRSetup() {
 
   // ─── Step 0: 컨텍스트 저장 ─────────────────────────────
 
-const handleSaveContext = async () => {
-    console.log('=== SAVE DEBUG ===', { companyId: company?.id, userId: user?.id });
-    if (!company?.id || !user?.id) {
-      console.log('company or user is null!');
-      return;
-    }
+  const handleSaveContext = async () => {
+    if (!company?.id || !user?.id) return;
 
     try {
       // upsert: 같은 회사+기간에 기존 것이 있으면 업데이트
@@ -240,12 +276,8 @@ const handleSaveContext = async () => {
 
   // ─── Step 1: AI 전사 OKR 생성 ─────────────────────────
 
-const handleGenerateCompanyOKR = async () => {
-    console.log('=== DEBUG ===', { company, user: user?.id, context });
-    if (!company) {
-      console.log('company is null!');
-      return;
-    }
+  const handleGenerateCompanyOKR = async () => {
+    if (!company) return;
 
     setIsAIGenerating(true);
     try {
