@@ -208,63 +208,42 @@ export default function CEOOKRSetup() {
     if (!company?.id || !user?.id) return;
 
     try {
-      // upsert: 같은 회사+기간에 기존 것이 있으면 업데이트
-      const { error } = await supabase
+      // 기존 레코드 확인
+      const { data: existing } = await supabase
         .from('company_okr_contexts')
-        .upsert({
-          company_id: company.id,
-          period: '2025-H1', // TODO: 동적으로
-          current_situation: context.currentSituation,
-          annual_goals: context.annualGoals,
-          key_strategies: context.keyStrategies,
-          challenges: context.challenges,
-          competitive_landscape: context.competitiveLandscape,
-          additional_context: context.additionalContext,
-          status: 'draft',
-        }, {
-          onConflict: 'company_id,period',
-          ignoreDuplicates: false,
-        });
+        .select('id')
+        .eq('company_id', company.id)
+        .order('created_at', { ascending: false })
+        .limit(1);
 
-      // onConflict가 안 되면 그냥 insert 시도
-      if (error) {
-        // 기존 레코드 업데이트
-        const { data: existing } = await supabase
+      if (existing && existing.length > 0) {
+        // 업데이트
+        await supabase
           .from('company_okr_contexts')
-          .select('id')
-          .eq('company_id', company.id)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .single();
-
-        if (existing) {
-          await supabase
-            .from('company_okr_contexts')
-            .update({
-              current_situation: context.currentSituation,
-              annual_goals: context.annualGoals,
-              key_strategies: context.keyStrategies,
-              challenges: context.challenges,
-              competitive_landscape: context.competitiveLandscape,
-              additional_context: context.additionalContext,
-            })
-            .eq('id', existing.id);
-        } else {
-          // 신규 생성
-          await supabase
-            .from('company_okr_contexts')
-            .insert({
-              company_id: company.id,
-              period: '2025-H1',
-              current_situation: context.currentSituation,
-              annual_goals: context.annualGoals,
-              key_strategies: context.keyStrategies,
-              challenges: context.challenges,
-              competitive_landscape: context.competitiveLandscape,
-              additional_context: context.additionalContext,
-              status: 'draft',
-            });
-        }
+          .update({
+            current_situation: context.currentSituation,
+            annual_goals: context.annualGoals,
+            key_strategies: context.keyStrategies,
+            challenges: context.challenges,
+            competitive_landscape: context.competitiveLandscape,
+            additional_context: context.additionalContext,
+          })
+          .eq('id', existing[0].id);
+      } else {
+        // 신규 생성
+        await supabase
+          .from('company_okr_contexts')
+          .insert({
+            company_id: company.id,
+            period: '2025-H1',
+            current_situation: context.currentSituation,
+            annual_goals: context.annualGoals,
+            key_strategies: context.keyStrategies,
+            challenges: context.challenges,
+            competitive_landscape: context.competitiveLandscape,
+            additional_context: context.additionalContext,
+            status: 'draft',
+          });
       }
 
       setContextSaved(true);
