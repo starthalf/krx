@@ -226,7 +226,7 @@ export const useStore = create<AppState>((set, get) => ({
       console.log('✅ Fetched objectives:', data?.length);
 
       if (data) {
-        const objectives: Objective[] = data.map(obj => ({
+        const newObjs: Objective[] = data.map(obj => ({
           id: obj.id,
           orgId: obj.org_id,
           name: obj.name,
@@ -237,7 +237,9 @@ export const useStore = create<AppState>((set, get) => ({
           order: obj.sort_order
         }));
         
-        set({ objectives });
+        // 다른 org의 objectives는 유지하고, 이 org의 것만 교체
+        const existing = get().objectives.filter(o => o.orgId !== orgId);
+        set({ objectives: [...existing, ...newObjs] });
       }
     } catch (error: any) {
       console.error('❌ fetchObjectives error:', error);
@@ -392,7 +394,9 @@ export const useStore = create<AppState>((set, get) => ({
           })) : []
         }));
         
-        set({ krs });
+        // 다른 org의 KRs는 유지하고, 이 org의 것만 교체
+        const existing = get().krs.filter(k => k.orgId !== orgId);
+        set({ krs: [...existing, ...krs] });
       }
     } catch (error: any) {
       console.error('❌ fetchKRs error:', error);
