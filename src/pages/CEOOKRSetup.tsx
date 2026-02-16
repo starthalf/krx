@@ -181,19 +181,19 @@ export default function CEOOKRSetup() {
         .select('*')
         .eq('company_id', company.id)
         .order('created_at', { ascending: false })
-        .limit(1)
-        .single();
+        .limit(1);
 
-      if (data) {
+      if (data && data.length > 0) {
+        const row = data[0];
         setContext({
-          currentSituation: data.current_situation || '',
-          annualGoals: data.annual_goals || '',
-          keyStrategies: data.key_strategies || '',
-          challenges: data.challenges || '',
-          competitiveLandscape: data.competitive_landscape || '',
-          additionalContext: data.additional_context || '',
+          currentSituation: row.current_situation || '',
+          annualGoals: row.annual_goals || '',
+          keyStrategies: row.key_strategies || '',
+          challenges: row.challenges || '',
+          competitiveLandscape: row.competitive_landscape || '',
+          additionalContext: row.additional_context || '',
         });
-        if (data.status === 'finalized') {
+        if (row.status === 'finalized') {
           setContextSaved(true);
         }
       }
@@ -208,63 +208,42 @@ export default function CEOOKRSetup() {
     if (!company?.id || !user?.id) return;
 
     try {
-      // upsert: 같은 회사+기간에 기존 것이 있으면 업데이트
-      const { error } = await supabase
+      // 기존 레코드 확인
+      const { data: existing } = await supabase
         .from('company_okr_contexts')
-        .upsert({
-          company_id: company.id,
-          period: '2025-H1', // TODO: 동적으로
-          current_situation: context.currentSituation,
-          annual_goals: context.annualGoals,
-          key_strategies: context.keyStrategies,
-          challenges: context.challenges,
-          competitive_landscape: context.competitiveLandscape,
-          additional_context: context.additionalContext,
-          status: 'draft',
-        }, {
-          onConflict: 'company_id,period',
-          ignoreDuplicates: false,
-        });
+        .select('id')
+        .eq('company_id', company.id)
+        .order('created_at', { ascending: false })
+        .limit(1);
 
-      // onConflict가 안 되면 그냥 insert 시도
-      if (error) {
-        // 기존 레코드 업데이트
-        const { data: existing } = await supabase
+      if (existing && existing.length > 0) {
+        // 업데이트
+        await supabase
           .from('company_okr_contexts')
-          .select('id')
-          .eq('company_id', company.id)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .single();
-
-        if (existing) {
-          await supabase
-            .from('company_okr_contexts')
-            .update({
-              current_situation: context.currentSituation,
-              annual_goals: context.annualGoals,
-              key_strategies: context.keyStrategies,
-              challenges: context.challenges,
-              competitive_landscape: context.competitiveLandscape,
-              additional_context: context.additionalContext,
-            })
-            .eq('id', existing.id);
-        } else {
-          // 신규 생성
-          await supabase
-            .from('company_okr_contexts')
-            .insert({
-              company_id: company.id,
-              period: '2025-H1',
-              current_situation: context.currentSituation,
-              annual_goals: context.annualGoals,
-              key_strategies: context.keyStrategies,
-              challenges: context.challenges,
-              competitive_landscape: context.competitiveLandscape,
-              additional_context: context.additionalContext,
-              status: 'draft',
-            });
-        }
+          .update({
+            current_situation: context.currentSituation,
+            annual_goals: context.annualGoals,
+            key_strategies: context.keyStrategies,
+            challenges: context.challenges,
+            competitive_landscape: context.competitiveLandscape,
+            additional_context: context.additionalContext,
+          })
+          .eq('id', existing[0].id);
+      } else {
+        // 신규 생성
+        await supabase
+          .from('company_okr_contexts')
+          .insert({
+            company_id: company.id,
+            period: '2025-H1',
+            current_situation: context.currentSituation,
+            annual_goals: context.annualGoals,
+            key_strategies: context.keyStrategies,
+            challenges: context.challenges,
+            competitive_landscape: context.competitiveLandscape,
+            additional_context: context.additionalContext,
+            status: 'draft',
+          });
       }
 
       setContextSaved(true);
@@ -936,155 +915,94 @@ export default function CEOOKRSetup() {
                 </div>
 
                 {/* 목표 리스트 */}
-                <div className="space-y-3">
+                <div className="space-y-4">
                   {objectives.map((obj, idx) => {
                     const biiColor = BII_COLORS[obj.biiType] || BII_COLORS.Improve;
                     const perspColor = PERSPECTIVE_COLORS[obj.perspective] || '';
                     const isExpanded = expandedObjId === obj.id;
+                    const isEditing = editingObjId === obj.id;
                     const totalWeight = obj.keyResults.reduce((s, kr) => s + kr.weight, 0);
 
                     return (
                       <div key={obj.id} className={`bg-white rounded-xl border-2 transition-all ${obj.selected ? 'border-blue-200' : 'border-slate-200 opacity-60'}`}>
-                        {/* ── 접힌 상태: 1줄 요약 ── */}
-                        <div className="px-5 py-4 flex items-center gap-3">
+                        {/* 헤더 */}
+                        <div className="p-5 flex items-start gap-4">
                           <input
                             type="checkbox"
                             checked={obj.selected}
                             onChange={() => toggleObjective(obj.id)}
-                            className="w-5 h-5 rounded border-slate-300 text-blue-600 flex-shrink-0"
+                            className="w-5 h-5 mt-1 rounded border-slate-300 text-blue-600"
                           />
-                          <span className="text-base font-extrabold text-blue-600 italic font-serif w-7 flex-shrink-0">O{idx + 1}</span>
-                          <span className={`px-1.5 py-0.5 rounded text-[11px] font-semibold flex-shrink-0 ${biiColor.bg} ${biiColor.text}`}>{obj.biiType}</span>
-                          <span className={`px-1.5 py-0.5 rounded text-[11px] font-semibold flex-shrink-0 ${perspColor}`}>{obj.perspective}</span>
-                          <span className="text-sm font-medium text-slate-900 truncate flex-1">{obj.name || '(목표 입력)'}</span>
-                          <span className="text-xs text-slate-400 flex-shrink-0">KR {obj.keyResults.length}개</span>
-                          <button
-                            onClick={() => setExpandedObjId(isExpanded ? null : obj.id)}
-                            className={`px-3 py-1 rounded-lg text-xs font-medium flex items-center gap-1 flex-shrink-0 transition-colors ${isExpanded ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
-                          >
-                            <Pencil className="w-3 h-3" />
-                            {isExpanded ? '접기' : '수정'}
-                          </button>
-                          <button onClick={() => deleteObjective(obj.id)} className="p-1.5 hover:bg-red-50 rounded-lg text-slate-300 hover:text-red-500 flex-shrink-0">
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="text-sm font-bold text-slate-400">O{idx + 1}</span>
+                              <span className={`px-2 py-0.5 rounded text-xs font-medium ${biiColor.bg} ${biiColor.text}`}>{obj.biiType}</span>
+                              <span className={`px-2 py-0.5 rounded text-xs font-medium ${perspColor}`}>{obj.perspective}</span>
+                            </div>
+                            {isEditing ? (
+                              <input
+                                value={obj.name}
+                                onChange={(e) => handleObjChange(obj.id, 'name', e.target.value)}
+                                onBlur={() => setEditingObjId(null)}
+                                autoFocus
+                                className="w-full text-lg font-semibold border border-blue-300 rounded-lg px-3 py-1.5"
+                              />
+                            ) : (
+                              <h3 className="text-lg font-semibold text-slate-900 cursor-pointer" onClick={() => setEditingObjId(obj.id)}>
+                                {obj.name || '(목표를 입력하세요)'}
+                              </h3>
+                            )}
+                            {obj.rationale && (
+                              <p className="text-sm text-slate-500 mt-1">💡 {obj.rationale}</p>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button onClick={() => deleteObjective(obj.id)} className="p-1.5 hover:bg-red-50 rounded-lg text-slate-400 hover:text-red-500">
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                            <button onClick={() => setExpandedObjId(isExpanded ? null : obj.id)} className="p-1.5 hover:bg-slate-100 rounded-lg">
+                              {isExpanded ? <ChevronUp className="w-5 h-5 text-slate-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}
+                            </button>
+                          </div>
                         </div>
 
-                        {/* ── 펼친 상태: 편집 영역 ── */}
+                        {/* KR 리스트 (접었다 펼침) */}
                         {isExpanded && (
                           <div className="border-t border-slate-100 px-5 pb-5">
-                            {/* Objective 편집 */}
-                            <div className="pt-4 pb-3 space-y-3">
-                              <div className="flex items-center gap-3">
-                                <label className="text-xs text-slate-500 w-16 flex-shrink-0">목표명</label>
-                                <input
-                                  value={obj.name}
-                                  onChange={(e) => handleObjChange(obj.id, 'name', e.target.value)}
-                                  className="flex-1 text-sm font-semibold border border-slate-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                                />
-                              </div>
-                              <div className="flex items-center gap-3">
-                                <label className="text-xs text-slate-500 w-16 flex-shrink-0">BII</label>
-                                <select
-                                  value={obj.biiType}
-                                  onChange={(e) => handleObjChange(obj.id, 'biiType', e.target.value)}
-                                  className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 cursor-pointer"
-                                >
-                                  <option value="Build">Build</option>
-                                  <option value="Innovate">Innovate</option>
-                                  <option value="Improve">Improve</option>
-                                </select>
-                                <label className="text-xs text-slate-500 ml-4">관점</label>
-                                <select
-                                  value={obj.perspective}
-                                  onChange={(e) => handleObjChange(obj.id, 'perspective', e.target.value)}
-                                  className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 cursor-pointer"
-                                >
-                                  <option value="재무">재무</option>
-                                  <option value="고객">고객</option>
-                                  <option value="프로세스">프로세스</option>
-                                  <option value="학습성장">학습성장</option>
-                                </select>
-                              </div>
-                              {obj.rationale && (
-                                <p className="text-xs text-slate-500 bg-slate-50 rounded-lg px-3 py-2">💡 {obj.rationale}</p>
-                              )}
+                            <div className="flex items-center justify-between py-3">
+                              <span className="text-sm font-medium text-slate-700">
+                                핵심결과 (KR) · 가중치 합계: <span className={totalWeight === 100 ? 'text-green-600' : 'text-red-600'}>{totalWeight}%</span>
+                              </span>
                             </div>
-
-                            {/* KR 리스트 */}
-                            <div className="pt-2">
-                              <div className="flex items-center justify-between mb-3">
-                                <span className="text-sm font-medium text-slate-700">
-                                  핵심결과 (KR) · 가중치 합계: <span className={totalWeight === 100 ? 'text-green-600 font-bold' : 'text-red-600 font-bold'}>{totalWeight}%</span>
-                                </span>
-                              </div>
-                              <div className="space-y-2">
-                                {obj.keyResults.map((kr, kIdx) => (
-                                  <div key={kr.id} className="bg-slate-50 rounded-lg p-3">
-                                    {/* KR 1줄: 번호 + 이름 + 핵심 수치 */}
-                                    <div className="flex items-center gap-2 mb-2">
-                                      <span className="text-xs font-extrabold text-indigo-600 italic font-serif flex-shrink-0">KR{kIdx + 1}</span>
-                                      <input
-                                        value={kr.name}
-                                        onChange={(e) => handleKRChange(obj.id, kr.id, 'name', e.target.value)}
-                                        className="flex-1 text-sm font-medium border border-slate-200 rounded px-2 py-1 bg-white focus:ring-1 focus:ring-blue-400 outline-none"
-                                      />
-                                      <button
-                                        onClick={() => {
-                                          if (!confirm('이 KR을 삭제하시겠습니까?')) return;
-                                          setObjectives(prev => prev.map(o =>
-                                            o.id === obj.id ? { ...o, keyResults: o.keyResults.filter(k => k.id !== kr.id) } : o
-                                          ));
-                                        }}
-                                        className="p-1 hover:bg-red-50 rounded text-slate-300 hover:text-red-500 flex-shrink-0"
-                                      >
-                                        <Trash2 className="w-3.5 h-3.5" />
-                                      </button>
-                                    </div>
-                                    {/* KR 핵심 수치: 가중치 + 목표 + 단위 */}
-                                    <div className="flex items-center gap-4 text-xs">
-                                      <div className="flex items-center gap-1">
-                                        <span className="text-slate-500">가중치</span>
-                                        <input type="number" value={kr.weight} onChange={(e) => handleKRChange(obj.id, kr.id, 'weight', parseInt(e.target.value) || 0)}
-                                          className="w-12 text-center border border-slate-200 rounded px-1 py-0.5 bg-white" min={0} max={100} />
-                                        <span className="text-slate-400">%</span>
+                            <div className="space-y-3">
+                              {obj.keyResults.map((kr, kIdx) => (
+                                <div key={kr.id} className="bg-slate-50 rounded-lg p-4">
+                                  <div className="flex items-start justify-between">
+                                    <div className="flex-1">
+                                      <div className="flex items-center gap-2 mb-1">
+                                        <span className="text-xs font-bold text-slate-400">KR{kIdx + 1}</span>
+                                        <span className="text-xs bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded">{kr.unit}</span>
+                                        <span className="text-xs bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded">가중치 {kr.weight}%</span>
+                                        <span className="text-xs bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded">목표 {kr.targetValue}</span>
                                       </div>
-                                      <div className="flex items-center gap-1">
-                                        <span className="text-slate-500">목표값</span>
-                                        <input type="number" value={kr.targetValue} onChange={(e) => handleKRChange(obj.id, kr.id, 'targetValue', parseFloat(e.target.value) || 0)}
-                                          className="w-16 text-center border border-slate-200 rounded px-1 py-0.5 bg-white" />
-                                      </div>
-                                      <div className="flex items-center gap-1">
-                                        <span className="text-slate-500">단위</span>
-                                        <select value={kr.unit} onChange={(e) => handleKRChange(obj.id, kr.id, 'unit', e.target.value)}
-                                          className="border border-slate-200 rounded px-1 py-0.5 bg-white cursor-pointer">
-                                          {['%', '원', '만원', '억원', '건', '명', '점', '일', '개', '회', '배'].map(u => (
-                                            <option key={u} value={u}>{u}</option>
-                                          ))}
-                                        </select>
-                                      </div>
-                                      <div className="flex items-center gap-1">
-                                        <span className="text-slate-500">유형</span>
-                                        <select value={kr.indicatorType} onChange={(e) => handleKRChange(obj.id, kr.id, 'indicatorType', e.target.value)}
-                                          className="border border-slate-200 rounded px-1 py-0.5 bg-white cursor-pointer">
-                                          <option value="결과">결과</option>
-                                          <option value="과정">과정</option>
-                                        </select>
-                                      </div>
-                                      <div className="flex items-center gap-1">
-                                        <span className="text-slate-500">주기</span>
-                                        <select value={kr.measurementCycle} onChange={(e) => handleKRChange(obj.id, kr.id, 'measurementCycle', e.target.value)}
-                                          className="border border-slate-200 rounded px-1 py-0.5 bg-white cursor-pointer">
-                                          <option value="월">월</option>
-                                          <option value="분기">분기</option>
-                                          <option value="반기">반기</option>
-                                          <option value="연">연</option>
-                                        </select>
-                                      </div>
+                                      {editingKRId === kr.id ? (
+                                        <input
+                                          value={kr.name}
+                                          onChange={(e) => handleKRChange(obj.id, kr.id, 'name', e.target.value)}
+                                          onBlur={() => setEditingKRId(null)}
+                                          autoFocus
+                                          className="w-full text-sm font-medium border border-blue-300 rounded px-2 py-1"
+                                        />
+                                      ) : (
+                                        <p className="text-sm font-medium text-slate-900 cursor-pointer" onClick={() => setEditingKRId(kr.id)}>
+                                          {kr.name}
+                                        </p>
+                                      )}
+                                      <p className="text-xs text-slate-500 mt-1">{kr.definition}</p>
                                     </div>
                                   </div>
-                                ))}
-                              </div>
+                                </div>
+                              ))}
                             </div>
                           </div>
                         )}
@@ -1357,4 +1275,4 @@ export default function CEOOKRSetup() {
       </div>
     </div>
   );
-}
+} 
