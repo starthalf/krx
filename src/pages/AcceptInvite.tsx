@@ -22,6 +22,21 @@ interface Organization {
   level: string;
 }
 
+// profiles 테이블에 row가 생길 때까지 polling
+const waitForProfile = async (userId: string, maxRetries = 10): Promise<boolean> => {
+  for (let i = 0; i < maxRetries; i++) {
+    const { data } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('id', userId)
+      .maybeSingle();
+    
+    if (data) return true;
+    await new Promise(r => setTimeout(r, 500));
+  }
+  return false;
+};
+
 export default function AcceptInvite() {
   const { token } = useParams<{ token: string }>();
   const navigate = useNavigate();
@@ -51,9 +66,6 @@ export default function AcceptInvite() {
     try {
       setLoading(true);
 
-      console.log('Loading invitation with token:', token);
-
-      // 초대 정보 조회
       const { data: invitationData, error: inviteError } = await supabase
         .from('invitations')
         .select(`
@@ -69,32 +81,24 @@ export default function AcceptInvite() {
         .eq('token', token)
         .single();
 
-      console.log('Invitation data:', invitationData);
-      console.log('Invitation error:', inviteError);
-
       if (inviteError || !invitationData) {
-        console.error('Invitation not found:', inviteError);
         throw new Error('초대를 찾을 수 없습니다');
       }
 
-      // 만료 확인
       if (new Date(invitationData.expires_at) < new Date()) {
         throw new Error('초대가 만료되었습니다');
       }
 
-      // 이미 수락됨
       if (invitationData.status === 'accepted') {
         throw new Error('이미 수락된 초대입니다');
       }
 
-      // 회사 정보 가져오기
       const { data: company } = await supabase
         .from('companies')
         .select('name')
         .eq('id', invitationData.company_id)
         .single();
 
-      // 역할 정보 가져오기
       let roleName = '';
       if (invitationData.role_id) {
         const { data: role } = await supabase
@@ -105,7 +109,6 @@ export default function AcceptInvite() {
         roleName = role?.display_name || '';
       }
 
-      // 조직 정보 가져오기
       let orgName = '';
       if (invitationData.org_id) {
         const { data: org } = await supabase
@@ -116,7 +119,6 @@ export default function AcceptInvite() {
         orgName = org?.name || '';
       }
 
-      // 초대한 사람 정보
       let invitedByName = '';
       if (invitationData.invited_by) {
         const { data: inviter } = await supabase
@@ -139,12 +141,10 @@ export default function AcceptInvite() {
         invited_by_name: invitedByName
       });
       
-      // 초대에 이름이 있으면 자동 입력
       if (invitationData.full_name) {
         setFullName(invitationData.full_name);
       }
 
-      // 조직/역할이 지정 안 됐으면 선택 목록 로드
       if (!invitationData.org_id || !invitationData.role_id) {
         await loadOrganizations(invitationData.company_id);
       }
@@ -157,7 +157,6 @@ export default function AcceptInvite() {
     }
   };
 
-  // 회사의 조직 목록 로드
   const loadOrganizations = async (companyId: string) => {
     const { data: orgs } = await supabase
       .from('organizations')
@@ -168,13 +167,11 @@ export default function AcceptInvite() {
     setOrganizations(orgs || []);
   };
 
-  // 조직/역할 선택이 필요한지 확인
   const needsOrgRoleSelection = !invitation?.org_id || !invitation?.role_id;
 
   const handleAccept = async () => {
     if (!token || !invitation) return;
 
-    // 유효성 검사
     if (!fullName.trim()) {
       alert('이름을 입력해주세요');
       return;
@@ -190,7 +187,6 @@ export default function AcceptInvite() {
       return;
     }
 
-    // 조직/역할 선택이 필요한 경우 검증
     if (needsOrgRoleSelection) {
       if (!selectedOrgId) {
         alert('소속 조직을 선택해주세요');
@@ -205,114 +201,144 @@ export default function AcceptInvite() {
     try {
       setAccepting(true);
 
-      // 1. 회원가입
+      // ── 1. 회원가입 또는 로그인 ──
+      let userId: string | null = null;
+
       const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
         email: invitation.email,
         password: password,
         options: {
-          data: {
-            full_name: fullName
-          }
+          data: { full_name: fullName }
         }
       });
 
       if (signUpError) {
-        // 이미 가입된 경우 → 로그인 시도
         if (signUpError.message.includes('already registered')) {
-          const { error: signInError } = await supabase.auth.signInWithPassword({
+          // 이미 가입 → 로그인
+          const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
             email: invitation.email,
             password: password
           });
-
           if (signInError) {
-            throw new Error('이미 가입된 이메일입니다. 비밀번호를 확인하거나 비밀번호 재설정을 하세요.');
+            throw new Error('이미 가입된 이메일입니다. 비밀번호를 확인해주세요.');
           }
+          userId = signInData.user?.id || null;
         } else {
           throw signUpError;
         }
+      } else {
+        userId = signUpData.user?.id || null;
       }
 
-      // 2. 잠시 대기 (Supabase Auth 처리 시간)
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
-      // 3. 초대 수락 (조직/역할 포함)
-      const { data: acceptData, error: acceptError } = await supabase.rpc('accept_invitation_with_org', {
-        invitation_token: token,
-        selected_org_id: needsOrgRoleSelection ? selectedOrgId : null,
-        selected_role_type: needsOrgRoleSelection ? selectedRoleType : null
-      });
-
-      // accept_invitation_with_org가 없으면 기존 함수 사용
-      if (acceptError?.message?.includes('function') || acceptError?.message?.includes('does not exist')) {
-        // 기존 accept_invitation 호출
-        const { data: fallbackData, error: fallbackError } = await supabase.rpc('accept_invitation', {
-          invitation_token: token
-        });
-
-        if (fallbackError) throw fallbackError;
-
-        if (!fallbackData.success) {
-          throw new Error(fallbackData.error || '초대 수락에 실패했습니다');
-        }
-
-        // 조직/역할 수동 할당
-        if (needsOrgRoleSelection) {
-          const { data: { user } } = await supabase.auth.getUser();
-          if (user) {
-            // 역할 ID 찾기
-            const { data: roleData } = await supabase
-              .from('roles')
-              .select('id')
-              .eq('name', selectedRoleType)
-              .single();
-
-            if (roleData) {
-              await supabase.from('user_roles').insert({
-                profile_id: user.id,
-                org_id: selectedOrgId,
-                role_id: roleData.id,
-                granted_by: user.id
-              });
-            }
-          }
-        }
-      } else if (acceptError) {
-        throw acceptError;
-      } else if (acceptData && !acceptData.success) {
-        throw new Error(acceptData.error || '초대 수락에 실패했습니다');
+      if (!userId) {
+        throw new Error('사용자 계정 생성에 실패했습니다');
       }
 
-      // 4. 프로필 업데이트
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        // 역할 레벨 확인
-        const { data: userRoles } = await supabase
-          .from('user_roles')
-          .select(`
-            role:roles(level)
-          `)
-          .eq('profile_id', user.id);
-
-        const maxLevel = Math.max(...(userRoles?.map(r => (r.role as any)?.level || 0) || [0]));
-        const isCompanyAdmin = maxLevel >= 90;
-
+      // ── 2. profiles 테이블에 row 생성 대기 ──
+      console.log('⏳ Waiting for profile to be created...', userId);
+      const profileExists = await waitForProfile(userId);
+      
+      if (!profileExists) {
+        // trigger가 안 돌았으면 직접 생성
+        console.log('⚠️ Profile not auto-created, creating manually...');
+        const { error: profileError } = await supabase
+          .from('profiles')
+          .upsert({
+            id: userId,
+            full_name: fullName,
+            company_id: invitation.company_id,
+          }, { onConflict: 'id' });
+        
+        if (profileError) {
+          console.error('Profile creation failed:', profileError);
+          throw new Error('프로필 생성에 실패했습니다: ' + profileError.message);
+        }
+      } else {
+        // profiles 존재하면 company_id, full_name 업데이트
         await supabase
           .from('profiles')
           .update({ 
-            onboarding_completed: !isCompanyAdmin,
+            company_id: invitation.company_id,
             full_name: fullName
           })
-          .eq('id', user.id);
+          .eq('id', userId);
+      }
 
-        // 5. 리다이렉트
-        if (isCompanyAdmin) {
-          alert('가입이 완료되었습니다! 조직 구조를 설정해주세요.');
-          navigate('/onboarding');
-        } else {
-          alert('가입 및 초대 수락이 완료되었습니다!');
-          navigate('/dashboard');
+      // ── 3. user_roles 할당 ──
+      const orgId = invitation.org_id || selectedOrgId;
+      let roleId = invitation.role_id;
+
+      if (!roleId) {
+        // 선택된 역할 타입으로 role_id 조회
+        const { data: roleData } = await supabase
+          .from('roles')
+          .select('id')
+          .eq('name', selectedRoleType || 'team_member')
+          .single();
+        roleId = roleData?.id;
+      }
+
+      if (orgId && roleId) {
+        // 이미 있는지 확인
+        const { data: existingRole } = await supabase
+          .from('user_roles')
+          .select('id')
+          .eq('profile_id', userId)
+          .eq('org_id', orgId)
+          .maybeSingle();
+
+        if (!existingRole) {
+          const { error: roleInsertError } = await supabase
+            .from('user_roles')
+            .insert({
+              profile_id: userId,
+              org_id: orgId,
+              role_id: roleId,
+              granted_by: userId,
+            });
+
+          if (roleInsertError) {
+            console.error('user_roles insert failed:', roleInsertError);
+            throw new Error('역할 할당에 실패했습니다: ' + roleInsertError.message);
+          }
         }
       }
+
+      // ── 4. 초대 상태 업데이트 ──
+      await supabase
+        .from('invitations')
+        .update({ 
+          status: 'accepted',
+          accepted_at: new Date().toISOString(),
+        })
+        .eq('token', token);
+
+      // ── 5. onboarding 상태 + 리다이렉트 ──
+      // 역할 레벨 확인
+      const { data: userRoles } = await supabase
+        .from('user_roles')
+        .select('roles!inner(level)')
+        .eq('profile_id', userId);
+
+      const maxLevel = Math.max(...(userRoles?.map((r: any) => r.roles?.level || 0) || [0]));
+      const isCompanyAdmin = maxLevel >= 90;
+
+      await supabase
+        .from('profiles')
+        .update({ 
+          onboarding_completed: !isCompanyAdmin,
+          full_name: fullName
+        })
+        .eq('id', userId);
+
+      if (isCompanyAdmin) {
+        alert('가입이 완료되었습니다! 조직 구조를 설정해주세요.');
+        navigate('/onboarding');
+      } else {
+        alert('가입 및 초대 수락이 완료되었습니다!');
+        navigate('/dashboard');
+      }
+
     } catch (err) {
       console.error('Failed to accept invitation:', err);
       alert('처리 중 오류가 발생했습니다: ' + (err as Error).message);
@@ -464,7 +490,6 @@ export default function AcceptInvite() {
               <span className="font-semibold text-sm">소속 정보를 선택해주세요</span>
             </div>
 
-            {/* 조직 선택 */}
             {!invitation.org_id && (
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">
@@ -490,7 +515,6 @@ export default function AcceptInvite() {
               </div>
             )}
 
-            {/* 역할 선택 */}
             {!invitation.role_id && (
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">
