@@ -618,4 +618,4 @@ function calculateGrade(progressPct: number, criteria: any): string {
   if (progressPct >= criteria.B) return 'B';
   if (progressPct >= criteria.C) return 'C';
   return 'D';
-}
+} 
