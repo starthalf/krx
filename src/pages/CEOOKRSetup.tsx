@@ -748,17 +748,13 @@ export default function CEOOKRSetup() {
       const notifications = [];
 
       for (const org of childOrgs) {
-        // 조직장 찾기: user_roles → roles 조인
+        // 조직에 속한 사용자 중 리더 찾기 (간단히: 해당 org의 user_roles에서 높은 레벨)
         const { data: orgMembers } = await supabase
           .from('user_roles')
-          .select('profile_id, role_id, roles!inner(name, level)')
+          .select('profile_id, role:roles(level)')
           .eq('org_id', org.id);
 
-        const leaders = orgMembers?.filter((m: any) => {
-          const role = m.roles;
-          // org_head(60) 이상이면 조직장급
-          return role && role.level >= 50;
-        }) || [];
+        const leaders = orgMembers?.filter((m: any) => m.role?.level >= 70) || [];
 
         for (const leader of leaders) {
           notifications.push({
@@ -983,6 +979,16 @@ export default function CEOOKRSetup() {
         {/* ════════ Step 1: 전사 OKR 수립 ════════ */}
         {currentStep === 1 && (
           <div className="space-y-6">
+            {/* 사이클 진행 중 경고 */}
+            {cycleStarted && (
+              <div className="bg-amber-50 border border-amber-300 rounded-xl p-4 flex items-start gap-3">
+                <AlertCircle className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="text-amber-800 font-semibold text-sm">사이클 진행 중 — 수정 시 주의</p>
+                  <p className="text-amber-700 text-xs mt-1">전사 OKR을 수정하면 이미 배포된 하위 조직 초안과 불일치가 발생할 수 있습니다. 수정 후 조직 초안 재생성을 권장합니다.</p>
+                </div>
+              </div>
+            )}
             {/* AI 생성 버튼 */}
             {objectives.length === 0 && !isAIGenerating && (
               <div className="bg-gradient-to-br from-blue-50 to-violet-50 border-2 border-dashed border-blue-200 rounded-xl p-12 text-center">
@@ -1126,9 +1132,9 @@ export default function CEOOKRSetup() {
                                   </button>
                                 </div>
                               ) : (
-                                <button onClick={() => setEditingObjId(obj.id)}
-                                  className="px-3 py-1 text-blue-600 text-xs rounded-lg font-medium hover:bg-blue-50 flex items-center gap-1.5 -mt-1">
-                                  <Pencil className="w-3 h-3" /> 목표 수정
+                                <button onClick={() => { if (cycleStarted && !confirm('⚠️ 사이클 진행 중입니다. 전사 OKR을 수정하면 하위 조직 초안과 불일치가 발생할 수 있습니다. 계속하시겠습니까?')) return; setEditingObjId(obj.id); }}
+                                  className={`px-3 py-1 text-xs rounded-lg font-medium flex items-center gap-1.5 -mt-1 ${cycleStarted ? 'text-amber-600 hover:bg-amber-50' : 'text-blue-600 hover:bg-blue-50'}`}>
+                                  <Pencil className="w-3 h-3" /> 목표 수정 {cycleStarted && '⚠️'}
                                 </button>
                               )}
                             </div>
@@ -1219,9 +1225,9 @@ export default function CEOOKRSetup() {
                                           </div>
                                         </div>
                                       ) : (
-                                        <button onClick={() => setEditingKRId(kr.id)}
-                                          className="mt-2 px-3 py-1 border border-slate-200 text-slate-500 text-xs rounded-lg font-medium hover:bg-slate-100 flex items-center gap-1">
-                                          <Pencil className="w-3 h-3" /> KR 수정
+                                        <button onClick={() => { if (cycleStarted && !confirm('⚠️ 사이클 진행 중입니다. 수정하시겠습니까?')) return; setEditingKRId(kr.id); }}
+                                          className={`mt-2 px-3 py-1 border text-xs rounded-lg font-medium flex items-center gap-1 ${cycleStarted ? 'border-amber-200 text-amber-600 hover:bg-amber-50' : 'border-slate-200 text-slate-500 hover:bg-slate-100'}`}>
+                                          <Pencil className="w-3 h-3" /> KR 수정 {cycleStarted && '⚠️'}
                                         </button>
                                       )}
                                     </div>
@@ -1242,9 +1248,11 @@ export default function CEOOKRSetup() {
                     <button onClick={addObjective} className="px-4 py-2 border border-slate-300 rounded-lg text-sm font-medium hover:bg-slate-50 flex items-center gap-1.5">
                       <Plus className="w-4 h-4" /> 목표 추가
                     </button>
-                    <button onClick={handleGenerateCompanyOKR} className="px-4 py-2 border border-blue-300 text-blue-700 bg-blue-50 rounded-lg text-sm font-medium hover:bg-blue-100 flex items-center gap-1.5">
-                      <RefreshCw className="w-4 h-4" /> AI 다시 생성
-                    </button>
+                    {!cycleStarted && (
+                      <button onClick={handleGenerateCompanyOKR} className="px-4 py-2 border border-blue-300 text-blue-700 bg-blue-50 rounded-lg text-sm font-medium hover:bg-blue-100 flex items-center gap-1.5">
+                        <RefreshCw className="w-4 h-4" /> AI 다시 생성
+                      </button>
+                    )}
                   </div>
                   <div className="flex gap-3">
                     <button onClick={() => setCurrentStep(0)} className="px-6 py-2.5 border border-slate-300 text-slate-700 rounded-lg font-medium hover:bg-slate-50 flex items-center gap-2">
