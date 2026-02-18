@@ -77,7 +77,7 @@ export default function OrganizationPage() {
         .from('user_roles')
         .select(`
           profile_id,
-          profiles!inner(full_name),
+          profiles!user_roles_profile_id_fkey(full_name),
           roles!inner(display_name, level)
         `)
         .eq('org_id', orgId)
