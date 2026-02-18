@@ -668,29 +668,23 @@ export default function Wizard() {
             목표를 수립할 조직을 선택해주세요
           </p>
 
-          {/* 전사 */}
-          {organizations.filter(o => o.level === '전사').length > 0 && (
+          {/* 전사 OKR은 CEO OKR 수립 메뉴에서 수립 — 여기서는 하위 조직만 */}
+
+          {/* 부문 */}
+          {organizations.filter(o => o.level === '부문').length > 0 && (
             <div className="mb-6">
-              <h3 className="text-sm font-semibold text-slate-700 mb-3">전사</h3>
-              <div className="grid grid-cols-1 gap-3">
+              <h3 className="text-sm font-semibold text-slate-700 mb-3">부문</h3>
+              <div className="grid grid-cols-2 gap-3">
                 {organizations
-                  .filter(o => o.level === '전사')
+                  .filter(o => o.level === '부문')
                   .map(org => (
                     <button
                       key={org.id}
                       onClick={() => handleSelectOrg(org.id)}
                       className="text-left border-2 border-slate-200 rounded-xl p-4 hover:border-blue-500 hover:bg-blue-50 transition-all"
                     >
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <div className="text-sm text-slate-500">{org.level} • {org.orgType}</div>
-                          <div className="text-lg font-semibold text-slate-900 mt-1">{org.name}</div>
-                          {org.mission && (
-                            <div className="text-sm text-slate-600 mt-1">{org.mission}</div>
-                          )}
-                        </div>
-                        <ChevronRight className="w-5 h-5 text-slate-400" />
-                      </div>
+                      <div className="text-sm text-slate-500">{org.level} • {org.orgType}</div>
+                      <div className="text-base font-semibold text-slate-900 mt-1">{org.name}</div>
                     </button>
                   ))}
               </div>
