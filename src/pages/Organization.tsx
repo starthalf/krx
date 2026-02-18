@@ -4,52 +4,21 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ChevronRight, ChevronDown, Building2, Users, Target,
-  Settings, Loader2, Search, Filter, LayoutGrid, List,
-  Crown, User, Mail
+  Settings, Loader2, Search, Filter, LayoutGrid, List
 } from 'lucide-react';
 import { useStore } from '../store/useStore';
-import { useAuth } from '../contexts/AuthContext';
-import { supabase } from '../lib/supabase';
 import { getOrgTypeColor } from '../utils/helpers';
 import type { Organization } from '../types';
-
-interface OrgMember {
-  profileId: string;
-  fullName: string;
-  email: string;
-  roleName: string;
-  roleLevel: number;
-}
 
 export default function OrganizationPage() {
   const navigate = useNavigate();
   const { organizations, loading, company } = useStore();
-  const { user } = useAuth();
 
   const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null);
   const [expandedOrgs, setExpandedOrgs] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'Front' | 'Middle' | 'Back'>('all');
   const [viewMode, setViewMode] = useState<'tree' | 'grid'>('tree');
-  const [members, setMembers] = useState<OrgMember[]>([]);
-  const [membersLoading, setMembersLoading] = useState(false);
-  const [isAdmin, setIsAdmin] = useState(false);
-
-  // 사용자 관리자 여부 확인
-  useEffect(() => {
-    if (!user?.id) return;
-    const checkAdmin = async () => {
-      const { data } = await supabase
-        .from('user_roles')
-        .select('roles!inner(level)')
-        .eq('profile_id', user.id);
-      if (data) {
-        const max = Math.max(...data.map((r: any) => r.roles?.level || 0));
-        setIsAdmin(max >= 90);
-      }
-    };
-    checkAdmin();
-  }, [user?.id]);
 
   // 초기 선택 및 확장
   useEffect(() => {
@@ -57,6 +26,7 @@ export default function OrganizationPage() {
       const rootOrg = organizations.find(o => !o.parentOrgId) || organizations[0];
       if (rootOrg) {
         setSelectedOrgId(rootOrg.id);
+        // 루트와 1단계 하위까지 확장
         const toExpand = new Set([rootOrg.id]);
         organizations.filter(o => o.parentOrgId === rootOrg.id).forEach(o => toExpand.add(o.id));
         setExpandedOrgs(toExpand);
@@ -64,49 +34,9 @@ export default function OrganizationPage() {
     }
   }, [organizations, selectedOrgId]);
 
-  // 선택한 조직의 구성원 로딩
-  useEffect(() => {
-    if (!selectedOrgId) return;
-    loadMembers(selectedOrgId);
-  }, [selectedOrgId]);
-
-  const loadMembers = async (orgId: string) => {
-    setMembersLoading(true);
-    try {
-      const { data } = await supabase
-        .from('user_roles')
-        .select(`
-          profile_id,
-          profiles!inner(full_name, email),
-          roles!inner(display_name, level)
-        `)
-        .eq('org_id', orgId)
-        .order('granted_at');
-
-      if (data) {
-        const m: OrgMember[] = data.map((row: any) => ({
-          profileId: row.profile_id,
-          fullName: row.profiles?.full_name || '이름 없음',
-          email: row.profiles?.email || '',
-          roleName: row.roles?.display_name || '구성원',
-          roleLevel: row.roles?.level || 0,
-        }));
-        // 역할 레벨 높은 순 정렬
-        m.sort((a, b) => b.roleLevel - a.roleLevel);
-        setMembers(m);
-      } else {
-        setMembers([]);
-      }
-    } catch (err) {
-      console.error('구성원 로딩 실패:', err);
-      setMembers([]);
-    } finally {
-      setMembersLoading(false);
-    }
-  };
-
   const selectedOrg = organizations.find(org => org.id === selectedOrgId);
 
+  // 트리 토글
   const toggleExpand = (orgId: string) => {
     const newExpanded = new Set(expandedOrgs);
     if (newExpanded.has(orgId)) newExpanded.delete(orgId);
@@ -117,6 +47,7 @@ export default function OrganizationPage() {
   const getChildOrgs = (parentId: string | null) =>
     organizations.filter(org => org.parentOrgId === parentId);
 
+  // 검색 필터링
   const filteredOrganizations = organizations.filter(org => {
     const matchesSearch = !searchQuery || 
       org.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -125,6 +56,7 @@ export default function OrganizationPage() {
     return matchesSearch && matchesType;
   });
 
+  // 통계 계산
   const stats = {
     total: organizations.length,
     front: organizations.filter(o => o.orgType === 'Front').length,
@@ -133,15 +65,9 @@ export default function OrganizationPage() {
     totalHeadcount: organizations.reduce((sum, o) => sum + (o.headcount || 0), 0),
   };
 
-  // 역할에 따른 아이콘
-  const getRoleIcon = (level: number) => {
-    if (level >= 90) return <Crown className="w-4 h-4 text-amber-500" />;
-    if (level >= 50) return <Crown className="w-4 h-4 text-blue-500" />;
-    return <User className="w-4 h-4 text-slate-400" />;
-  };
-
   // 트리 렌더링
   const renderOrgTree = (org: Organization, level: number = 0) => {
+    // 검색 중이면 필터된 결과만 표시
     if (searchQuery && !filteredOrganizations.some(fo => fo.id === org.id)) {
       return null;
     }
@@ -180,6 +106,11 @@ export default function OrganizationPage() {
                 {org.orgType}
               </span>
               <span className="text-xs text-slate-500">{org.level}</span>
+              {org.headcount > 0 && (
+                <span className="text-xs text-slate-400 flex items-center gap-0.5">
+                  <Users className="w-3 h-3" /> {org.headcount}
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -191,8 +122,41 @@ export default function OrganizationPage() {
     );
   };
 
+  // 그리드 카드 렌더링
+  const renderOrgCard = (org: Organization) => (
+    <div
+      key={org.id}
+      onClick={() => setSelectedOrgId(org.id)}
+      className={`p-4 rounded-xl border-2 cursor-pointer transition-all hover:shadow-md ${
+        selectedOrgId === org.id
+          ? 'border-blue-500 bg-blue-50'
+          : 'border-slate-200 hover:border-slate-300'
+      }`}
+    >
+      <div className="flex items-start justify-between mb-2">
+        <h3 className="font-semibold text-slate-900 truncate">{org.name}</h3>
+        <span className={`px-2 py-0.5 text-xs rounded-full border ${getOrgTypeColor(org.orgType)}`}>
+          {org.orgType}
+        </span>
+      </div>
+      <p className="text-xs text-slate-500 mb-2">{org.level}</p>
+      {org.mission && (
+        <p className="text-sm text-slate-600 line-clamp-2 mb-2">{org.mission}</p>
+      )}
+      <div className="flex items-center gap-3 text-xs text-slate-500">
+        <span className="flex items-center gap-1">
+          <Users className="w-3.5 h-3.5" /> {org.headcount || 0}명
+        </span>
+        <span className="flex items-center gap-1">
+          <Target className="w-3.5 h-3.5" /> {getChildOrgs(org.id).length}개 하위
+        </span>
+      </div>
+    </div>
+  );
+
   const rootOrgs = organizations.filter(org => org.parentOrgId === null);
 
+  // 로딩
   if (loading && organizations.length === 0) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -201,6 +165,7 @@ export default function OrganizationPage() {
     );
   }
 
+  // 빈 상태
   if (!loading && organizations.length === 0) {
     return (
       <div className="p-6">
@@ -208,14 +173,12 @@ export default function OrganizationPage() {
           <Building2 className="w-12 h-12 text-slate-400 mx-auto mb-4" />
           <h3 className="text-lg font-semibold text-slate-900 mb-2">조직이 없습니다</h3>
           <p className="text-slate-600 mb-6">관리자 설정에서 조직 구조를 먼저 등록해주세요.</p>
-          {isAdmin && (
-            <button
-              onClick={() => navigate('/admin?tab=structure')}
-              className="px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium inline-flex items-center gap-2"
-            >
-              <Settings className="w-4 h-4" /> 관리자 설정으로 이동
-            </button>
-          )}
+          <button
+            onClick={() => navigate('/admin?tab=structure')}
+            className="px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium inline-flex items-center gap-2"
+          >
+            <Settings className="w-4 h-4" /> 관리자 설정으로 이동
+          </button>
         </div>
       </div>
     );
@@ -229,37 +192,35 @@ export default function OrganizationPage() {
           <h1 className="text-2xl font-bold text-slate-900">조직 관리</h1>
           <p className="text-slate-600 mt-1">조직도 조회 및 정보 확인</p>
         </div>
-        {isAdmin && (
-          <button
-            onClick={() => navigate('/admin?tab=structure')}
-            className="px-4 py-2 bg-white border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 flex items-center gap-2 text-sm font-medium"
-          >
-            <Settings className="w-4 h-4" /> 조직 편집
-          </button>
-        )}
+        <button
+          onClick={() => navigate('/admin?tab=structure')}
+          className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors text-sm font-medium flex items-center gap-2"
+        >
+          <Settings className="w-4 h-4" /> 조직 편집
+        </button>
       </div>
 
-      {/* 통계 */}
-      <div className="grid grid-cols-5 gap-3 mb-4">
-        <div className="bg-white rounded-lg border border-slate-200 p-3">
-          <div className="text-xl font-bold text-slate-900">{stats.total}</div>
-          <div className="text-xs text-slate-500">전체 조직</div>
+      {/* 통계 카드 */}
+      <div className="grid grid-cols-5 gap-4 mb-6">
+        <div className="bg-white rounded-xl border border-slate-200 p-4">
+          <div className="text-2xl font-bold text-slate-900">{stats.total}</div>
+          <div className="text-sm text-slate-600">전체 조직</div>
         </div>
-        <div className="bg-green-50 rounded-lg border border-green-200 p-3">
-          <div className="text-xl font-bold text-green-700">{stats.front}</div>
-          <div className="text-xs text-green-600">Front</div>
+        <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-xl border border-green-200 p-4">
+          <div className="text-2xl font-bold text-green-700">{stats.front}</div>
+          <div className="text-sm text-green-600">Front</div>
         </div>
-        <div className="bg-blue-50 rounded-lg border border-blue-200 p-3">
-          <div className="text-xl font-bold text-blue-700">{stats.middle}</div>
-          <div className="text-xs text-blue-600">Middle</div>
+        <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl border border-blue-200 p-4">
+          <div className="text-2xl font-bold text-blue-700">{stats.middle}</div>
+          <div className="text-sm text-blue-600">Middle</div>
         </div>
-        <div className="bg-purple-50 rounded-lg border border-purple-200 p-3">
-          <div className="text-xl font-bold text-purple-700">{stats.back}</div>
-          <div className="text-xs text-purple-600">Back</div>
+        <div className="bg-gradient-to-br from-purple-50 to-violet-50 rounded-xl border border-purple-200 p-4">
+          <div className="text-2xl font-bold text-purple-700">{stats.back}</div>
+          <div className="text-sm text-purple-600">Back</div>
         </div>
-        <div className="bg-amber-50 rounded-lg border border-amber-200 p-3">
-          <div className="text-xl font-bold text-amber-700">{stats.totalHeadcount}</div>
-          <div className="text-xs text-amber-600">총 인원</div>
+        <div className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-xl border border-amber-200 p-4">
+          <div className="text-2xl font-bold text-amber-700">{stats.totalHeadcount}</div>
+          <div className="text-sm text-amber-600">총 인원</div>
         </div>
       </div>
 
@@ -326,34 +287,16 @@ export default function OrganizationPage() {
             )
           ) : (
             <div className="grid grid-cols-1 gap-3">
-              {filteredOrganizations.map(org => (
-                <div
-                  key={org.id}
-                  onClick={() => setSelectedOrgId(org.id)}
-                  className={`p-4 rounded-xl border-2 cursor-pointer transition-all hover:shadow-md ${
-                    selectedOrgId === org.id
-                      ? 'border-blue-500 bg-blue-50'
-                      : 'border-slate-200 hover:border-slate-300'
-                  }`}
-                >
-                  <div className="flex items-start justify-between mb-2">
-                    <h3 className="font-semibold text-slate-900 truncate">{org.name}</h3>
-                    <span className={`px-2 py-0.5 text-xs rounded-full border ${getOrgTypeColor(org.orgType)}`}>
-                      {org.orgType}
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-500">{org.level}</p>
-                </div>
-              ))}
+              {filteredOrganizations.map(org => renderOrgCard(org))}
             </div>
           )}
         </div>
 
-        {/* 오른쪽: 상세 정보 + 구성원 */}
+        {/* 오른쪽: 상세 정보 (조회 전용) */}
         <div className="col-span-3 bg-white rounded-xl border border-slate-200 p-6 overflow-y-auto">
           {selectedOrg ? (
             <div className="space-y-6">
-              {/* 헤더 - 컴팩트 */}
+              {/* 헤더 */}
               <div className="flex items-start justify-between">
                 <div>
                   <h2 className="text-xl font-bold text-slate-900">{selectedOrg.name}</h2>
@@ -362,39 +305,66 @@ export default function OrganizationPage() {
                       {selectedOrg.orgType}
                     </span>
                     <span className="text-sm text-slate-500">{selectedOrg.level}</span>
-                    {selectedOrg.parentOrgId && (
-                      <>
-                        <span className="text-slate-300">·</span>
-                        <span className="text-sm text-slate-500">
-                          상위: {organizations.find(o => o.id === selectedOrg.parentOrgId)?.name}
-                        </span>
-                      </>
-                    )}
                   </div>
                 </div>
                 <div className="text-right">
-                  <div className="text-2xl font-bold text-slate-900">{members.length}</div>
+                  <div className="text-2xl font-bold text-slate-900">{selectedOrg.headcount || 0}</div>
                   <div className="text-sm text-slate-500">인원</div>
                 </div>
               </div>
 
               {/* 미션 */}
               {selectedOrg.mission && (
-                <div className="bg-blue-50 border border-blue-100 rounded-lg p-3">
-                  <p className="text-sm text-blue-800">{selectedOrg.mission}</p>
+                <div className="bg-blue-50 border border-blue-100 rounded-lg p-4">
+                  <h3 className="text-sm font-semibold text-blue-900 mb-1">미션</h3>
+                  <p className="text-blue-800">{selectedOrg.mission}</p>
                 </div>
               )}
 
-              {/* 하위 조직 (있을 때만) */}
+              {/* 정보 그리드 */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="bg-slate-50 rounded-lg p-4">
+                  <h4 className="text-sm font-medium text-slate-700 mb-2">조직 유형</h4>
+                  <p className="text-slate-900">
+                    {selectedOrg.orgType === 'Front' && '🎯 Front - 매출 직접 기여 (영업/마케팅)'}
+                    {selectedOrg.orgType === 'Middle' && '⚙️ Middle - 가치 창출 (기획/개발/생산)'}
+                    {selectedOrg.orgType === 'Back' && '🛡️ Back - 지원 기능 (인사/재무/총무)'}
+                  </p>
+                </div>
+                <div className="bg-slate-50 rounded-lg p-4">
+                  <h4 className="text-sm font-medium text-slate-700 mb-2">상위 조직</h4>
+                  <p className="text-slate-900">
+                    {selectedOrg.parentOrgId
+                      ? organizations.find(o => o.id === selectedOrg.parentOrgId)?.name || '-'
+                      : '(최상위 조직)'}
+                  </p>
+                </div>
+              </div>
+
+              {/* 기능 태그 */}
+              {selectedOrg.functionTags && selectedOrg.functionTags.length > 0 && (
+                <div>
+                  <h4 className="text-sm font-medium text-slate-700 mb-2">핵심 기능</h4>
+                  <div className="flex flex-wrap gap-2">
+                    {selectedOrg.functionTags.map((tag, idx) => (
+                      <span key={idx} className="px-3 py-1 bg-slate-100 text-slate-700 rounded-full text-sm">
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* 하위 조직 목록 */}
               {(() => {
                 const children = getChildOrgs(selectedOrg.id);
                 if (children.length === 0) return null;
                 return (
                   <div>
-                    <h4 className="text-sm font-medium text-slate-700 mb-2">
+                    <h4 className="text-sm font-medium text-slate-700 mb-3">
                       하위 조직 ({children.length}개)
                     </h4>
-                    <div className="flex flex-wrap gap-2">
+                    <div className="grid grid-cols-2 gap-2">
                       {children.map(child => (
                         <button
                           key={child.id}
@@ -402,9 +372,12 @@ export default function OrganizationPage() {
                             setSelectedOrgId(child.id);
                             setExpandedOrgs(prev => new Set([...prev, selectedOrg.id]));
                           }}
-                          className="flex items-center gap-2 px-3 py-2 bg-slate-50 rounded-lg hover:bg-slate-100 transition-colors text-sm"
+                          className="flex items-center gap-2 p-3 bg-slate-50 rounded-lg hover:bg-slate-100 transition-colors text-left"
                         >
-                          <span className="font-medium text-slate-900">{child.name}</span>
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium text-sm text-slate-900 truncate">{child.name}</div>
+                            <div className="text-xs text-slate-500">{child.level} · {child.headcount || 0}명</div>
+                          </div>
                           <span className={`px-1.5 py-0.5 text-xs rounded border ${getOrgTypeColor(child.orgType)}`}>
                             {child.orgType}
                           </span>
@@ -415,75 +388,24 @@ export default function OrganizationPage() {
                 );
               })()}
 
-              {/* ── 구성원 리스트 ── */}
-              <div>
-                <h4 className="text-sm font-medium text-slate-700 mb-3 flex items-center gap-2">
-                  <Users className="w-4 h-4" />
-                  구성원 ({members.length}명)
-                </h4>
-
-                {membersLoading ? (
-                  <div className="flex items-center justify-center py-8">
-                    <Loader2 className="w-5 h-5 animate-spin text-slate-400" />
+              {/* 편집 안내 */}
+              <div className="pt-4 border-t">
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-start gap-3">
+                  <Settings className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-medium text-amber-900">조직 정보를 수정하려면?</p>
+                    <p className="text-sm text-amber-700 mt-1">
+                      관리자 설정에서 조직 구조를 편집할 수 있습니다.
+                    </p>
+                    <button
+                      onClick={() => navigate('/admin?tab=structure')}
+                      className="mt-2 text-sm text-amber-800 font-medium hover:underline"
+                    >
+                      관리자 설정으로 이동 →
+                    </button>
                   </div>
-                ) : members.length === 0 ? (
-                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-6 text-center">
-                    <Users className="w-8 h-8 text-slate-300 mx-auto mb-2" />
-                    <p className="text-sm text-slate-500">아직 구성원이 없습니다</p>
-                    {isAdmin && (
-                      <p className="text-xs text-slate-400 mt-1">관리자 설정에서 구성원을 초대할 수 있습니다</p>
-                    )}
-                  </div>
-                ) : (
-                  <div className="border border-slate-200 rounded-lg overflow-hidden">
-                    <table className="w-full">
-                      <thead>
-                        <tr className="bg-slate-50 border-b border-slate-200">
-                          <th className="text-left px-4 py-2.5 text-xs font-medium text-slate-500">이름</th>
-                          <th className="text-left px-4 py-2.5 text-xs font-medium text-slate-500">이메일</th>
-                          <th className="text-left px-4 py-2.5 text-xs font-medium text-slate-500">역할</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {members.map((m, idx) => (
-                          <tr key={m.profileId} className={`border-b border-slate-100 last:border-0 ${idx % 2 === 0 ? '' : 'bg-slate-50/50'}`}>
-                            <td className="px-4 py-3">
-                              <div className="flex items-center gap-2">
-                                {getRoleIcon(m.roleLevel)}
-                                <span className="text-sm font-medium text-slate-900">{m.fullName}</span>
-                              </div>
-                            </td>
-                            <td className="px-4 py-3">
-                              <span className="text-sm text-slate-500">{m.email}</span>
-                            </td>
-                            <td className="px-4 py-3">
-                              <span className={`px-2 py-0.5 text-xs rounded-full ${
-                                m.roleLevel >= 90 ? 'bg-amber-100 text-amber-800' :
-                                m.roleLevel >= 50 ? 'bg-blue-100 text-blue-800' :
-                                'bg-slate-100 text-slate-700'
-                              }`}>
-                                {m.roleName}
-                              </span>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-
-              {/* 관리자만 편집 안내 */}
-              {isAdmin && (
-                <div className="pt-4 border-t">
-                  <button
-                    onClick={() => navigate('/admin?tab=structure')}
-                    className="text-sm text-blue-600 font-medium hover:underline flex items-center gap-1"
-                  >
-                    <Settings className="w-3.5 h-3.5" /> 조직 구조 편집 →
-                  </button>
                 </div>
-              )}
+              </div>
             </div>
           ) : (
             <div className="flex flex-col items-center justify-center h-full text-slate-500">
