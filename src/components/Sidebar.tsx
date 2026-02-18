@@ -1,4 +1,5 @@
 // src/components/Sidebar.tsx
+import { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { 
   Home, 
@@ -10,39 +11,73 @@ import {
   Inbox,
   Bell,
   GitBranch,
-  Megaphone
+  Megaphone,
+  ClipboardList
 } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '../lib/supabase';
 
-const navigation = [
-  { name: '대시보드', href: '/', icon: Home },
-  {
-     name: '목표 수립',
-     icon: Target,
-     children: [
-       { name: '전사 OKR 수립', href: '/ceo-okr-setup' },
-       { name: '조직 OKR 수립', href: '/wizard' },
-     ]
-   },
-  { name: '수립 현황', href: '/okr-setup', icon: Megaphone },
-  { name: 'OKR Map', href: '/okr-map', icon: GitBranch },
-  {
-    name: 'OKR 현황',
-    icon: TrendingUp,
-    children: [
-      { name: '전사 OKR', href: '/okr/company' },
-      { name: '본부별 OKR', href: '/okr/division' },
-      { name: '팀별 OKR', href: '/okr/team' }
-    ]
-  },
-  { name: '체크인', href: '/checkin', icon: CheckSquare },
-  { name: '승인 대기함', href: '/approval-inbox', icon: Inbox },
-  { name: '알림', href: '/notifications', icon: Bell },
-  { name: '조직 관리', href: '/organization', icon: Building2 },
-  { name: 'KR지표 DB', href: '/kpi-pool', icon: BookOpen }
-];
+interface NavItem {
+  name: string;
+  href?: string;
+  icon: any;
+  requiredLevel?: number; // 이 레벨 이상만 표시
+  children?: { name: string; href: string }[];
+}
 
 export default function Sidebar() {
   const location = useLocation();
+  const { user } = useAuth();
+  const [maxRoleLevel, setMaxRoleLevel] = useState<number>(0);
+
+  // 사용자의 최고 역할 레벨 조회
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const loadRole = async () => {
+      const { data } = await supabase
+        .from('user_roles')
+        .select('roles!inner(level)')
+        .eq('profile_id', user.id);
+
+      if (data && data.length > 0) {
+        const max = Math.max(...data.map((r: any) => r.roles?.level || 0));
+        setMaxRoleLevel(max);
+      }
+    };
+
+    loadRole();
+  }, [user?.id]);
+
+  const navigation: NavItem[] = [
+    { name: '대시보드', href: '/', icon: Home },
+    { name: '목표 수립', href: '/wizard', icon: Target },
+    // CEO/관리자 전용 (level >= 90)
+    { name: '전사 OKR 수립', href: '/ceo-okr-setup', icon: ClipboardList, requiredLevel: 90 },
+    { name: '조직 OKR 수립', href: '/wizard', icon: Target, requiredLevel: 90 },
+    { name: '수립 현황', href: '/okr-setup', icon: Megaphone, requiredLevel: 90 },
+    { name: 'OKR Map', href: '/okr-map', icon: GitBranch },
+    {
+      name: 'OKR 현황',
+      icon: TrendingUp,
+      children: [
+        { name: '전사 OKR', href: '/okr/company' },
+        { name: '본부별 OKR', href: '/okr/division' },
+        { name: '팀별 OKR', href: '/okr/team' }
+      ]
+    },
+    { name: '체크인', href: '/checkin', icon: CheckSquare },
+    { name: '승인 대기함', href: '/approval-inbox', icon: Inbox },
+    { name: '알림', href: '/notifications', icon: Bell },
+    { name: '조직 관리', href: '/organization', icon: Building2 },
+    { name: 'KR지표 DB', href: '/kpi-pool', icon: BookOpen }
+  ];
+
+  // 역할 레벨에 따른 메뉴 필터링
+  const filteredNavigation = navigation.filter(item => {
+    if (!item.requiredLevel) return true;
+    return maxRoleLevel >= item.requiredLevel;
+  });
 
   const isActive = (href: string) => {
     if (href === '/') return location.pathname === '/';
@@ -63,7 +98,7 @@ export default function Sidebar() {
 
       {/* 네비게이션 */}
       <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
-        {navigation.map((item) => {
+        {filteredNavigation.map((item) => {
           if (item.children) {
             return (
               <div key={item.name} className="space-y-1">
