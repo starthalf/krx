@@ -751,10 +751,13 @@ export default function CEOOKRSetup() {
         // 조직에 속한 사용자 중 리더 찾기 (간단히: 해당 org의 user_roles에서 높은 레벨)
         const { data: orgMembers } = await supabase
           .from('user_roles')
-          .select('profile_id, role:roles(level)')
+          .select('profile_id, roles!inner(name, level)')
           .eq('org_id', org.id);
 
-        const leaders = orgMembers?.filter((m: any) => m.role?.level >= 70) || [];
+        const leaders = orgMembers?.filter((m: any) => {
+          const role = m.roles;
+          return role && role.level >= 50;
+        }) || [];
 
         for (const leader of leaders) {
           notifications.push({
