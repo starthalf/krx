@@ -1546,13 +1546,16 @@ export default function Wizard() {
                       <div className="flex items-center gap-2">
                         <GitBranch className="w-3.5 h-3.5 text-violet-500" />
                         <span className="text-xs font-medium text-violet-600">상위 목표에서 계승</span>
+                        <span className="text-xs text-violet-400">|</span>
+                        <span className="text-xs text-violet-500">{parentObj.orgName}</span>
                       </div>
                       <div className="flex items-center gap-2 mt-1.5">
+                        <span className="text-xs font-bold text-violet-500 bg-violet-100 px-1.5 py-0.5 rounded">
+                          O{parentObjectives.filter(po => po.orgName === parentObj.orgName).indexOf(parentObj) + 1}
+                        </span>
                         <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${getBIIColor(parentObj.biiType as BIIType).bg} ${getBIIColor(parentObj.biiType as BIIType).text}`}>
                           {parentObj.biiType}
                         </span>
-                        <span className="text-sm text-violet-800 font-medium">{parentObj.orgName}</span>
-                        <span className="text-violet-400">›</span>
                         <span className="text-sm text-violet-900">{parentObj.name}</span>
                       </div>
                     </div>
