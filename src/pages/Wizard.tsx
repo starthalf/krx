@@ -1496,7 +1496,7 @@ export default function Wizard() {
           </div>
         )}
 
-        {/* Step 2: KR 설정 (수정 기능 포함) */}
+        {/* Step 2: OKR 검토 및 수정 — Objective별 통합 카드 */}
         {currentStep === 2 && (
           <div className="space-y-6">
             {/* AI 초안 안내 배너 */}
@@ -1506,343 +1506,425 @@ export default function Wizard() {
                 <div>
                   <p className="text-blue-900 font-semibold text-sm">CEO가 배포한 AI 초안이 로딩되었습니다</p>
                   <p className="text-blue-700 text-xs mt-1">
-                    목표와 KR을 검토한 후 자유롭게 수정하세요. 수정이 완료되면 "최종 확인" 단계에서 제출합니다.
+                    각 목표와 KR을 검토한 후 자유롭게 수정하세요. 수정이 완료되면 "최종 확인" 단계에서 제출합니다.
                   </p>
                 </div>
               </div>
             )}
 
-            {/* ── 상위 조직 Cascading 시각화 ── */}
-            {parentObjectives.length > 0 && (
-              <div className="bg-gradient-to-r from-violet-50 to-blue-50 border border-violet-200 rounded-xl p-4">
-                <div className="flex items-center gap-2 mb-3">
-                  <GitBranch className="w-4 h-4 text-violet-600" />
-                  <span className="text-sm font-semibold text-violet-900">상위 조직 목표 연결</span>
-                </div>
-                <div className="space-y-2">
-                  {objectives.filter(o => o.selected).map(obj => {
-                    const parentObj = parentObjectives.find(po => po.id === (obj as any).parentObjId);
-                    const biiColor = getBIIColor(obj.biiType);
-                    return (
-                      <div key={obj.id} className="flex items-center gap-2 bg-white/70 rounded-lg px-3 py-2">
-                        {/* 내 목표 */}
-                        <div className="flex-1 min-w-0 flex items-center gap-2">
-                          <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${biiColor.bg} ${biiColor.text}`}>
-                            {obj.biiType}
-                          </span>
-                          <span className="text-sm text-slate-900 truncate">{obj.name}</span>
-                        </div>
-                        {/* 연결 화살표 */}
-                        {parentObj ? (
-                          <>
-                            <div className="flex items-center gap-1 flex-shrink-0">
-                              <div className="w-8 h-0.5 bg-violet-400" />
-                              <Link2 className="w-3.5 h-3.5 text-violet-500" />
-                              <div className="w-8 h-0.5 bg-violet-400" />
-                            </div>
-                            <div className="flex items-center gap-1.5 bg-violet-100 rounded-lg px-2.5 py-1.5 flex-shrink-0 max-w-[240px]">
-                              <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${getBIIColor(parentObj.biiType as BIIType).bg} ${getBIIColor(parentObj.biiType as BIIType).text}`}>
-                                {parentObj.biiType}
-                              </span>
-                              <div className="min-w-0">
-                                <div className="text-xs text-violet-600 font-medium">{parentObj.orgName}</div>
-                                <div className="text-xs text-violet-800 truncate">{parentObj.name}</div>
-                              </div>
-                            </div>
-                          </>
-                        ) : (
-                          <span className="text-xs text-slate-400 bg-slate-100 px-2 py-1 rounded flex-shrink-0">독립 목표</span>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-bold text-slate-900">OKR 검토 및 수정</h2>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleAddKR}
+                  className="px-3 py-1.5 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 text-sm font-medium flex items-center gap-1.5"
+                >
+                  <Plus className="w-3.5 h-3.5" /> KR 추가
+                </button>
+                <button
+                  onClick={handleOpenPoolModal}
+                  className="px-3 py-1.5 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 text-sm font-medium flex items-center gap-1.5"
+                >
+                  <BookOpen className="w-3.5 h-3.5" /> Pool
+                </button>
               </div>
-            )}
-
-            <h2 className="text-xl font-bold text-slate-900">KR(핵심결과) 설정</h2>
-
-            <div className="flex gap-2 border-b border-slate-200 overflow-x-auto">
-              {objectives.filter(o => o.selected).map((obj, idx) => {
-                const biiColor = getBIIColor(obj.biiType);
-                return (
-                  <button
-                    key={obj.id}
-                    onClick={() => setSelectedObjectiveTab(obj.id)}
-                    className={`px-4 py-3 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
-                      selectedObjectiveTab === obj.id
-                        ? 'border-blue-600 text-blue-600 bg-blue-50'
-                        : 'border-transparent text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${biiColor.bg} ${biiColor.text}`}>
-                        {obj.biiType}
-                      </span>
-                      <span className="font-semibold">목표{idx + 1}</span>
-                      <span className="text-xs">
-                        {selectedObjectiveTab === obj.id ? '●' : '○'}
-                      </span>
-                    </div>
-                    <div className={`text-xs mt-1 ${
-                      selectedObjectiveTab === obj.id ? 'text-blue-600' : 'text-slate-500'
-                    }`}>
-                      {obj.name.length > 30 ? obj.name.substring(0, 30) + '...' : obj.name}
-                    </div>
-                  </button>
-                );
-              })}
             </div>
 
-            <div className="space-y-4">
-              {krs.filter(kr => kr.objectiveId === selectedObjectiveTab).map((kr) => {
-                const biiColor = getBIIColor(kr.biiType);
-                const categoryColor = getKPICategoryColor(kr.kpiCategory);
-                const isExpanded = expandedKR === kr.id;
-                const isSelected = kr.selected !== false;
-                const isEditing = editingKRId === kr.id;
+            {/* ── Objective별 통합 카드 ── */}
+            {objectives.filter(o => o.selected).map((obj, objIdx) => {
+              const biiColor = getBIIColor(obj.biiType);
+              const parentObj = parentObjectives.find(po => po.id === obj.parentObjId);
+              const objKRs = krs.filter(kr => kr.objectiveId === obj.id && kr.selected !== false);
+              const isEditingObj = editingObjId === obj.id;
 
-                return (
-                  <div 
-                    key={kr.id} 
-                    className={`border rounded-xl p-5 bg-white transition-opacity ${
-                      isSelected ? 'border-slate-200 opacity-100' : 'border-slate-200 opacity-50'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between mb-4">
-                      <div className="flex items-center gap-3 flex-1">
-                        <input 
-                          type="checkbox" 
-                          checked={isSelected}
-                          onChange={() => toggleKR(kr.id)}
-                          className="w-4 h-4 rounded border-slate-300 text-blue-600" 
-                        />
-                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${biiColor.bg} ${biiColor.text}`}>
-                          {kr.biiType}
-                        </span>
-                        
-                        {isEditing ? (
-                          <input 
-                            type="text" 
-                            value={kr.name}
-                            onChange={(e) => handleKRChange(kr.id, 'name', e.target.value)}
-                            className="font-semibold text-slate-900 border border-slate-300 rounded px-2 py-1 w-full max-w-md"
-                          />
-                        ) : (
-                          <h3 className="font-semibold text-slate-900">{kr.name}</h3>
-                        )}
-                      </div>
-
+              return (
+                <div key={obj.id} className="border border-slate-200 rounded-2xl overflow-hidden bg-white shadow-sm">
+                  
+                  {/* ── 상위 연결 헤더 ── */}
+                  {parentObj && (
+                    <div className="bg-gradient-to-r from-violet-50 to-indigo-50 border-b border-violet-200 px-5 py-3">
                       <div className="flex items-center gap-2">
-                        <span className={`px-2 py-1 rounded text-xs font-medium border ${categoryColor}`}>
-                          {kr.kpiCategory}
+                        <GitBranch className="w-3.5 h-3.5 text-violet-500" />
+                        <span className="text-xs font-medium text-violet-600">상위 목표에서 계승</span>
+                      </div>
+                      <div className="flex items-center gap-2 mt-1.5">
+                        <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${getBIIColor(parentObj.biiType as BIIType).bg} ${getBIIColor(parentObj.biiType as BIIType).text}`}>
+                          {parentObj.biiType}
                         </span>
-                        
-                        {isEditing ? (
-                          <button 
-                            onClick={() => setEditingKRId(null)}
-                            className="p-1 hover:bg-green-100 text-green-600 rounded transition-colors"
-                            title="저장"
-                          >
-                            <Check className="w-4 h-4" />
-                          </button>
-                        ) : (
-                          <button 
-                            onClick={() => setEditingKRId(kr.id)}
-                            className="p-1 hover:bg-slate-100 rounded transition-colors"
-                            title="수정"
-                          >
-                            <Pencil className="w-4 h-4 text-slate-500" />
-                          </button>
-                        )}
-                        
-                        <button 
-                          onClick={() => setKrs(krs.filter(k => k.id !== kr.id))}
-                          className="p-1 hover:bg-slate-100 rounded transition-colors"
-                          title="삭제"
-                        >
-                          <Trash2 className="w-4 h-4 text-slate-500" />
-                        </button>
+                        <span className="text-sm text-violet-800 font-medium">{parentObj.orgName}</span>
+                        <span className="text-violet-400">›</span>
+                        <span className="text-sm text-violet-900">{parentObj.name}</span>
                       </div>
                     </div>
+                  )}
 
-                    <div className="grid grid-cols-2 gap-4 mb-4 text-sm">
-                      <div className="flex items-center">
-                        <span className="text-slate-500 w-12 shrink-0">정의:</span>
-                        {isEditing ? (
-                          <input
-                            type="text"
-                            value={kr.definition}
-                            onChange={(e) => handleKRChange(kr.id, 'definition', e.target.value)}
-                            className="w-full border border-slate-300 rounded px-2 py-1"
-                          />
-                        ) : (
-                          <span className="text-slate-700 truncate">{kr.definition}</span>
-                        )}
-                      </div>
-                      <div className="flex items-center">
-                        <span className="text-slate-500 w-12 shrink-0">산식:</span>
-                        {isEditing ? (
-                          <input
-                            type="text"
-                            value={kr.formula}
-                            onChange={(e) => handleKRChange(kr.id, 'formula', e.target.value)}
-                            className="w-full border border-slate-300 rounded px-2 py-1"
-                          />
-                        ) : (
-                          <span className="text-slate-700 truncate">{kr.formula}</span>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-4 gap-4 mb-4">
-                      <div>
-                        <label className="block text-xs text-slate-500 mb-1">목표값</label>
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="number"
-                            value={kr.targetValue}
-                            onChange={(e) => handleKRChange(kr.id, 'targetValue', parseInt(e.target.value) || 0)}
-                            className={`w-24 border rounded px-2 py-1 text-sm ${isEditing ? 'border-blue-300 bg-blue-50' : 'border-slate-300'}`}
-                            readOnly={!isEditing}
-                          />
-                          {isEditing ? (
-                            <input 
-                              type="text" 
-                              value={kr.unit}
-                              onChange={(e) => handleKRChange(kr.id, 'unit', e.target.value)}
-                              className="w-12 border border-blue-300 rounded px-1 py-1 text-sm text-center"
-                            />
+                  {/* ── Objective 본문 ── */}
+                  <div className="px-5 pt-4 pb-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-start gap-3 flex-1 min-w-0">
+                        {/* 넘버링 */}
+                        <div className="w-8 h-8 rounded-lg bg-slate-900 text-white flex items-center justify-center text-sm font-bold flex-shrink-0">
+                          O{objIdx + 1}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          {isEditingObj ? (
+                            <div className="space-y-2">
+                              <input
+                                type="text"
+                                value={obj.name}
+                                onChange={(e) => setObjectives(prev => prev.map(o =>
+                                  o.id === obj.id ? { ...o, name: e.target.value } : o
+                                ))}
+                                className="w-full px-3 py-2 border border-blue-300 rounded-lg text-sm font-medium focus:ring-2 focus:ring-blue-500 outline-none"
+                                autoFocus
+                              />
+                              <div className="flex gap-2 items-center">
+                                <select
+                                  value={obj.biiType}
+                                  onChange={(e) => setObjectives(prev => prev.map(o =>
+                                    o.id === obj.id ? { ...o, biiType: e.target.value as BIIType } : o
+                                  ))}
+                                  className="px-2 py-1 border border-slate-300 rounded text-xs"
+                                >
+                                  <option value="Build">Build</option>
+                                  <option value="Innovate">Innovate</option>
+                                  <option value="Improve">Improve</option>
+                                </select>
+                                <select
+                                  value={obj.perspective}
+                                  onChange={(e) => setObjectives(prev => prev.map(o =>
+                                    o.id === obj.id ? { ...o, perspective: e.target.value } : o
+                                  ))}
+                                  className="px-2 py-1 border border-slate-300 rounded text-xs"
+                                >
+                                  <option value="재무">재무</option>
+                                  <option value="고객">고객</option>
+                                  <option value="프로세스">프로세스</option>
+                                  <option value="학습성장">학습성장</option>
+                                </select>
+                                <button
+                                  onClick={() => setEditingObjId(null)}
+                                  className="px-3 py-1 bg-blue-600 text-white rounded text-xs font-medium hover:bg-blue-700"
+                                >
+                                  완료
+                                </button>
+                              </div>
+                            </div>
                           ) : (
-                            <span className="text-sm text-slate-600">{kr.unit}</span>
+                            <div>
+                              <h3 className="font-bold text-slate-900 text-base leading-snug">{obj.name}</h3>
+                              <div className="flex items-center gap-2 mt-1.5">
+                                <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${biiColor.bg} ${biiColor.text}`}>
+                                  {obj.biiType}
+                                </span>
+                                <span className="text-xs text-slate-500">{obj.perspective} 관점</span>
+                                {!parentObj && obj.source === 'ai_draft' && (
+                                  <span className="text-xs text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">독립</span>
+                                )}
+                              </div>
+                            </div>
                           )}
                         </div>
                       </div>
-                      <div>
-                        <label className="block text-xs text-slate-500 mb-1">유형</label>
-                        <select 
-                          className={`w-full border rounded px-2 py-1 text-sm ${isEditing ? 'border-blue-300' : 'border-slate-300 bg-slate-50'}`}
-                          value={kr.indicatorType}
-                          disabled={!isEditing}
-                          onChange={(e) => handleKRChange(kr.id, 'indicatorType', e.target.value)}
-                        >
-                          <option>투입</option><option>과정</option><option>산출</option><option>결과</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-xs text-slate-500 mb-1">측정주기</label>
-                        <select 
-                          className={`w-full border rounded px-2 py-1 text-sm ${isEditing ? 'border-blue-300' : 'border-slate-300 bg-slate-50'}`}
-                          value={kr.measurementCycle}
-                          disabled={!isEditing}
-                          onChange={(e) => handleKRChange(kr.id, 'measurementCycle', e.target.value)}
-                        >
-                          <option>월</option><option>분기</option><option>반기</option><option>연</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-xs text-slate-500 mb-1">관점</label>
-                        <select 
-                          className={`w-full border rounded px-2 py-1 text-sm ${isEditing ? 'border-blue-300' : 'border-slate-300 bg-slate-50'}`}
-                          value={kr.perspective}
-                          disabled={!isEditing}
-                          onChange={(e) => handleKRChange(kr.id, 'perspective', e.target.value)}
-                        >
-                          <option>재무</option><option>고객</option><option>프로세스</option><option>학습성장</option>
-                        </select>
-                      </div>
-                    </div>
 
-                    {isEditing && (
-                    <div className="flex gap-2 mb-4">
-                      <button
-                        onClick={() => setExpandedKR(isExpanded ? null : kr.id)}
-                        className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors flex items-center gap-1"
-                      >
-                        🎯 원클릭 목표설정
-                        <ChevronDown className={`w-4 h-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
-                      </button>
-                      <button className="px-3 py-1.5 border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors">
-                        📊 전년실적
-                      </button>
-                      <button className="px-3 py-1.5 border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors flex items-center gap-1">
-                        <Bot className="w-4 h-4" />
-                        AI가 완성해줘
-                      </button>
+                      {/* 액션 버튼 */}
+                      {!isEditingObj && (
+                        <div className="flex items-center gap-1 flex-shrink-0">
+                          <button
+                            onClick={() => setEditingObjId(obj.id)}
+                            className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                            title="목표 수정"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => {
+                              if (confirm('이 목표를 삭제하시겠습니까? 하위 KR도 함께 삭제됩니다.')) {
+                                setObjectives(prev => prev.map(o =>
+                                  o.id === obj.id ? { ...o, selected: false } : o
+                                ));
+                              }
+                            }}
+                            className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                            title="목표 삭제"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      )}
                     </div>
+                  </div>
+
+                  {/* ── KR 리스트 ── */}
+                  <div className="px-5 pb-4 space-y-2">
+                    {objKRs.length === 0 ? (
+                      <div className="bg-slate-50 rounded-lg p-4 text-center">
+                        <p className="text-sm text-slate-400">KR이 없습니다</p>
+                        <button
+                          onClick={() => {
+                            setSelectedObjectiveTab(obj.id);
+                            handleAddKR();
+                          }}
+                          className="mt-2 text-xs text-blue-600 hover:underline"
+                        >
+                          + KR 추가
+                        </button>
+                      </div>
+                    ) : (
+                      objKRs.map((kr, krIdx) => {
+                        const krBiiColor = getBIIColor(kr.biiType);
+                        const categoryColor = getKPICategoryColor(kr.kpiCategory);
+                        const isEditing = editingKRId === kr.id;
+
+                        return (
+                          <div
+                            key={kr.id}
+                            className={`border rounded-xl transition-all ${
+                              isEditing ? 'border-blue-300 bg-blue-50/30' : 'border-slate-100 bg-slate-50/50 hover:border-slate-200'
+                            }`}
+                          >
+                            {/* KR 헤더 (항상 표시) */}
+                            <div className="flex items-center gap-3 px-4 py-3">
+                              <span className="text-xs font-bold text-blue-500 w-7 flex-shrink-0">
+                                KR{krIdx + 1}
+                              </span>
+                              
+                              {isEditing ? (
+                                <input
+                                  type="text"
+                                  value={kr.name}
+                                  onChange={(e) => handleKRChange(kr.id, 'name', e.target.value)}
+                                  className="flex-1 px-2 py-1 border border-blue-300 rounded text-sm font-medium focus:ring-2 focus:ring-blue-500 outline-none"
+                                />
+                              ) : (
+                                <span className="flex-1 text-sm font-medium text-slate-800 min-w-0 truncate">
+                                  {kr.name}
+                                </span>
+                              )}
+
+                              <div className="flex items-center gap-2 flex-shrink-0">
+                                <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${krBiiColor.bg} ${krBiiColor.text}`}>
+                                  {kr.biiType}
+                                </span>
+                                <span className={`px-1.5 py-0.5 rounded text-xs font-medium border ${categoryColor}`}>
+                                  {kr.kpiCategory}
+                                </span>
+                                <span className="text-xs text-slate-500 font-medium w-16 text-right">
+                                  {kr.targetValue.toLocaleString()}{kr.unit}
+                                </span>
+                                <span className="text-xs text-slate-400 w-10 text-right">{kr.weight}%</span>
+
+                                {isEditing ? (
+                                  <button
+                                    onClick={() => setEditingKRId(null)}
+                                    className="p-1 text-green-600 hover:bg-green-100 rounded"
+                                    title="완료"
+                                  >
+                                    <Check className="w-3.5 h-3.5" />
+                                  </button>
+                                ) : (
+                                  <button
+                                    onClick={() => setEditingKRId(kr.id)}
+                                    className="p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded"
+                                    title="수정"
+                                  >
+                                    <Pencil className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                                <button
+                                  onClick={() => setKrs(krs.filter(k => k.id !== kr.id))}
+                                  className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded"
+                                  title="삭제"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* KR 상세 (편집 모드일 때만) */}
+                            {isEditing && (
+                              <div className="px-4 pb-4 pt-1 space-y-3 border-t border-blue-200">
+                                {/* 정의 & 산식 */}
+                                <div className="grid grid-cols-2 gap-3">
+                                  <div>
+                                    <label className="block text-xs text-slate-500 mb-1">정의</label>
+                                    <input
+                                      type="text"
+                                      value={kr.definition}
+                                      onChange={(e) => handleKRChange(kr.id, 'definition', e.target.value)}
+                                      className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block text-xs text-slate-500 mb-1">산식</label>
+                                    <input
+                                      type="text"
+                                      value={kr.formula}
+                                      onChange={(e) => handleKRChange(kr.id, 'formula', e.target.value)}
+                                      className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm"
+                                    />
+                                  </div>
+                                </div>
+
+                                {/* 목표값, 단위, 유형, 주기, 관점, 가중치 */}
+                                <div className="grid grid-cols-6 gap-2">
+                                  <div>
+                                    <label className="block text-xs text-slate-500 mb-1">목표값</label>
+                                    <input
+                                      type="number"
+                                      value={kr.targetValue}
+                                      onChange={(e) => handleKRChange(kr.id, 'targetValue', parseInt(e.target.value) || 0)}
+                                      className="w-full border border-blue-300 bg-blue-50 rounded px-2 py-1.5 text-sm"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block text-xs text-slate-500 mb-1">단위</label>
+                                    <input
+                                      type="text"
+                                      value={kr.unit}
+                                      onChange={(e) => handleKRChange(kr.id, 'unit', e.target.value)}
+                                      className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm text-center"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block text-xs text-slate-500 mb-1">유형</label>
+                                    <select
+                                      value={kr.indicatorType}
+                                      onChange={(e) => handleKRChange(kr.id, 'indicatorType', e.target.value)}
+                                      className="w-full border border-slate-300 rounded px-1 py-1.5 text-sm"
+                                    >
+                                      <option>투입</option><option>과정</option><option>산출</option><option>결과</option>
+                                    </select>
+                                  </div>
+                                  <div>
+                                    <label className="block text-xs text-slate-500 mb-1">주기</label>
+                                    <select
+                                      value={kr.measurementCycle}
+                                      onChange={(e) => handleKRChange(kr.id, 'measurementCycle', e.target.value)}
+                                      className="w-full border border-slate-300 rounded px-1 py-1.5 text-sm"
+                                    >
+                                      <option>월</option><option>분기</option><option>반기</option><option>연</option>
+                                    </select>
+                                  </div>
+                                  <div>
+                                    <label className="block text-xs text-slate-500 mb-1">관점</label>
+                                    <select
+                                      value={kr.perspective}
+                                      onChange={(e) => handleKRChange(kr.id, 'perspective', e.target.value)}
+                                      className="w-full border border-slate-300 rounded px-1 py-1.5 text-sm"
+                                    >
+                                      <option>재무</option><option>고객</option><option>프로세스</option><option>학습성장</option>
+                                    </select>
+                                  </div>
+                                  <div>
+                                    <label className="block text-xs text-slate-500 mb-1">가중치</label>
+                                    <div className="flex items-center gap-1">
+                                      <input
+                                        type="number"
+                                        min={0}
+                                        max={100}
+                                        value={kr.weight}
+                                        onChange={(e) => handleKRChange(kr.id, 'weight', Math.max(0, Math.min(100, parseInt(e.target.value) || 0)))}
+                                        className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm text-center"
+                                      />
+                                      <span className="text-xs text-slate-500">%</span>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* 등급 구간 */}
+                                <div>
+                                  <label className="block text-xs text-slate-500 mb-1">등급 구간 (S / A / B / C / D)</label>
+                                  <div className="flex gap-2">
+                                    {(['S', 'A', 'B', 'C', 'D'] as const).map((grade) => (
+                                      <div key={grade} className="flex-1">
+                                        <div className="text-center text-xs text-slate-400 mb-0.5">{grade}</div>
+                                        <input
+                                          type="number"
+                                          value={kr.gradeCriteria[grade]}
+                                          onChange={(e) => {
+                                            const val = parseInt(e.target.value) || 0;
+                                            setKrs(prev => prev.map(k =>
+                                              k.id === kr.id
+                                                ? { ...k, gradeCriteria: { ...k.gradeCriteria, [grade]: val } }
+                                                : k
+                                            ));
+                                          }}
+                                          className="w-full border border-slate-200 rounded px-1 py-1 text-xs text-center"
+                                        />
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+
+                                {/* AI 보조 버튼 */}
+                                <div className="flex gap-2">
+                                  <button className="px-3 py-1.5 bg-gradient-to-r from-blue-600 to-violet-600 text-white rounded-lg text-xs font-medium hover:from-blue-700 hover:to-violet-700 flex items-center gap-1">
+                                    <Bot className="w-3.5 h-3.5" />
+                                    AI가 완성해줘
+                                  </button>
+                                  <button className="px-3 py-1.5 border border-slate-300 text-slate-600 rounded-lg text-xs font-medium hover:bg-slate-50">
+                                    📊 전년실적 참조
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })
                     )}
 
-                    {isExpanded && (
-                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
-                        <h4 className="font-semibold text-slate-900 mb-3">목표 자동 설정 결과</h4>
-                        <div className="grid grid-cols-2 gap-4 text-sm mb-3">
-                          <div>
-                            <span className="text-slate-600">📊 전년 실적:</span>
-                            <span className="ml-2 font-medium">{kr.previousYear.toLocaleString()}{kr.unit}</span>
-                          </div>
-                          <div>
-                            <span className="text-slate-600">📈 전사 성장 방침:</span>
-                            <span className="ml-2 font-medium text-green-600">+10%</span>
-                          </div>
+                    {/* Objective 내 KR 추가 버튼 */}
+                    <button
+                      onClick={() => {
+                        setSelectedObjectiveTab(obj.id);
+                        handleAddKR();
+                      }}
+                      className="w-full border border-dashed border-slate-300 rounded-xl py-2.5 text-xs text-slate-500 hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50/30 transition-colors flex items-center justify-center gap-1"
+                    >
+                      <Plus className="w-3 h-3" /> KR 추가
+                    </button>
+
+                    {/* Objective별 가중치 합계 */}
+                    {objKRs.length > 0 && (
+                      <div className="flex items-center justify-between px-1 pt-1">
+                        <div className="flex items-center gap-2 text-xs text-slate-400">
+                          <span>{objKRs.length}개 KR</span>
                         </div>
-                        <div className="space-y-2 text-sm mb-4">
-                          <div className="font-medium">목표(B등급): {kr.gradeCriteria.B.toLocaleString()}{kr.unit} (+{kr.previousYear > 0 ? ((kr.gradeCriteria.B / kr.previousYear - 1) * 100).toFixed(1) : 0}%)</div>
-                          <div className="grid grid-cols-2 gap-2 text-xs text-slate-600">
-                            <div>S등급: {kr.gradeCriteria.S.toLocaleString()}{kr.unit}↑</div>
-                            <div>A등급: {kr.gradeCriteria.A.toLocaleString()}~{kr.gradeCriteria.S.toLocaleString()}{kr.unit}</div>
-                            <div>B등급: {kr.gradeCriteria.B.toLocaleString()}~{kr.gradeCriteria.A.toLocaleString()}{kr.unit}</div>
-                            <div>C등급: {kr.gradeCriteria.C.toLocaleString()}~{kr.gradeCriteria.B.toLocaleString()}{kr.unit}</div>
-                          </div>
-                        </div>
-                        <div className="flex gap-2">
-                          <button className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">
-                            ✅ 적용하기
-                          </button>
-                          <button className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">
-                            수정하기
-                          </button>
-                        </div>
+                        {(() => {
+                          const sum = objKRs.reduce((s, k) => s + k.weight, 0);
+                          return (
+                            <span className={`text-xs font-medium ${sum === 100 ? 'text-green-600' : 'text-red-500'}`}>
+                              가중치: {sum}% {sum === 100 ? '✅' : sum > 100 ? `(${sum - 100}% 초과)` : `(${100 - sum}% 부족)`}
+                            </span>
+                          );
+                        })()}
                       </div>
                     )}
                   </div>
-                );
-              })}
-            </div>
+                </div>
+              );
+            })}
 
-            <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
-              <div className="text-sm text-slate-600">
-                <span className="font-medium">선택된 KR:</span> {selectedKRs.filter(kr => kr.objectiveId === selectedObjectiveTab).length}개
-                <span className="text-xs text-slate-400 ml-3">💡 가중치는 다음 단계(세부설정)에서 배분합니다</span>
-              </div>
-            </div>
-
+            {/* 하단 액션 */}
             <div className="flex gap-2">
-              <button 
-                onClick={handleAddKR}
-                className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors text-sm font-medium flex items-center gap-2"
-              >
-                <Plus className="w-4 h-4" />
-                KR 추가
-              </button>
-              <button 
+              <button
                 onClick={handleAIRegenerateKRs}
                 disabled={isAIGenerating}
-                className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors text-sm font-medium flex items-center gap-2 disabled:opacity-50"
+                className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 text-sm font-medium flex items-center gap-2 disabled:opacity-50"
               >
                 <RefreshCw className={`w-4 h-4 ${isAIGenerating ? 'animate-spin' : ''}`} />
-                {isAIGenerating ? '생성 중...' : 'AI 재추천'}
+                {isAIGenerating ? '생성 중...' : 'AI KR 재추천'}
               </button>
-              <button 
+              <button
                 onClick={handleOpenPoolModal}
-                className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors text-sm font-medium flex items-center gap-2"
+                className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 text-sm font-medium flex items-center gap-2"
               >
-                <BookOpen className="w-4 h-4" />
-                Pool에서 선택
+                <Database className="w-4 h-4" /> Pool에서 선택
               </button>
             </div>
           </div>
         )}
-
         {/* Step 3: 세부 설정 */}
         {currentStep === 3 && (() => {
           const selectedObjs = objectives.filter(o => o.selected);
