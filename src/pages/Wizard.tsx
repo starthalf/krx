@@ -3,7 +3,8 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { 
   ChevronLeft, ChevronRight, Bot, Target, RefreshCw, Pencil, Trash2, 
-  ChevronDown, BookOpen, Plus, X, ArrowLeft, Loader2, Check, Search, Star, Database
+  ChevronDown, BookOpen, Plus, X, ArrowLeft, Loader2, Check, Search, Star, Database,
+  GitBranch, Link2, AlertCircle, FileCheck, Clock, MessageSquare, Send, Users
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useStore } from '../store/useStore';
@@ -11,12 +12,25 @@ import { getBIIColor, getKPICategoryColor } from '../utils/helpers';
 import type { BIIType } from '../types';
 import OKRCommentPanel from '../components/OKRCommentPanel';
 
+// Wizard 전용 타입
+type ApprovalStatus = 'draft' | 'submitted' | 'under_review' | 'approved' | 'rejected' | 'revision_requested';
+
+interface ParentOKR {
+  objectiveId: string;
+  objectiveName: string;
+  biiType: string;
+  keyResults: string[];
+}
+
 interface ObjectiveCandidate {
   id: string;
   name: string;
   biiType: BIIType;
   perspective: string;
   selected: boolean;
+  parentObjId?: string | null;
+  cascadeType?: string;
+  source?: string;
 }
 
 interface KRCandidate {
@@ -136,79 +150,157 @@ export default function Wizard() {
 
   // ==================== Data States ====================
 
-  const [objectives, setObjectives] = useState<ObjectiveCandidate[]>([
-    { id: '1', name: '시장 선도형 신제품 수주 확대를 통한 매출 성장 달성', biiType: 'Improve', perspective: '재무', selected: true },
-    { id: '2', name: '고객 중심 영업 프로세스 혁신', biiType: 'Innovate', perspective: '프로세스', selected: true },
-    { id: '3', name: '조직 역량 강화 기반 구축', biiType: 'Build', perspective: '학습성장', selected: true },
-    { id: '4', name: '디지털 마케팅 채널 다각화', biiType: 'Build', perspective: '고객', selected: false },
-    { id: '5', name: '브랜드 인지도 제고를 통한 시장 확대', biiType: 'Improve', perspective: '고객', selected: false },
-  ]);
+  // AI 초안 로딩 상태
+  const [isLoadingDraft, setIsLoadingDraft] = useState(false);
+  const [hasDraft, setHasDraft] = useState(false);
 
-  const [krs, setKrs] = useState<(KRCandidate & { selected?: boolean })[]>([
-    {
-      id: 'kr-1', objectiveId: '1', name: '매출 목표달성도', definition: '사업계획 대비 실제 매출 달성 정도',
-      formula: '당해년도 매출액 / 계획상 매출액 × 100', unit: '억원', weight: 25, targetValue: 3528,
-      biiType: 'Improve', kpiCategory: '전략', perspective: '재무', indicatorType: '결과', measurementCycle: '월',
-      previousYear: 3200, poolMatch: 96,
-      gradeCriteria: { S: 4234, A: 3881, B: 3528, C: 3175, D: 0 },
-      quarterlyTargets: { Q1: 843, Q2: 953, Q3: 868, Q4: 864 },
-      selected: true
-    },
-    {
-      id: 'kr-2', objectiveId: '1', name: '영업이익액', definition: '매출에서 영업비용을 제외한 순이익',
-      formula: '영업이익액 실적', unit: '억원', weight: 20, targetValue: 287,
-      biiType: 'Improve', kpiCategory: '전략', perspective: '재무', indicatorType: '결과', measurementCycle: '월',
-      previousYear: 260, poolMatch: 92,
-      gradeCriteria: { S: 344, A: 316, B: 287, C: 258, D: 0 },
-      quarterlyTargets: { Q1: 68, Q2: 75, Q3: 72, Q4: 72 },
-      selected: true
-    },
-    {
-      id: 'kr-3', objectiveId: '1', name: '수주금액', definition: '신규 계약 체결 금액의 합계',
-      formula: '신규 계약 금액의 총합', unit: '억원', weight: 15, targetValue: 3555,
-      biiType: 'Improve', kpiCategory: '전략', perspective: '고객', indicatorType: '결과', measurementCycle: '월',
-      previousYear: 3230, poolMatch: 88,
-      gradeCriteria: { S: 4266, A: 3911, B: 3555, C: 3200, D: 0 },
-      quarterlyTargets: { Q1: 850, Q2: 960, Q3: 875, Q4: 870 },
-      selected: true
-    },
-    {
-      id: 'kr-4', objectiveId: '2', name: '매출채권회전일', definition: '매출채권이 현금으로 회수되는데 걸리는 평균 일수',
-      formula: '(평균 매출채권 / 매출액) × 365', unit: '일', weight: 15, targetValue: 46,
-      biiType: 'Innovate', kpiCategory: '고유업무', perspective: '프로세스', indicatorType: '결과', measurementCycle: '월',
-      previousYear: 52, poolMatch: 94,
-      gradeCriteria: { S: 37, A: 41, B: 46, C: 51, D: 999 },
-      quarterlyTargets: { Q1: 46, Q2: 46, Q3: 46, Q4: 46 },
-      selected: true
-    },
-    {
-      id: 'kr-5', objectiveId: '2', name: '중점거래처 품목증가율', definition: '주요 거래처 대상 신규 품목 계약 확대',
-      formula: '정성 마일스톤 기반 평가', unit: '%', weight: 10, targetValue: 100,
-      biiType: 'Innovate', kpiCategory: '전략', perspective: '고객', indicatorType: '과정', measurementCycle: '분기',
-      previousYear: 0, poolMatch: 0,
-      gradeCriteria: { S: 120, A: 110, B: 100, C: 80, D: 0 },
-      quarterlyTargets: { Q1: 25, Q2: 50, Q3: 75, Q4: 100 },
-      selected: true
-    },
-    {
-      id: 'kr-6', objectiveId: '3', name: '인재유지율', definition: '핵심 인재의 조직 잔류율',
-      formula: '(기말 인원 / 기초 인원) × 100', unit: '%', weight: 5, targetValue: 95,
-      biiType: 'Build', kpiCategory: '공통', perspective: '학습성장', indicatorType: '결과', measurementCycle: '월',
-      previousYear: 93, poolMatch: 98,
-      gradeCriteria: { S: 98, A: 96, B: 95, C: 93, D: 0 },
-      quarterlyTargets: { Q1: 95, Q2: 95, Q3: 95, Q4: 95 },
-      selected: true
-    },
-    {
-      id: 'kr-7', objectiveId: '3', name: '교육이수율', definition: '필수 교육과정 이수 완료율',
-      formula: '(교육 이수 인원 / 전체 인원) × 100', unit: '%', weight: 5, targetValue: 100,
-      biiType: 'Build', kpiCategory: '공통', perspective: '학습성장', indicatorType: '결과', measurementCycle: '월',
-      previousYear: 88, poolMatch: 95,
-      gradeCriteria: { S: 110, A: 105, B: 100, C: 90, D: 0 },
-      quarterlyTargets: { Q1: 25, Q2: 50, Q3: 75, Q4: 100 },
-      selected: true
-    },
-  ]);
+  // 상위 조직 OKR (Cascading 시각화용)
+  interface ParentObjective {
+    id: string;
+    name: string;
+    biiType: string;
+    orgName: string;
+  }
+  const [parentObjectives, setParentObjectives] = useState<ParentObjective[]>([]);
+
+  const [objectives, setObjectives] = useState<ObjectiveCandidate[]>([]);
+
+  const [krs, setKrs] = useState<(KRCandidate & { selected?: boolean; parentObjId?: string | null })[]>([]);
+
+  // ==================== AI 초안 자동 로딩 ====================
+
+  useEffect(() => {
+    const targetOrgId = selectedOrgId || urlOrgId;
+    if (!targetOrgId) return;
+
+    loadDraftFromDB(targetOrgId);
+    loadParentOKRs(targetOrgId);
+  }, [selectedOrgId, urlOrgId]);
+
+  // DB에서 AI 초안 로딩
+  const loadDraftFromDB = async (targetOrgId: string) => {
+    setIsLoadingDraft(true);
+    try {
+      // 해당 조직의 objectives 조회 (ai_draft 또는 draft)
+      const { data: objs, error: objErr } = await supabase
+        .from('objectives')
+        .select(`
+          id, name, bii_type, period, status, source, sort_order,
+          parent_obj_id, cascade_type, approval_status
+        `)
+        .eq('org_id', targetOrgId)
+        .eq('period', '2025-H1')
+        .in('source', ['ai_draft', 'manual'])
+        .order('sort_order');
+
+      if (objErr) throw objErr;
+
+      if (objs && objs.length > 0) {
+        setHasDraft(true);
+
+        // Objectives 변환
+        const loadedObjectives: ObjectiveCandidate[] = objs.map((obj: any) => ({
+          id: obj.id,
+          name: obj.name,
+          biiType: obj.bii_type || 'Improve',
+          perspective: '재무', // DB에 perspective 없으면 기본값
+          selected: true,
+          parentObjId: obj.parent_obj_id,
+          cascadeType: obj.cascade_type || 'independent',
+          source: obj.source,
+        }));
+        setObjectives(loadedObjectives);
+        setSelectedObjectiveTab(loadedObjectives[0]?.id || '');
+
+        // 각 objective의 KR 조회
+        const objIds = objs.map((o: any) => o.id);
+        const { data: allKRs } = await supabase
+          .from('key_results')
+          .select('*')
+          .in('objective_id', objIds)
+          .order('created_at');
+
+        if (allKRs && allKRs.length > 0) {
+          const loadedKRs = allKRs.map((kr: any) => ({
+            id: kr.id,
+            objectiveId: kr.objective_id,
+            name: kr.name,
+            definition: kr.definition || '',
+            formula: kr.formula || '',
+            unit: kr.unit || '%',
+            weight: kr.weight || 20,
+            targetValue: kr.target_value || 100,
+            biiType: (kr.bii_type || 'Improve') as BIIType,
+            kpiCategory: (kr.kpi_category || '전략') as any,
+            perspective: (kr.perspective || '재무') as any,
+            indicatorType: (kr.indicator_type || '결과') as any,
+            measurementCycle: (kr.measurement_cycle || '월') as any,
+            previousYear: 0,
+            poolMatch: 0,
+            gradeCriteria: kr.grade_criteria || { S: 120, A: 110, B: 100, C: 90, D: 0 },
+            quarterlyTargets: kr.quarterly_targets || { Q1: 0, Q2: 0, Q3: 0, Q4: 0 },
+            selected: true,
+            parentObjId: kr.parent_obj_id || null,
+          }));
+          setKrs(loadedKRs);
+        }
+
+        // 초안이 있으면 바로 KR 설정 단계로
+        setShowOneClickModal(false);
+        setCurrentStep(2);
+      } else {
+        setHasDraft(false);
+        // 초안 없으면 원클릭 모달
+        if (!urlOrgId) setShowOneClickModal(true);
+      }
+    } catch (err) {
+      console.error('AI 초안 로딩 실패:', err);
+    } finally {
+      setIsLoadingDraft(false);
+    }
+  };
+
+  // 상위 조직 OKR 로딩 (Cascading 시각화용)
+  const loadParentOKRs = async (targetOrgId: string) => {
+    try {
+      const currentOrg = organizations.find(o => o.id === targetOrgId);
+      if (!currentOrg?.parentOrgId) return;
+
+      // 상위 조직 찾기 (전사까지)
+      const parentIds: string[] = [];
+      let cursor = currentOrg.parentOrgId;
+      while (cursor) {
+        parentIds.push(cursor);
+        const parent = organizations.find(o => o.id === cursor);
+        cursor = parent?.parentOrgId || null;
+      }
+
+      if (parentIds.length === 0) return;
+
+      // 상위 조직들의 확정된 objectives
+      const { data: parentObjs } = await supabase
+        .from('objectives')
+        .select('id, name, bii_type, org_id, status')
+        .in('org_id', parentIds)
+        .eq('period', '2025-H1')
+        .in('status', ['finalized', 'active', 'draft']);
+
+      if (parentObjs) {
+        const mapped: ParentObjective[] = parentObjs.map((po: any) => {
+          const org = organizations.find(o => o.id === po.org_id);
+          return {
+            id: po.id,
+            name: po.name,
+            biiType: po.bii_type || 'Improve',
+            orgName: org?.name || '상위 조직',
+          };
+        });
+        setParentObjectives(mapped);
+      }
+    } catch (err) {
+      console.error('상위 OKR 로딩 실패:', err);
+    }
+  };
 
   // ==================== Handlers ====================
 
@@ -519,6 +611,42 @@ export default function Wizard() {
     setCurrentStep(0);
   };
 
+  // 상위 조직에 제출
+  const handleSubmitForApproval = async () => {
+    if (!orgId) return;
+    if (!confirm('목표를 상위 조직에 제출하시겠습니까?')) return;
+
+    try {
+      // 모든 objectives의 approval_status를 submitted로 업데이트
+      const selectedIds = objectives.filter(o => o.selected && o.source).map(o => o.id);
+      if (selectedIds.length > 0) {
+        await supabase
+          .from('objectives')
+          .update({ approval_status: 'submitted', status: 'submitted' })
+          .in('id', selectedIds);
+      }
+      setApprovalStatus('submitted');
+      setSubmittedAt(new Date().toISOString());
+      alert('✅ 제출되었습니다. 상위 조직의 검토를 기다려주세요.');
+    } catch (err: any) {
+      alert(`제출 실패: ${err.message}`);
+    }
+  };
+
+  // 유관부서 검토 요청 발송
+  const handleSendReviewRequest = async () => {
+    if (reviewRequestOrgs.length === 0) return;
+    try {
+      // TODO: notifications 테이블에 검토 요청 알림 insert
+      alert(`✅ ${reviewRequestOrgs.length}개 조직에 검토 요청을 발송했습니다.`);
+      setShowReviewRequestModal(false);
+      setReviewRequestOrgs([]);
+      setReviewRequestMessage('');
+    } catch (err: any) {
+      alert(`발송 실패: ${err.message}`);
+    }
+  };
+
   // AI 목표 생성 핸들러 (Step 1) - v2: industry 동적
   const handleAIGenerateObjectives = async () => {
     setIsAIGenerating(true);
@@ -561,62 +689,121 @@ export default function Wizard() {
       return;
     }
 
-    if (!confirm('목표를 최종 확정하고 저장하시겠습니까?')) return;
+    if (!confirm('목표를 저장하시겠습니까?')) return;
 
     setIsSaving(true);
     try {
       const selectedObjectives = objectives.filter(o => o.selected);
       
       for (const obj of selectedObjectives) {
-        const { data: savedObj, error: objError } = await supabase
-          .from('objectives')
-          .insert({
-            org_id: orgId,
-            name: obj.name,
-            bii_type: obj.biiType,
-            period: '2025-H1',
-            status: 'active',
-            sort_order: parseInt(obj.id) || 0
-          })
-          .select()
-          .single();
+        let savedObjId = obj.id;
 
-        if (objError) throw new Error(`목표 저장 실패: ${objError.message}`);
-        if (!savedObj) continue;
+        // 기존 DB 레코드면 update, 새로 만든 거면 insert
+        const isExisting = obj.source === 'ai_draft' || obj.source === 'manual';
 
+        if (isExisting && obj.id && !obj.id.startsWith('obj-new-')) {
+          // UPDATE 기존 objective
+          const { error: objError } = await supabase
+            .from('objectives')
+            .update({
+              name: obj.name,
+              bii_type: obj.biiType,
+              source: 'manual', // 수정했으니 manual로
+              status: 'draft',
+              approval_status: 'draft',
+            })
+            .eq('id', obj.id);
+
+          if (objError) throw new Error(`목표 수정 실패: ${objError.message}`);
+        } else {
+          // INSERT 새 objective
+          const { data: savedObj, error: objError } = await supabase
+            .from('objectives')
+            .insert({
+              org_id: orgId,
+              name: obj.name,
+              bii_type: obj.biiType,
+              period: '2025-H1',
+              status: 'draft',
+              source: 'manual',
+              approval_status: 'draft',
+              parent_obj_id: obj.parentObjId || null,
+              cascade_type: obj.cascadeType || 'independent',
+              sort_order: parseInt(obj.id) || 0
+            })
+            .select()
+            .single();
+
+          if (objError) throw new Error(`목표 저장 실패: ${objError.message}`);
+          if (!savedObj) continue;
+          savedObjId = savedObj.id;
+        }
+
+        // KR 처리: 해당 objective의 KR들
         const relatedKRs = krs.filter(k => k.objectiveId === obj.id && k.selected !== false);
         
         for (const kr of relatedKRs) {
-          const { error: krError } = await supabase
-            .from('key_results')
-            .insert({
-              objective_id: savedObj.id,
-              org_id: orgId,
-              name: kr.name,
-              definition: kr.definition,
-              formula: kr.formula,
-              unit: kr.unit,
-              weight: kr.weight,
-              target_value: kr.targetValue,
-              current_value: 0,
-              bii_type: kr.biiType,
-              kpi_category: kr.kpiCategory,
-              perspective: kr.perspective,
-              indicator_type: kr.indicatorType,
-              measurement_cycle: kr.measurementCycle,
-              grade_criteria: kr.gradeCriteria,
-              quarterly_targets: kr.quarterlyTargets,
-              status: 'active'
-            });
+          const krPayload = {
+            name: kr.name,
+            definition: kr.definition,
+            formula: kr.formula,
+            unit: kr.unit,
+            weight: kr.weight,
+            target_value: kr.targetValue,
+            bii_type: kr.biiType,
+            kpi_category: kr.kpiCategory,
+            perspective: kr.perspective,
+            indicator_type: kr.indicatorType,
+            measurement_cycle: kr.measurementCycle,
+            grade_criteria: kr.gradeCriteria,
+            quarterly_targets: kr.quarterlyTargets,
+          };
 
-          if (krError) throw new Error(`KR 저장 실패: ${krError.message}`);
+          const isExistingKR = kr.id && !kr.id.startsWith('kr-new-') && !kr.id.startsWith('kr-ai-') && !kr.id.startsWith('kr-pool-');
+
+          if (isExistingKR) {
+            const { error } = await supabase
+              .from('key_results')
+              .update({ ...krPayload, source: 'manual' })
+              .eq('id', kr.id);
+            if (error) throw new Error(`KR 수정 실패: ${error.message}`);
+          } else {
+            const { error } = await supabase
+              .from('key_results')
+              .insert({
+                ...krPayload,
+                objective_id: savedObjId,
+                org_id: orgId,
+                current_value: 0,
+                source: 'manual',
+                status: 'draft'
+              });
+            if (error) throw new Error(`KR 저장 실패: ${error.message}`);
+          }
+        }
+
+        // 선택 해제된 KR 삭제
+        const deselectedKRs = krs.filter(k => k.objectiveId === obj.id && k.selected === false);
+        for (const dk of deselectedKRs) {
+          if (dk.id && !dk.id.startsWith('kr-new-')) {
+            await supabase.from('key_results').delete().eq('id', dk.id);
+          }
+        }
+      }
+
+      // 선택 해제된 Objective 삭제
+      const deselectedObjs = objectives.filter(o => !o.selected && o.source);
+      for (const dobj of deselectedObjs) {
+        if (dobj.id && !dobj.id.startsWith('obj-new-')) {
+          await supabase.from('key_results').delete().eq('objective_id', dobj.id);
+          await supabase.from('objectives').delete().eq('id', dobj.id);
         }
       }
 
       await fetchObjectives(orgId);
       await fetchKRs(orgId);
       
-      alert('성공적으로 저장되었습니다!');
+      alert('✅ 저장되었습니다!');
       navigate('/okr/team'); 
 
     } catch (error: any) {
@@ -754,11 +941,24 @@ export default function Wizard() {
     );
   }
 
+  // [로딩] AI 초안 불러오는 중
+  if (isLoadingDraft) {
+    return (
+      <div className="p-6 max-w-6xl mx-auto">
+        <div className="flex flex-col items-center justify-center py-20">
+          <Loader2 className="w-12 h-12 text-blue-600 animate-spin mb-4" />
+          <h3 className="text-lg font-semibold text-slate-900 mb-2">초안을 불러오는 중...</h3>
+          <p className="text-sm text-slate-500">{currentOrgName}의 OKR 데이터를 확인하고 있습니다</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="p-6 max-w-6xl mx-auto">
       {/* 헤더 */}
       {!showOneClickModal && (
-        <div className="flex items-center gap-4 mb-6">
+        <div className="flex items-center gap-3 mb-6 flex-wrap">
           <button 
             onClick={() => navigate(-1)}
             className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-600"
@@ -767,15 +967,20 @@ export default function Wizard() {
             <ArrowLeft className="w-6 h-6" />
           </button>
           <h1 className="text-2xl font-bold text-slate-900">목표 수립 ({currentOrgName})</h1>
-          {/* v2: 업종 표시 */}
           <span className="text-sm text-slate-500 bg-slate-100 px-3 py-1 rounded-full">
-            업종: {companyIndustry}
+            {companyIndustry}
           </span>
+          {hasDraft && (
+            <span className="text-xs font-medium text-blue-700 bg-blue-100 px-2.5 py-1 rounded-full flex items-center gap-1">
+              <Bot className="w-3 h-3" />
+              CEO 초안 기반
+            </span>
+          )}
         </div>
       )}
 
-      {/* 모달: 수립 방식 선택 */}
-      {showOneClickModal && (
+      {/* 모달: 수립 방식 선택 (초안이 없을 때만) */}
+      {showOneClickModal && !hasDraft && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl p-8 max-w-3xl w-full mx-4 relative">
             <button 
@@ -785,15 +990,22 @@ export default function Wizard() {
               <X className="w-6 h-6" />
             </button>
 
-            <h2 className="text-2xl font-bold text-slate-900 mb-6">{currentOrgName} 목표 수립</h2>
-            <p className="text-slate-600 mb-6">어떤 방법으로 수립하시겠습니까?</p>
+            <h2 className="text-2xl font-bold text-slate-900 mb-2">{currentOrgName} 목표 수립</h2>
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-6">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0" />
+                <p className="text-sm text-amber-800">
+                  CEO가 배포한 초안이 아직 없습니다. 직접 수립하거나 AI를 활용해 생성하세요.
+                </p>
+              </div>
+            </div>
 
             <div className="grid grid-cols-2 gap-6">
               <div className="border-2 border-slate-200 rounded-xl p-6 hover:border-blue-600 transition-all cursor-pointer">
                 <div className="text-3xl mb-3">🤖</div>
-                <h3 className="text-lg font-bold text-slate-900 mb-2">원클릭 전체 생성</h3>
+                <h3 className="text-lg font-bold text-slate-900 mb-2">AI 전체 생성</h3>
                 <p className="text-sm text-slate-600 mb-4">
-                  AI가 조직정보를 분석하여 목표+KR+가중치+목표값+등급구간을 한번에 생성합니다.
+                  AI가 조직정보를 분석하여 목표+KR을 한번에 생성합니다.
                 </p>
                 <button
                   onClick={handleOneClickGenerate}
@@ -807,7 +1019,7 @@ export default function Wizard() {
                 <div className="text-3xl mb-3">📝</div>
                 <h3 className="text-lg font-bold text-slate-900 mb-2">위저드로 직접 수립</h3>
                 <p className="text-sm text-slate-600 mb-4">
-                  5단계를 따라가며 직접 수립합니다. AI가 각 단계에서 80%를 채워줍니다.
+                  단계를 따라가며 직접 수립합니다. AI가 각 단계에서 보조합니다.
                 </p>
                 <button
                   onClick={handleStartWizard}
@@ -1102,7 +1314,33 @@ export default function Wizard() {
               </div>
             </div>
 
-            <p className="text-slate-600">🤖 AI가 5개 목표 후보를 생성했습니다. 3~5개를 선택해주세요.</p>
+            <p className="text-slate-600">
+              {hasDraft 
+                ? '📋 CEO가 배포한 초안 목표입니다. 검토 후 선택/수정/추가하세요.' 
+                : '🤖 AI가 목표 후보를 생성했습니다. 3~5개를 선택해주세요.'}
+            </p>
+
+            {/* 상위 조직 목표 참조 (접이식) */}
+            {parentObjectives.length > 0 && (
+              <details className="bg-violet-50 border border-violet-200 rounded-xl">
+                <summary className="cursor-pointer px-4 py-3 flex items-center gap-2 text-sm font-semibold text-violet-900">
+                  <GitBranch className="w-4 h-4 text-violet-600" />
+                  상위 조직 목표 참조 ({parentObjectives.length}개)
+                </summary>
+                <div className="px-4 pb-3 space-y-1.5">
+                  {parentObjectives.map(po => (
+                    <div key={po.id} className="flex items-center gap-2 bg-white/60 rounded-lg px-3 py-1.5">
+                      <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${getBIIColor(po.biiType as BIIType).bg} ${getBIIColor(po.biiType as BIIType).text}`}>
+                        {po.biiType}
+                      </span>
+                      <span className="text-xs text-violet-600 font-medium">{po.orgName}</span>
+                      <span className="text-xs text-slate-400">›</span>
+                      <span className="text-sm text-slate-800">{po.name}</span>
+                    </div>
+                  ))}
+                </div>
+              </details>
+            )}
 
             <div className="grid grid-cols-2 gap-4">
               {objectives.map((obj) => {
@@ -1190,6 +1428,22 @@ export default function Wizard() {
                               </span>
                               <span className="text-xs text-slate-600">{obj.perspective} 관점</span>
                             </div>
+                            {/* 상위 목표 연결 배지 */}
+                            {(() => {
+                              const parentObj = parentObjectives.find(po => po.id === obj.parentObjId);
+                              return parentObj ? (
+                                <div className="flex items-center gap-1.5 mt-2 bg-violet-50 border border-violet-200 rounded-lg px-2 py-1">
+                                  <Link2 className="w-3 h-3 text-violet-500 flex-shrink-0" />
+                                  <span className="text-xs text-violet-700 truncate">
+                                    ← {parentObj.orgName}: {parentObj.name}
+                                  </span>
+                                </div>
+                              ) : obj.source === 'ai_draft' ? (
+                                <div className="flex items-center gap-1 mt-2">
+                                  <span className="text-xs text-slate-400">독립 목표</span>
+                                </div>
+                              ) : null;
+                            })()}
                           </div>
                         )}
                       </div>
@@ -1245,6 +1499,67 @@ export default function Wizard() {
         {/* Step 2: KR 설정 (수정 기능 포함) */}
         {currentStep === 2 && (
           <div className="space-y-6">
+            {/* AI 초안 안내 배너 */}
+            {hasDraft && (
+              <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 flex items-start gap-3">
+                <Bot className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="text-blue-900 font-semibold text-sm">CEO가 배포한 AI 초안이 로딩되었습니다</p>
+                  <p className="text-blue-700 text-xs mt-1">
+                    목표와 KR을 검토한 후 자유롭게 수정하세요. 수정이 완료되면 "최종 확인" 단계에서 제출합니다.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* ── 상위 조직 Cascading 시각화 ── */}
+            {parentObjectives.length > 0 && (
+              <div className="bg-gradient-to-r from-violet-50 to-blue-50 border border-violet-200 rounded-xl p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <GitBranch className="w-4 h-4 text-violet-600" />
+                  <span className="text-sm font-semibold text-violet-900">상위 조직 목표 연결</span>
+                </div>
+                <div className="space-y-2">
+                  {objectives.filter(o => o.selected).map(obj => {
+                    const parentObj = parentObjectives.find(po => po.id === (obj as any).parentObjId);
+                    const biiColor = getBIIColor(obj.biiType);
+                    return (
+                      <div key={obj.id} className="flex items-center gap-2 bg-white/70 rounded-lg px-3 py-2">
+                        {/* 내 목표 */}
+                        <div className="flex-1 min-w-0 flex items-center gap-2">
+                          <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${biiColor.bg} ${biiColor.text}`}>
+                            {obj.biiType}
+                          </span>
+                          <span className="text-sm text-slate-900 truncate">{obj.name}</span>
+                        </div>
+                        {/* 연결 화살표 */}
+                        {parentObj ? (
+                          <>
+                            <div className="flex items-center gap-1 flex-shrink-0">
+                              <div className="w-8 h-0.5 bg-violet-400" />
+                              <Link2 className="w-3.5 h-3.5 text-violet-500" />
+                              <div className="w-8 h-0.5 bg-violet-400" />
+                            </div>
+                            <div className="flex items-center gap-1.5 bg-violet-100 rounded-lg px-2.5 py-1.5 flex-shrink-0 max-w-[240px]">
+                              <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${getBIIColor(parentObj.biiType as BIIType).bg} ${getBIIColor(parentObj.biiType as BIIType).text}`}>
+                                {parentObj.biiType}
+                              </span>
+                              <div className="min-w-0">
+                                <div className="text-xs text-violet-600 font-medium">{parentObj.orgName}</div>
+                                <div className="text-xs text-violet-800 truncate">{parentObj.name}</div>
+                              </div>
+                            </div>
+                          </>
+                        ) : (
+                          <span className="text-xs text-slate-400 bg-slate-100 px-2 py-1 rounded flex-shrink-0">독립 목표</span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             <h2 className="text-xl font-bold text-slate-900">KR(핵심결과) 설정</h2>
 
             <div className="flex gap-2 border-b border-slate-200 overflow-x-auto">
