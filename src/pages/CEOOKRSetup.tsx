@@ -1645,7 +1645,7 @@ export default function CEOOKRSetup() {
                     <textarea
                       value={cycleMessage}
                       onChange={(e) => setCycleMessage(e.target.value)}
-                      placeholder="AI가 생성한 초안을 바탕으로 조직 OKR을 수정/확정해주세요."
+                      placeholder="CEO가 작성한 초안을 바탕으로 조직 OKR을 수정/확정해주세요."
                       rows={3}
                       className="w-full border border-slate-300 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none"
                     />
