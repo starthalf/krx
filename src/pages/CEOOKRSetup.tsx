@@ -279,8 +279,17 @@ export default function CEOOKRSetup() {
         .limit(1);
 
       if (cycles && cycles.length > 0 && cycles[0].cycle_started_at) {
-        setCycleStarted(true);
-        setCurrentStep(3);
+        const cycleStatus = cycles[0].status;
+        if (cycleStatus === 'paused') {
+          // 일시중지 상태 → 초안 재생성 단계
+          setCycleStarted(false);
+          setAllDraftsComplete(false);
+          setOrgDraftStatuses([]);
+          setCurrentStep(2);
+        } else if (cycleStatus === 'in_progress') {
+          setCycleStarted(true);
+          setCurrentStep(3);
+        }
       }
 
     } catch (err) {
@@ -655,13 +664,12 @@ export default function CEOOKRSetup() {
           // DB에 ai_draft로 저장
           let savedCount = 0;
           
-          // 기존 ai_draft 삭제
+          // 기존 초안 삭제 (source 관계없이 — 조직장이 수정한 것도 포함)
           const { data: existingObjs } = await supabase
             .from('objectives')
             .select('id')
             .eq('org_id', org.id)
-            .eq('period', '2025-H1')
-            .eq('source', 'ai_draft');
+            .eq('period', '2025-H1');
 
           if (existingObjs && existingObjs.length > 0) {
             const ids = existingObjs.map(o => o.id);
@@ -892,6 +900,7 @@ export default function CEOOKRSetup() {
       }
 
       setCycleStarted(false);
+      setAllDraftsComplete(false);
       setOrgDraftStatuses([]);
       setCurrentStep(2);
       alert('✅ 초안 재생성 단계로 돌아왔습니다. "전체 초안 재생성" 버튼을 눌러주세요.');
