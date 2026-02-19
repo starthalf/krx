@@ -1664,19 +1664,6 @@ export default function Wizard() {
         {/* Step 2: OKR 검토 및 수정 — Objective별 통합 카드 */}
         {currentStep === 2 && (
           <div className="space-y-6">
-            {/* AI 초안 안내 배너 */}
-            {hasDraft && (
-              <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 flex items-start gap-3">
-                <Bot className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
-                <div>
-                  <p className="text-blue-900 font-semibold text-sm">CEO가 배포한 AI 초안이 로딩되었습니다</p>
-                  <p className="text-blue-700 text-xs mt-1">
-                    각 목표와 KR을 검토한 후 자유롭게 수정하세요. 수정이 완료되면 "최종 확인" 단계에서 제출합니다.
-                  </p>
-                </div>
-              </div>
-            )}
-
             <h2 className="text-xl font-bold text-slate-900">OKR 검토 및 수정</h2>
 
             {/* ── Objective별 통합 카드 ── */}
