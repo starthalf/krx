@@ -4,7 +4,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { 
   ChevronLeft, ChevronRight, Bot, Target, RefreshCw, Pencil, Trash2, 
   ChevronDown, BookOpen, Plus, X, ArrowLeft, Loader2, Check, Search, Star, Database,
-  GitBranch, Link2, AlertCircle, FileCheck, Clock, MessageSquare, Send, Users
+  GitBranch, Link2, AlertCircle, FileCheck, Clock, MessageSquare, Send, Users, Sparkles
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useStore } from '../store/useStore';
@@ -83,6 +83,13 @@ export default function Wizard() {
 
   // [New] 회사 업종 (DB에서 가져옴 → Edge Function에 전달)
   const [companyIndustry, setCompanyIndustry] = useState<string>('SaaS/클라우드');
+
+  // [New] Objective별 AI KR 재생성
+  const [aiRegenObjId, setAiRegenObjId] = useState<string | null>(null); // 현재 컨텍스트 입력 중인 Obj
+  const [aiRegenContext, setAiRegenContext] = useState('');
+  const [aiRegeneratingObjId, setAiRegeneratingObjId] = useState<string | null>(null); // 실제 생성 중인 Obj
+  // Pool 모달이 어떤 Objective용인지
+  const [poolTargetObjId, setPoolTargetObjId] = useState<string | null>(null);
 
   // [New] Pool에서 선택 모달
   const [showPoolModal, setShowPoolModal] = useState(false);
@@ -408,7 +415,11 @@ export default function Wizard() {
   };
 
   // [New] Pool 모달 열기 - DB에서 KPI 검색
-  const handleOpenPoolModal = async () => {
+  const handleOpenPoolModal = async (targetObjId?: string) => {
+    if (targetObjId) {
+      setPoolTargetObjId(targetObjId);
+      setSelectedObjectiveTab(targetObjId);
+    }
     setShowPoolModal(true);
     setPoolSelectedIds(new Set());
     setPoolSearch('');
@@ -472,13 +483,14 @@ export default function Wizard() {
 
   // [New] Pool에서 선택한 KPI를 KR로 추가
   const handleAddFromPool = () => {
-    const currentObj = objectives.find(o => o.id === selectedObjectiveTab);
+    const targetId = poolTargetObjId || selectedObjectiveTab;
+    const currentObj = objectives.find(o => o.id === targetId);
     if (!currentObj) return;
 
     const selectedPoolKPIs = poolKPIs.filter(k => poolSelectedIds.has(k.id));
     const newKRs: (KRCandidate & { selected: boolean })[] = selectedPoolKPIs.map((pk, idx) => ({
       id: `kr-pool-${Date.now()}-${idx}`,
-      objectiveId: selectedObjectiveTab,
+      objectiveId: targetId,
       name: pk.name,
       definition: pk.definition || '',
       formula: pk.formula || '',
@@ -499,26 +511,32 @@ export default function Wizard() {
 
     setKrs(prev => [...prev, ...newKRs]);
     setShowPoolModal(false);
-    alert(`✅ ${newKRs.length}개 KR을 Pool에서 추가했습니다!`);
+    setPoolTargetObjId(null);
   };
 
   // AI KR 추천 (v2: industry, orgType 추가)
-  const handleAIRegenerateKRs = async () => {
-    const currentObj = objectives.find(o => o.id === selectedObjectiveTab);
+  const handleAIRegenerateKRs = async (targetObjId?: string, userContext?: string) => {
+    const objId = targetObjId || selectedObjectiveTab;
+    const currentObj = objectives.find(o => o.id === objId);
     if (!currentObj) return;
 
-    setIsAIGenerating(true);
+    setAiRegeneratingObjId(objId);
     
     try {
+      // 상위 목표 정보
+      const parentObj = parentObjectives.find(po => po.id === currentObj.parentObjId);
+
       const { data, error } = await supabase.functions.invoke('generate-krs', {
         body: {
           objectiveName: currentObj.name,
           objectiveType: currentObj.biiType,
           perspective: currentObj.perspective,
-          // v2: 새 파라미터 추가
           orgType: currentOrg?.orgType || 'Front',
           functionTags: currentOrg?.functionTags || [],
-          industry: companyIndustry
+          industry: companyIndustry,
+          // 새 파라미터: 상위 목표 + 사용자 컨텍스트
+          parentObjectiveName: parentObj?.name || '',
+          userContext: userContext || ''
         }
       });
 
@@ -527,7 +545,7 @@ export default function Wizard() {
       if (data && data.krs) {
         const aiKRs: (KRCandidate & { selected: boolean })[] = data.krs.map((item: any, idx: number) => ({
           id: `kr-ai-${Date.now()}-${idx}`,
-          objectiveId: selectedObjectiveTab,
+          objectiveId: objId,
           name: item.name,
           definition: item.definition || '',
           formula: item.formula || '실적 측정',
@@ -547,18 +565,18 @@ export default function Wizard() {
         }));
         
         setKrs(prev => [
-          ...prev.filter(kr => kr.objectiveId !== selectedObjectiveTab),
+          ...prev.filter(kr => kr.objectiveId !== objId),
           ...aiKRs
         ]);
-        
-        alert('🤖 AI가 해당 목표에 맞는 새로운 KR을 생성했습니다!');
       }
       
     } catch (error: any) {
       console.error('AI KR Error:', error);
       alert(`AI 생성 실패: ${error.message}`);
     } finally {
-      setIsAIGenerating(false);
+      setAiRegeneratingObjId(null);
+      setAiRegenObjId(null);
+      setAiRegenContext('');
     }
   };
 
@@ -1162,10 +1180,17 @@ export default function Wizard() {
                   <h2 className="text-xl font-bold text-slate-900">KR Pool에서 선택</h2>
                   <span className="text-sm text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">{companyIndustry}</span>
                 </div>
-                <button onClick={() => setShowPoolModal(false)} className="text-slate-400 hover:text-slate-600">
+                <button onClick={() => { setShowPoolModal(false); setPoolTargetObjId(null); }} className="text-slate-400 hover:text-slate-600">
                   <X className="w-6 h-6" />
                 </button>
               </div>
+              {poolTargetObjId && (
+                <div className="mb-3 px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg">
+                  <p className="text-xs text-blue-700">
+                    <span className="font-medium">대상 목표:</span> {objectives.find(o => o.id === poolTargetObjId)?.name}
+                  </p>
+                </div>
+              )}
 
               {/* 검색 & 필터 */}
               <div className="flex gap-3">
@@ -1292,7 +1317,7 @@ export default function Wizard() {
               </div>
               <div className="flex gap-3">
                 <button
-                  onClick={() => setShowPoolModal(false)}
+                  onClick={() => { setShowPoolModal(false); setPoolTargetObjId(null); }}
                   className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-100"
                 >
                   취소
@@ -1814,16 +1839,76 @@ export default function Wizard() {
                       })
                     )}
 
-                    {/* Objective 내 KR 추가 버튼 */}
-                    <button
-                      onClick={() => {
-                        setSelectedObjectiveTab(obj.id);
-                        handleAddKR();
-                      }}
-                      className="w-full border border-dashed border-slate-300 rounded-xl py-2.5 text-xs text-slate-500 hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50/30 transition-colors flex items-center justify-center gap-1"
-                    >
-                      <Plus className="w-3 h-3" /> KR 추가
-                    </button>
+                    {/* Objective 내 액션 바 */}
+                    <div className="flex items-center gap-2 pt-1">
+                      <button
+                        onClick={() => {
+                          setSelectedObjectiveTab(obj.id);
+                          handleAddKR();
+                        }}
+                        className="flex-1 border border-dashed border-slate-300 rounded-lg py-2 text-xs text-slate-500 hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50/30 transition-colors flex items-center justify-center gap-1"
+                      >
+                        <Plus className="w-3 h-3" /> KR 추가
+                      </button>
+                      <button
+                        onClick={() => {
+                          if (aiRegenObjId === obj.id) {
+                            setAiRegenObjId(null);
+                            setAiRegenContext('');
+                          } else {
+                            setAiRegenObjId(obj.id);
+                            setAiRegenContext('');
+                          }
+                        }}
+                        disabled={aiRegeneratingObjId === obj.id}
+                        className="px-3 py-2 border border-slate-200 text-slate-600 rounded-lg hover:bg-blue-50 hover:border-blue-300 hover:text-blue-700 text-xs font-medium flex items-center gap-1.5 transition-colors disabled:opacity-50"
+                      >
+                        <RefreshCw className={`w-3 h-3 ${aiRegeneratingObjId === obj.id ? 'animate-spin' : ''}`} />
+                        {aiRegeneratingObjId === obj.id ? '생성 중...' : 'AI KR'}
+                      </button>
+                      <button
+                        onClick={() => handleOpenPoolModal(obj.id)}
+                        className="px-3 py-2 border border-slate-200 text-slate-600 rounded-lg hover:bg-violet-50 hover:border-violet-300 hover:text-violet-700 text-xs font-medium flex items-center gap-1.5 transition-colors"
+                      >
+                        <Database className="w-3 h-3" /> Pool
+                      </button>
+                    </div>
+
+                    {/* AI 재생성 컨텍스트 입력 패널 */}
+                    {aiRegenObjId === obj.id && (
+                      <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 space-y-2 mt-1">
+                        <div className="flex items-center gap-2">
+                          <Sparkles className="w-3.5 h-3.5 text-blue-600" />
+                          <span className="text-xs font-medium text-blue-800">AI에게 KR 재생성 요청</span>
+                        </div>
+                        <textarea
+                          value={aiRegenContext}
+                          onChange={(e) => setAiRegenContext(e.target.value)}
+                          placeholder={`예: "${parentObjectives.find(po => po.id === obj.parentObjId)?.name || '상위 목표'}"와 더 잘 맞는 KR로 변경해줘`}
+                          className="w-full border border-blue-200 rounded-lg px-3 py-2 text-sm resize-none focus:ring-2 focus:ring-blue-400 outline-none bg-white"
+                          rows={2}
+                        />
+                        <div className="flex items-center justify-between">
+                          <p className="text-xs text-blue-500">⚠ 기존 KR이 모두 새로 생성된 KR로 대체됩니다</p>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => { setAiRegenObjId(null); setAiRegenContext(''); }}
+                              className="px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                            >
+                              취소
+                            </button>
+                            <button
+                              onClick={() => handleAIRegenerateKRs(obj.id, aiRegenContext)}
+                              disabled={aiRegeneratingObjId === obj.id}
+                              className="px-4 py-1.5 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center gap-1.5"
+                            >
+                              <RefreshCw className={`w-3 h-3 ${aiRegeneratingObjId === obj.id ? 'animate-spin' : ''}`} />
+                              재생성
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
 
                     {/* KR 개수 표시 */}
                     {objKRs.length > 0 && (
@@ -1836,23 +1921,6 @@ export default function Wizard() {
               );
             })}
 
-            {/* 하단 액션 */}
-            <div className="flex gap-2">
-              <button
-                onClick={handleAIRegenerateKRs}
-                disabled={isAIGenerating}
-                className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 text-sm font-medium flex items-center gap-2 disabled:opacity-50"
-              >
-                <RefreshCw className={`w-4 h-4 ${isAIGenerating ? 'animate-spin' : ''}`} />
-                {isAIGenerating ? '생성 중...' : 'AI KR 재추천'}
-              </button>
-              <button
-                onClick={handleOpenPoolModal}
-                className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 text-sm font-medium flex items-center gap-2"
-              >
-                <Database className="w-4 h-4" /> Pool에서 선택
-              </button>
-            </div>
           </div>
         )}
         {/* Step 3: 목표치 설정 */}
