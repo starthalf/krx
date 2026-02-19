@@ -836,6 +836,122 @@ export default function CEOOKRSetup() {
     }
   };
 
+  // ─── 사이클 일시중지 (되돌리기) ─────────────────────────
+  const handleResetCycle = async () => {
+    if (!company?.id) return;
+
+    const msg = cycleStarted
+      ? '⚠️ 진행 중인 사이클을 중지하고 초안 생성 단계로 되돌립니다.\n\n' +
+        '• 사이클 상태가 "중지됨"으로 변경됩니다\n' +
+        '• 조직장에게 수립 일시중지 알림이 발송됩니다\n' +
+        '• 이미 제출/승인된 OKR은 유지됩니다\n\n' +
+        '계속하시겠습니까?'
+      : '초안 생성 단계로 되돌리시겠습니까?';
+
+    if (!confirm(msg)) return;
+
+    try {
+      // 진행 중 사이클 → paused로 변경
+      if (cycleStarted) {
+        const { error } = await supabase
+          .from('okr_planning_cycles')
+          .update({ status: 'paused' })
+          .eq('company_id', company.id)
+          .eq('period', '2025-H1')
+          .eq('status', 'in_progress');
+
+        if (error) throw error;
+
+        // 알림 발송 (선택적)
+        const childOrgs = organizations.filter(o => o.level !== '전사');
+        const notifications = [];
+        for (const org of childOrgs) {
+          const { data: orgMembers } = await supabase
+            .from('user_roles')
+            .select('profile_id, roles!inner(level)')
+            .eq('org_id', org.id);
+
+          const leaders = orgMembers?.filter((m: any) => m.roles?.level >= 50) || [];
+          for (const leader of leaders) {
+            notifications.push({
+              recipient_id: leader.profile_id,
+              sender_id: user?.id,
+              sender_name: '대표이사',
+              type: 'okr_cycle_paused',
+              title: 'OKR 수립 사이클이 일시중지되었습니다',
+              message: '전사 OKR 재조정 중입니다. 잠시 후 재개 알림을 보내드리겠습니다.',
+              resource_type: 'cycle',
+              org_id: org.id,
+              priority: 'medium',
+            });
+          }
+        }
+        if (notifications.length > 0) {
+          await supabase.from('notifications').insert(notifications);
+        }
+      }
+
+      setCycleStarted(false);
+      setCurrentStep(2);
+      alert('✅ 사이클이 일시중지되었습니다. 초안을 재생성할 수 있습니다.');
+    } catch (err: any) {
+      console.error('사이클 중지 실패:', err);
+      alert('실패: ' + err.message);
+    }
+  };
+
+  // ─── 사이클 + 하위 초안 전체 리셋 (위험) ──────────────
+  const handleFullReset = async () => {
+    if (!company?.id) return;
+
+    const msg =
+      '🚨 전체 리셋 — 매우 위험한 작업입니다!\n\n' +
+      '다음 항목이 모두 삭제됩니다:\n' +
+      '• 진행 중인 사이클\n' +
+      '• 하위 조직의 모든 AI 초안 (objectives + KRs)\n' +
+      '• 조직장이 수정/제출한 내용도 포함\n\n' +
+      '전사 OKR은 유지됩니다.\n\n' +
+      '정말 리셋하시겠습니까?';
+
+    if (!confirm(msg)) return;
+    if (!confirm('한 번 더 확인합니다. 되돌릴 수 없습니다. 진행하시겠습니까?')) return;
+
+    try {
+      // 1. 사이클 삭제/중지
+      await supabase
+        .from('okr_planning_cycles')
+        .update({ status: 'cancelled' })
+        .eq('company_id', company.id)
+        .eq('period', '2025-H1');
+
+      // 2. 하위 조직 objectives + KRs 삭제
+      const companyOrg = organizations.find(o => o.level === '전사');
+      const childOrgs = organizations.filter(o => o.level !== '전사');
+
+      for (const org of childOrgs) {
+        const { data: objs } = await supabase
+          .from('objectives')
+          .select('id')
+          .eq('org_id', org.id)
+          .eq('period', '2025-H1');
+
+        if (objs && objs.length > 0) {
+          const ids = objs.map(o => o.id);
+          await supabase.from('key_results').delete().in('objective_id', ids);
+          await supabase.from('objectives').delete().in('id', ids);
+        }
+      }
+
+      setCycleStarted(false);
+      setOrgDraftStatuses([]);
+      setCurrentStep(2);
+      alert('✅ 전체 리셋 완료. 하위 조직 초안을 새로 생성할 수 있습니다.');
+    } catch (err: any) {
+      console.error('전체 리셋 실패:', err);
+      alert('실패: ' + err.message);
+    }
+  };
+
   // ─── Objective 수정 핸들러 ─────────────────────────────
 
   const handleObjChange = (objId: string, field: string, value: any) => {
@@ -1448,6 +1564,58 @@ export default function CEOOKRSetup() {
                       </span>
                     </div>
                   </div>
+
+                  {/* 재생성 옵션 */}
+                  {!cycleStarted ? (
+                    <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+                      <div className="flex items-start gap-3">
+                        <RefreshCw className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" />
+                        <div className="flex-1">
+                          <p className="text-amber-900 font-semibold text-sm">초안을 다시 생성하시겠습니까?</p>
+                          <p className="text-amber-700 text-xs mt-1">
+                            기존 AI 초안이 삭제되고 새로 생성됩니다. 조직장이 수정한 내용도 초기화됩니다.
+                          </p>
+                          <button
+                            onClick={() => {
+                              if (!confirm('⚠️ 기존 AI 초안이 모두 삭제되고 새로 생성됩니다.\n조직장이 수정한 내용도 초기화됩니다.\n\n계속하시겠습니까?')) return;
+                              setOrgDraftStatuses([]);
+                              handleGenerateAllDrafts();
+                            }}
+                            className="mt-3 px-4 py-2 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700 flex items-center gap-2"
+                          >
+                            <RefreshCw className="w-4 h-4" /> 전체 초안 재생성
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+                      <div className="flex items-start gap-3">
+                        <AlertCircle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
+                        <div className="flex-1">
+                          <p className="text-red-900 font-semibold text-sm">사이클 진행 중 — 재생성하려면 먼저 사이클을 중지해야 합니다</p>
+                          <p className="text-red-700 text-xs mt-1">
+                            조직장에게 일시중지 알림이 발송되며, 이미 제출된 OKR은 유지됩니다.
+                          </p>
+                          <div className="flex gap-2 mt-3">
+                            <button
+                              onClick={handleResetCycle}
+                              className="px-4 py-2 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700 flex items-center gap-2"
+                            >
+                              ⏸️ 사이클 일시중지 후 재생성
+                            </button>
+                            <button
+                              onClick={handleFullReset}
+                              className="px-4 py-2 border-2 border-red-400 text-red-700 rounded-lg text-sm font-medium hover:bg-red-100 flex items-center gap-2"
+                            >
+                              🚨 전체 리셋 (하위 초안 모두 삭제)
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   <div className="flex gap-3">
                     <button
                       onClick={() => navigate('/okr-map')}
@@ -1556,6 +1724,32 @@ export default function CEOOKRSetup() {
                       <GitBranch className="w-4 h-4" /> OKR Map 보기
                     </button>
                   </div>
+
+                  {/* 사이클 관리 (접이식) */}
+                  <details className="mt-8 text-left max-w-lg mx-auto">
+                    <summary className="cursor-pointer text-sm text-slate-400 hover:text-slate-600 flex items-center gap-1.5 justify-center">
+                      ⚙️ 사이클 관리 (고급)
+                    </summary>
+                    <div className="mt-4 space-y-3 bg-slate-50 border border-slate-200 rounded-xl p-4">
+                      <p className="text-xs text-slate-500">전사 OKR 재수립이나 초안 재생성이 필요한 경우 아래 옵션을 사용하세요.</p>
+                      
+                      <button
+                        onClick={handleResetCycle}
+                        className="w-full py-2.5 border border-amber-300 text-amber-700 bg-amber-50 rounded-lg text-sm font-medium hover:bg-amber-100 flex items-center justify-center gap-2"
+                      >
+                        ⏸️ 사이클 일시중지 & 초안 재생성 단계로
+                      </button>
+                      <p className="text-xs text-slate-400 px-1">사이클을 중지하고 Step 2로 돌아갑니다. 이미 제출된 OKR은 유지됩니다.</p>
+
+                      <button
+                        onClick={handleFullReset}
+                        className="w-full py-2.5 border-2 border-red-300 text-red-600 rounded-lg text-sm font-medium hover:bg-red-50 flex items-center justify-center gap-2"
+                      >
+                        🚨 전체 리셋 (사이클 취소 + 하위 초안 삭제)
+                      </button>
+                      <p className="text-xs text-red-400 px-1">사이클을 취소하고 하위 조직의 모든 OKR을 삭제합니다. 되돌릴 수 없습니다.</p>
+                    </div>
+                  </details>
                 </div>
               )}
             </div>
@@ -1574,4 +1768,4 @@ export default function CEOOKRSetup() {
       </div>
     </div>
   );
-} 
+}
