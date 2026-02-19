@@ -1664,7 +1664,7 @@ export default function Wizard() {
         {/* Step 2: OKR 검토 및 수정 — Objective별 통합 카드 */}
         {currentStep === 2 && (
           <div className="space-y-6">
-            <h2 className="text-xl font-bold text-slate-900">OKR 검토 및 수정</h2>
+            <h2 className="text-xl font-bold text-slate-900">결과(Key Result) 검토 및 수정</h2>
 
             {/* ── Objective별 통합 카드 ── */}
             {objectives.filter(o => o.selected).map((obj, objIdx) => {
