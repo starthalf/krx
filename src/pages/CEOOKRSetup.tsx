@@ -1541,7 +1541,7 @@ export default function CEOOKRSetup() {
                       <div className="flex items-start gap-3">
                         <AlertCircle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
                         <div className="flex-1">
-                          <p className="text-red-900 font-semibold text-sm">사이클 진행 중 — 재생성 하면 지금까지 조직장들이 진행한 작업들이 모두 초기화 됩니다</p>
+                          <p className="text-red-900 font-semibold text-sm">사이클 진행 중 — 재생성하려면 먼저 사이클을 중지해야 합니다</p>
                           <p className="text-red-700 text-xs mt-1">
                             사이클을 중지하면 조직장에게 일시중지 알림이 발송됩니다. 재생성 후 사이클을 다시 시작할 수 있습니다.
                           </p>
@@ -1665,22 +1665,15 @@ export default function CEOOKRSetup() {
                     </button>
                   </div>
 
-                  {/* 사이클 관리 (접이식) */}
-                  <details className="mt-8 text-left max-w-lg mx-auto">
-                    <summary className="cursor-pointer text-sm text-slate-400 hover:text-slate-600 flex items-center gap-1.5 justify-center">
-                      ⚙️ 사이클 관리
-                    </summary>
-                    <div className="mt-4 bg-slate-50 border border-slate-200 rounded-xl p-4">
-                      <p className="text-xs text-slate-500 mb-3">전사 OKR을 수정했거나 초안을 다시 만들어야 하는 경우 사용하세요.</p>
-                      <button
-                        onClick={handleResetCycle}
-                        className="w-full py-2.5 border border-amber-300 text-amber-700 bg-amber-50 rounded-lg text-sm font-medium hover:bg-amber-100 flex items-center justify-center gap-2"
-                      >
-                        ⏸️ 사이클 중지 → 초안 재생성 단계로
-                      </button>
-                      <p className="text-xs text-slate-400 mt-2 px-1">사이클이 중지되고 Step 2로 돌아갑니다. 조직장에게 일시중지 알림이 발송됩니다.</p>
-                    </div>
-                  </details>
+                  {/* 하단 관리 링크 */}
+                  <div className="mt-8 pt-4 border-t border-slate-100 flex items-center justify-center gap-6">
+                    <button
+                      onClick={handleResetCycle}
+                      className="text-sm text-slate-400 hover:text-amber-600 flex items-center gap-1.5 transition-colors"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" /> 초안 재생성 (사이클 중지)
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
