@@ -95,6 +95,7 @@ function daysUntil(dateStr: string) {
 export default function PlanningCycleManager() {
   const { user } = useAuth();
   const company = useStore(state => state.company);
+  const organizations = useStore(state => state.organizations);
 
   const [cycles, setCycles] = useState<PlanningCycle[]>([]);
   const [loading, setLoading] = useState(true);
@@ -303,6 +304,62 @@ export default function PlanningCycleManager() {
         .delete()
         .eq('id', cycleId);
       if (error) throw error;
+      fetchCycles();
+    } catch (err: any) {
+      alert(`삭제 실패: ${err.message}`);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // ─── 하위 조직 OKR 전체 삭제 ────────────────────────
+  const handleDeleteAllChildOKRs = async (cycle: PlanningCycle) => {
+    const childOrgs = organizations.filter(o => o.level !== '전사');
+    if (childOrgs.length === 0) {
+      alert('하위 조직이 없습니다.');
+      return;
+    }
+
+    const msg =
+      `🚨 하위 조직 OKR 전체 삭제\n\n` +
+      `대상: ${childOrgs.length}개 조직 (전사 OKR 제외)\n` +
+      `기간: ${cycle.period}\n\n` +
+      `• 모든 하위 조직의 Objectives와 KR이 삭제됩니다\n` +
+      `• 조직장이 수정·제출한 내용도 모두 삭제됩니다\n` +
+      `• 전사 OKR은 유지됩니다\n\n` +
+      `이 작업은 되돌릴 수 없습니다. 계속하시겠습니까?`;
+
+    if (!confirm(msg)) return;
+    if (!confirm('정말 삭제하시겠습니까? 마지막 확인입니다.')) return;
+
+    setActionLoading(true);
+    try {
+      let deletedObjCount = 0;
+      let deletedKrCount = 0;
+
+      for (const org of childOrgs) {
+        const { data: objs } = await supabase
+          .from('objectives')
+          .select('id')
+          .eq('org_id', org.id)
+          .eq('period', cycle.period);
+
+        if (objs && objs.length > 0) {
+          const ids = objs.map(o => o.id);
+          const { count: krCount } = await supabase
+            .from('key_results')
+            .delete()
+            .in('objective_id', ids)
+            .select('id', { count: 'exact', head: true });
+          
+          await supabase.from('key_results').delete().in('objective_id', ids);
+          await supabase.from('objectives').delete().in('id', ids);
+          
+          deletedObjCount += objs.length;
+        }
+      }
+
+      alert(`✅ 삭제 완료\n\n${childOrgs.length}개 조직에서 ${deletedObjCount}개 목표가 삭제되었습니다.\n\n전사 OKR 수립 페이지에서 초안을 다시 생성하세요.`);
       fetchCycles();
     } catch (err: any) {
       alert(`삭제 실패: ${err.message}`);
@@ -748,6 +805,18 @@ export default function PlanningCycleManager() {
                     </button>
                   ))}
                 </div>
+              </div>
+
+              {/* 하위 조직 OKR 삭제 */}
+              <div className="mt-3 pt-3 border-t border-slate-100 flex items-center justify-end">
+                <button
+                  onClick={() => handleDeleteAllChildOKRs(cycle)}
+                  disabled={actionLoading}
+                  className="text-xs text-red-400 hover:text-red-600 flex items-center gap-1.5 transition-colors disabled:opacity-50"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  하위 조직 OKR 전체 삭제 (전사 OKR 유지)
+                </button>
               </div>
             </div>
           </div>
