@@ -51,10 +51,10 @@ export default function Sidebar() {
 
   const navigation: NavItem[] = [
     { name: '대시보드', href: '/', icon: Home },
-    { name: '조직 OKR 수립', href: '/wizard', icon: Target },
-    // CEO/관리자 전용 (level >= 90)
+   // CEO/관리자 전용 (level >= 90)
     { name: '전사 OKR 수립', href: '/ceo-okr-setup', icon: ClipboardList, requiredLevel: 90 },
-    { name: '수립 현황', href: '/okr-setup', icon: Megaphone, requiredLevel: 90 },
+    { name: '조직 OKR 수립', href: '/wizard', icon: Target },
+       { name: '수립 현황', href: '/okr-setup', icon: Megaphone, requiredLevel: 90 },
     { name: 'OKR Map', href: '/okr-map', icon: GitBranch },
     {
       name: 'OKR 현황',
