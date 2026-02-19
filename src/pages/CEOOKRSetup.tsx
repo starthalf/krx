@@ -846,14 +846,39 @@ export default function CEOOKRSetup() {
     setPreviewOrg({ orgId, orgName, level });
     setPreviewLoading(true);
     try {
-      const { data } = await supabase
+      // 1. objectives 조회
+      const { data: objs, error: objError } = await supabase
         .from('objectives')
-        .select('id, name, bii_type, perspective, parent_obj_id, key_results(id, name, definition, formula)')
+        .select('id, name, bii_type, perspective, parent_obj_id')
         .eq('org_id', orgId)
         .eq('period', '2025-H1')
         .order('created_at', { ascending: true });
 
-      setPreviewOKRs(data || []);
+      if (objError) console.error('objectives 조회 에러:', objError);
+
+      if (!objs || objs.length === 0) {
+        console.warn('objectives 0건 — orgId:', orgId, 'period: 2025-H1');
+        setPreviewOKRs([]);
+        setPreviewLoading(false);
+        return;
+      }
+
+      // 2. 해당 objectives의 KR 조회
+      const objIds = objs.map(o => o.id);
+      const { data: krs, error: krError } = await supabase
+        .from('key_results')
+        .select('id, name, definition, formula, objective_id')
+        .in('objective_id', objIds);
+
+      if (krError) console.error('key_results 조회 에러:', krError);
+
+      // 3. objectives에 KR 매핑
+      const result = objs.map(obj => ({
+        ...obj,
+        key_results: (krs || []).filter(kr => kr.objective_id === obj.id),
+      }));
+
+      setPreviewOKRs(result);
     } catch (err) {
       console.error('미리보기 로드 실패:', err);
       setPreviewOKRs([]);
