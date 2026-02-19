@@ -1408,7 +1408,7 @@ export default function Wizard() {
         {currentStep === 1 && (
           <div className="space-y-6">
             <div className="flex items-center justify-between">
-              <h2 className="text-xl font-bold text-slate-900">목표(Objective) 검토 및 수정</h2>
+              <h2 className="text-xl font-bold text-slate-900">목표(Objective) 수립</h2>
               <div className="bg-gradient-to-br from-blue-50 to-violet-50 border border-blue-200 rounded-lg p-4">
                 <h4 className="text-sm font-semibold text-slate-900 mb-2">BII 밸런스</h4>
                 <div className="space-y-1 text-xs">
@@ -1664,7 +1664,7 @@ export default function Wizard() {
         {/* Step 2: OKR 검토 및 수정 — Objective별 통합 카드 */}
         {currentStep === 2 && (
           <div className="space-y-6">
-            <h2 className="text-xl font-bold text-slate-900">결과(Key Result) 검토 및 수정</h2>
+            <h2 className="text-xl font-bold text-slate-900">OKR 검토 및 수정</h2>
 
             {/* ── Objective별 통합 카드 ── */}
             {objectives.filter(o => o.selected).map((obj, objIdx) => {
@@ -1769,12 +1769,6 @@ export default function Wizard() {
                               )}
 
                               <div className="flex items-center gap-2 flex-shrink-0">
-                                <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${krBiiColor.bg} ${krBiiColor.text}`}>
-                                  {kr.biiType}
-                                </span>
-                                <span className={`px-1.5 py-0.5 rounded text-xs font-medium border ${categoryColor}`}>
-                                  {kr.kpiCategory}
-                                </span>
 
                                 {isEditing ? (
                                   <button
