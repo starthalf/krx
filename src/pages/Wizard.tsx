@@ -1445,9 +1445,10 @@ export default function Wizard() {
 
             {/* 상위 조직 목표 참조 (접이식) */}
             {parentObjectives.length > 0 && (
-              <details className="bg-violet-50 border border-violet-200 rounded-xl" open>
-                <summary className="cursor-pointer px-4 py-3 flex items-center gap-2 text-sm font-semibold text-violet-900">
-                  <GitBranch className="w-4 h-4 text-violet-600" />
+              <details className="bg-violet-50 border border-violet-200 rounded-xl">
+                <summary className="cursor-pointer px-4 py-2.5 flex items-center gap-1.5 text-xs font-medium text-violet-700 [&>*]:marker:hidden list-none">
+                  <ChevronRight className="w-3.5 h-3.5 text-violet-500 transition-transform [[open]>&]:rotate-90" />
+                  <GitBranch className="w-3.5 h-3.5 text-violet-500" />
                   상위 조직 목표 참조 ({parentObjectives.length}개)
                 </summary>
                 <div className="px-4 pb-3 space-y-3">
