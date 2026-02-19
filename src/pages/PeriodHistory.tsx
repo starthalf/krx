@@ -1,17 +1,19 @@
 // src/pages/PeriodHistory.tsx
 // 기간별 성과 히스토리 조회 페이지 (아카이브 데이터 열람)
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   Calendar, ChevronLeft, Building2, Target, TrendingUp,
   BarChart3, Users, Award, Loader2, ChevronDown, ChevronRight,
   Lock, Archive, Clock, AlertTriangle, CheckCircle2,
-  PieChart, ArrowUpRight, ArrowDownRight, Minus
+  ArrowUpRight, ArrowDownRight, Minus
 } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
 import { useStore } from '../store/useStore';
 import {
   fetchFiscalPeriod,
+  fetchFiscalPeriods,
   fetchPeriodSnapshots,
   fetchCompanyPeriodSummary,
   fetchArchivedPeriods,
@@ -22,7 +24,6 @@ import {
   PeriodSnapshot,
   CompanyPeriodSummary,
   PERIOD_STATUS_CONFIG,
-  GradeDistribution,
 } from '../types/period.types';
 
 // ─────────────────────────────────────────────────────────────
@@ -179,60 +180,115 @@ function OrgSnapshotCard({ snapshot, orgName, orgLevel, onViewDetails }: OrgSnap
 export default function PeriodHistory() {
   const navigate = useNavigate();
   const { periodId } = useParams<{ periodId: string }>();
-  const company = useStore(state => state.company);
+  const { profile } = useAuth();
   const organizations = useStore(state => state.organizations);
+  
+  // profile.company_id 사용
+  const companyId = profile?.company_id;
 
   // State
   const [loading, setLoading] = useState(true);
   const [period, setPeriod] = useState<FiscalPeriod | null>(null);
   const [snapshots, setSnapshots] = useState<PeriodSnapshot[]>([]);
   const [companySummary, setCompanySummary] = useState<CompanyPeriodSummary | null>(null);
-  const [archivedPeriods, setArchivedPeriods] = useState<FiscalPeriod[]>([]);
+  const [allPeriods, setAllPeriods] = useState<FiscalPeriod[]>([]);
   const [closeLogs, setCloseLogs] = useState<any[]>([]);
+  const [error, setError] = useState<string | null>(null);
   
   // 선택된 조직 스냅샷 상세
   const [selectedSnapshot, setSelectedSnapshot] = useState<PeriodSnapshot | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
+  
+  // 중복 로드 방지
+  const loadedRef = useRef<string | null>(null);
 
   // ─────────────────────────────────────────────────────────
   // Data Loading
   // ─────────────────────────────────────────────────────────
-  const loadData = useCallback(async () => {
-    if (!periodId || !company?.id) return;
-    
-    setLoading(true);
-    try {
-      // 기간 정보
-      const periodData = await fetchFiscalPeriod(periodId);
-      setPeriod(periodData);
-      
-      if (periodData && ['closed', 'archived'].includes(periodData.status)) {
-        // 스냅샷 목록
-        const snapshotData = await fetchPeriodSnapshots(periodId);
-        setSnapshots(snapshotData);
-        
-        // 전사 요약
-        const summaryData = await fetchCompanyPeriodSummary(periodId, company.id);
-        setCompanySummary(summaryData);
-        
-        // 마감 로그
-        const logs = await fetchPeriodCloseLogs(periodId);
-        setCloseLogs(logs);
+  useEffect(() => {
+    const loadData = async () => {
+      if (!companyId) {
+        setLoading(false);
+        return;
       }
       
-      // 아카이브된 기간 목록 (사이드바용)
-      const archived = await fetchArchivedPeriods(company.id);
-      setArchivedPeriods(archived);
-    } catch (err) {
-      console.error('데이터 로드 실패:', err);
-    } finally {
-      setLoading(false);
-    }
-  }, [periodId, company?.id]);
-
-  useEffect(() => {
+      // periodId 없이 접근한 경우 - 기간 목록만 로드
+      if (!periodId) {
+        try {
+          const periods = await fetchFiscalPeriods(companyId);
+          setAllPeriods(periods);
+          
+          // 마감된 기간 중 가장 최근 것으로 자동 이동
+          const closedPeriod = periods.find(p => 
+            ['closed', 'archived'].includes(p.status) && p.periodType === 'half'
+          );
+          if (closedPeriod) {
+            navigate(`/period-history/${closedPeriod.id}`, { replace: true });
+            return;
+          }
+        } catch (err: any) {
+          setError(err.message);
+        }
+        setLoading(false);
+        return;
+      }
+      
+      // 중복 로드 방지
+      if (loadedRef.current === `${periodId}-${companyId}`) {
+        return;
+      }
+      loadedRef.current = `${periodId}-${companyId}`;
+      
+      setLoading(true);
+      setError(null);
+      
+      try {
+        console.log('📅 기간 히스토리 로드:', periodId);
+        
+        // 기간 정보
+        const periodData = await fetchFiscalPeriod(periodId);
+        console.log('📅 기간 데이터:', periodData);
+        setPeriod(periodData);
+        
+        // 전체 기간 목록
+        const periods = await fetchFiscalPeriods(companyId);
+        setAllPeriods(periods);
+        
+        if (periodData && ['closed', 'archived'].includes(periodData.status)) {
+          // 스냅샷 목록
+          try {
+            const snapshotData = await fetchPeriodSnapshots(periodId);
+            setSnapshots(snapshotData);
+          } catch (e) {
+            console.log('스냅샷 없음');
+          }
+          
+          // 전사 요약
+          try {
+            const summaryData = await fetchCompanyPeriodSummary(periodId, companyId);
+            setCompanySummary(summaryData);
+          } catch (e) {
+            console.log('요약 없음');
+          }
+          
+          // 마감 로그
+          try {
+            const logs = await fetchPeriodCloseLogs(periodId);
+            setCloseLogs(logs);
+          } catch (e) {
+            console.log('로그 없음');
+          }
+        }
+      } catch (err: any) {
+        console.error('데이터 로드 실패:', err);
+        setError(err.message);
+      } finally {
+        setLoading(false);
+      }
+    };
+    
     loadData();
-  }, [loadData]);
+  }, [periodId, companyId, navigate]);
 
   // 조직 이름 찾기
   const getOrgInfo = (orgId: string) => {
@@ -246,12 +302,58 @@ export default function PeriodHistory() {
   // ─────────────────────────────────────────────────────────
   // Loading State
   // ─────────────────────────────────────────────────────────
+  if (!companyId) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="w-8 h-8 animate-spin text-slate-400 mx-auto mb-4" />
+          <p className="text-slate-500">회사 정보를 불러오는 중...</p>
+        </div>
+      </div>
+    );
+  }
+  
   if (loading) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center">
         <div className="flex items-center gap-3 text-slate-600">
           <Loader2 className="w-6 h-6 animate-spin" />
           <span>데이터 로딩 중...</span>
+        </div>
+      </div>
+    );
+  }
+  
+  if (error) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="text-center">
+          <AlertTriangle className="w-12 h-12 text-red-400 mx-auto mb-4" />
+          <p className="text-red-600 mb-4">{error}</p>
+          <button
+            onClick={() => navigate('/admin?tab=periods')}
+            className="text-blue-600 hover:text-blue-700"
+          >
+            기간 관리로 돌아가기
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // periodId 없이 접근했는데 마감된 기간도 없는 경우
+  if (!periodId && allPeriods.length > 0) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="text-center">
+          <Calendar className="w-12 h-12 text-slate-300 mx-auto mb-4" />
+          <p className="text-slate-500 mb-4">마감된 기간이 없습니다.</p>
+          <button
+            onClick={() => navigate('/admin?tab=periods')}
+            className="text-blue-600 hover:text-blue-700"
+          >
+            기간 관리로 이동
+          </button>
         </div>
       </div>
     );
@@ -274,241 +376,253 @@ export default function PeriodHistory() {
     );
   }
 
-  const statusConfig = PERIOD_STATUS_CONFIG[period.status];
+  const statusConfig = PERIOD_STATUS_CONFIG[period.status] || {
+    label: period.status,
+    color: 'text-slate-600',
+    bgColor: 'bg-slate-100',
+  };
+  
+  // 선택 가능한 기간 (마감됨 또는 아카이브)
+  const selectablePeriods = allPeriods.filter(p => 
+    ['closed', 'archived', 'active'].includes(p.status) && p.periodType === 'half'
+  );
 
   // ─────────────────────────────────────────────────────────
   // Main Render
   // ─────────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-slate-50">
-      <div className="max-w-7xl mx-auto px-4 py-6">
-        {/* Header */}
-        <div className="mb-6">
-          <button
-            onClick={() => navigate('/admin?tab=periods')}
-            className="text-slate-500 hover:text-slate-700 text-sm flex items-center gap-1 mb-4"
-          >
-            <ChevronLeft className="w-4 h-4" />
-            기간 관리로 돌아가기
-          </button>
-          
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="flex items-center gap-3 mb-2">
-                <h1 className="text-2xl font-bold text-slate-900">{period.periodName}</h1>
-                <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${statusConfig.bgColor} ${statusConfig.color}`}>
-                  {period.status === 'archived' && <Archive className="w-3 h-3 inline mr-1" />}
-                  {statusConfig.label}
+    <div className="p-6 max-w-6xl mx-auto">
+      {/* Header */}
+      <div className="mb-6">
+        <button
+          onClick={() => navigate('/admin?tab=periods')}
+          className="text-slate-500 hover:text-slate-700 text-sm flex items-center gap-1 mb-4"
+        >
+          <ChevronLeft className="w-4 h-4" />
+          기간 관리로 돌아가기
+        </button>
+        
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="flex items-center gap-3 mb-2">
+              <h1 className="text-2xl font-bold text-slate-900">{period.periodName}</h1>
+              <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${statusConfig.bgColor} ${statusConfig.color}`}>
+                {period.status === 'archived' && <Archive className="w-3 h-3 inline mr-1" />}
+                {statusConfig.label}
+              </span>
+              {period.forceClosed && (
+                <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-red-100 text-red-700">
+                  강제마감
                 </span>
-                {period.forceClosed && (
-                  <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-red-100 text-red-700">
-                    강제마감
-                  </span>
+              )}
+            </div>
+            <p className="text-slate-500">
+              {new Date(period.startsAt).toLocaleDateString('ko-KR')} ~ {' '}
+              {new Date(period.endsAt).toLocaleDateString('ko-KR')}
+              {period.closedAt && (
+                <span className="ml-3 text-slate-400">
+                  마감일: {new Date(period.closedAt).toLocaleDateString('ko-KR')}
+                </span>
+              )}
+            </p>
+          </div>
+          
+          {/* 기간 선택 드롭다운 */}
+          {selectablePeriods.length > 1 && (
+            <select
+              value={periodId}
+              onChange={(e) => navigate(`/period-history/${e.target.value}`)}
+              className="px-4 py-2 border border-slate-300 rounded-lg bg-white text-sm"
+            >
+              {selectablePeriods.map(p => (
+                <option key={p.id} value={p.id}>
+                  {p.periodName} ({PERIOD_STATUS_CONFIG[p.status]?.label || p.status})
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+      </div>
+
+      {/* 아직 마감 안 된 기간 */}
+      {!['closed', 'archived'].includes(period.status) && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-6 text-center">
+          <Clock className="w-12 h-12 text-amber-400 mx-auto mb-3" />
+          <h2 className="text-lg font-semibold text-amber-800 mb-2">아직 마감되지 않은 기간입니다</h2>
+          <p className="text-amber-700 mb-4">
+            마감이 완료되면 성과 스냅샷을 조회할 수 있습니다.
+          </p>
+          {period.status === 'active' && (
+            <button
+              onClick={() => navigate(`/period-close/${period.id}`)}
+              className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors"
+            >
+              마감 시작하기
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* 마감된 기간 - 성과 데이터 */}
+      {['closed', 'archived'].includes(period.status) && (
+        <>
+          {/* 강제 마감 알림 */}
+          {period.forceClosed && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6 flex items-start gap-3">
+              <AlertTriangle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-red-800 font-medium">강제 마감된 기간</p>
+                <p className="text-red-700 text-sm mt-1">
+                  사유: {period.forceCloseReason || '사유 없음'}
+                </p>
+                {period.incompleteItems && (
+                  <p className="text-red-600 text-xs mt-1">
+                    미완료 OKR: {(period.incompleteItems as any).incomplete_okr_sets || 0}개 조직, 
+                    미입력 체크인: {(period.incompleteItems as any).incomplete_checkins || 0}개
+                  </p>
                 )}
               </div>
-              <p className="text-slate-500">
-                {new Date(period.startsAt).toLocaleDateString('ko-KR')} ~ {' '}
-                {new Date(period.endsAt).toLocaleDateString('ko-KR')}
-                {period.closedAt && (
-                  <span className="ml-3 text-slate-400">
-                    마감일: {new Date(period.closedAt).toLocaleDateString('ko-KR')}
-                  </span>
-                )}
-              </p>
             </div>
-            
-            {/* 기간 선택 드롭다운 */}
-            {archivedPeriods.length > 1 && (
-              <select
-                value={periodId}
-                onChange={(e) => navigate(`/period-history/${e.target.value}`)}
-                className="px-4 py-2 border border-slate-300 rounded-lg bg-white text-sm"
-              >
-                {archivedPeriods.map(p => (
-                  <option key={p.id} value={p.id}>
-                    {p.periodName} ({PERIOD_STATUS_CONFIG[p.status].label})
-                  </option>
-                ))}
-              </select>
-            )}
-          </div>
-        </div>
+          )}
 
-        {/* 아직 마감 안 된 기간 */}
-        {!['closed', 'archived'].includes(period.status) && (
-          <div className="bg-amber-50 border border-amber-200 rounded-xl p-6 text-center">
-            <Clock className="w-12 h-12 text-amber-400 mx-auto mb-3" />
-            <h2 className="text-lg font-semibold text-amber-800 mb-2">아직 마감되지 않은 기간입니다</h2>
-            <p className="text-amber-700 mb-4">
-              마감이 완료되면 성과 스냅샷을 조회할 수 있습니다.
-            </p>
-            {period.status === 'active' && (
-              <button
-                onClick={() => navigate(`/period-close/${period.id}`)}
-                className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors"
-              >
-                마감 시작하기
-              </button>
-            )}
-          </div>
-        )}
-
-        {/* 마감된 기간 - 성과 데이터 */}
-        {['closed', 'archived'].includes(period.status) && (
-          <>
-            {/* 강제 마감 알림 */}
-            {period.forceClosed && (
-              <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6 flex items-start gap-3">
-                <AlertTriangle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
-                <div>
-                  <p className="text-red-800 font-medium">강제 마감된 기간</p>
-                  <p className="text-red-700 text-sm mt-1">
-                    사유: {period.forceCloseReason || '사유 없음'}
-                  </p>
-                  {period.incompleteItems && (
-                    <p className="text-red-600 text-xs mt-1">
-                      미완료 OKR: {(period.incompleteItems as any).incomplete_okr_sets || 0}개 조직, 
-                      미입력 체크인: {(period.incompleteItems as any).incomplete_checkins || 0}개
-                    </p>
-                  )}
+          {/* 전사 요약 카드 */}
+          {companySummary && (
+            <div className="bg-white rounded-xl border border-slate-200 p-6 mb-6">
+              <h2 className="text-lg font-semibold text-slate-900 mb-4 flex items-center gap-2">
+                <BarChart3 className="w-5 h-5 text-blue-600" />
+                전사 성과 요약
+              </h2>
+              
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+                <div className="text-center p-4 bg-blue-50 rounded-lg">
+                  <p className="text-3xl font-bold text-blue-600">{companySummary.companyAvgAchievement.toFixed(1)}%</p>
+                  <p className="text-sm text-blue-700">평균 달성률</p>
+                </div>
+                <div className="text-center p-4 bg-slate-50 rounded-lg">
+                  <p className="text-3xl font-bold text-slate-900">{companySummary.totalOrgs}</p>
+                  <p className="text-sm text-slate-600">참여 조직</p>
+                </div>
+                <div className="text-center p-4 bg-slate-50 rounded-lg">
+                  <p className="text-3xl font-bold text-slate-900">{companySummary.totalObjectives}</p>
+                  <p className="text-sm text-slate-600">총 목표</p>
+                </div>
+                <div className="text-center p-4 bg-slate-50 rounded-lg">
+                  <p className="text-3xl font-bold text-slate-900">{companySummary.totalKrs}</p>
+                  <p className="text-sm text-slate-600">총 KR</p>
+                </div>
+                <div className="text-center p-4 bg-slate-50 rounded-lg">
+                  <div className="flex justify-center gap-1 mb-1">
+                    {Object.entries(companySummary.companyGradeDistribution).map(([grade, count]) => (
+                      <GradeBadge key={grade} grade={grade} count={count as number} />
+                    ))}
+                  </div>
+                  <p className="text-sm text-slate-600">등급 분포</p>
                 </div>
               </div>
-            )}
 
-            {/* 전사 요약 카드 */}
-            {companySummary && (
-              <div className="bg-white rounded-xl border border-slate-200 p-6 mb-6">
-                <h2 className="text-lg font-semibold text-slate-900 mb-4 flex items-center gap-2">
-                  <BarChart3 className="w-5 h-5 text-blue-600" />
-                  전사 성과 요약
-                </h2>
-                
-                <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
-                  <div className="text-center p-4 bg-blue-50 rounded-lg">
-                    <p className="text-3xl font-bold text-blue-600">{companySummary.companyAvgAchievement.toFixed(1)}%</p>
-                    <p className="text-sm text-blue-700">평균 달성률</p>
-                  </div>
-                  <div className="text-center p-4 bg-slate-50 rounded-lg">
-                    <p className="text-3xl font-bold text-slate-900">{companySummary.totalOrgs}</p>
-                    <p className="text-sm text-slate-600">참여 조직</p>
-                  </div>
-                  <div className="text-center p-4 bg-slate-50 rounded-lg">
-                    <p className="text-3xl font-bold text-slate-900">{companySummary.totalObjectives}</p>
-                    <p className="text-sm text-slate-600">총 목표</p>
-                  </div>
-                  <div className="text-center p-4 bg-slate-50 rounded-lg">
-                    <p className="text-3xl font-bold text-slate-900">{companySummary.totalKrs}</p>
-                    <p className="text-sm text-slate-600">총 KR</p>
-                  </div>
-                  <div className="text-center p-4 bg-slate-50 rounded-lg">
-                    <div className="flex justify-center gap-1 mb-1">
-                      {Object.entries(companySummary.companyGradeDistribution).map(([grade, count]) => (
-                        <GradeBadge key={grade} grade={grade} count={count as number} />
+              {/* Top/Low Performers */}
+              <div className="grid md:grid-cols-2 gap-4">
+                {companySummary.topPerformers && companySummary.topPerformers.length > 0 && (
+                  <div>
+                    <h3 className="text-sm font-medium text-slate-700 mb-2 flex items-center gap-1">
+                      <Award className="w-4 h-4 text-green-500" />
+                      우수 조직
+                    </h3>
+                    <div className="space-y-2">
+                      {companySummary.topPerformers.slice(0, 3).map((org: any, idx: number) => (
+                        <div key={org.org_id} className="flex items-center justify-between bg-green-50 rounded px-3 py-2">
+                          <span className="text-sm text-slate-700">
+                            <span className="font-medium text-green-700 mr-2">{idx + 1}.</span>
+                            {org.org_name}
+                          </span>
+                          <span className="text-sm font-semibold text-green-600">{org.rate.toFixed(1)}%</span>
+                        </div>
                       ))}
                     </div>
-                    <p className="text-sm text-slate-600">등급 분포</p>
                   </div>
-                </div>
-
-                {/* Top/Low Performers */}
-                <div className="grid md:grid-cols-2 gap-4">
-                  {companySummary.topPerformers.length > 0 && (
-                    <div>
-                      <h3 className="text-sm font-medium text-slate-700 mb-2 flex items-center gap-1">
-                        <Award className="w-4 h-4 text-green-500" />
-                        우수 조직
-                      </h3>
-                      <div className="space-y-2">
-                        {companySummary.topPerformers.slice(0, 3).map((org, idx) => (
-                          <div key={org.org_id} className="flex items-center justify-between bg-green-50 rounded px-3 py-2">
-                            <span className="text-sm text-slate-700">
-                              <span className="font-medium text-green-700 mr-2">{idx + 1}.</span>
-                              {org.org_name}
-                            </span>
-                            <span className="text-sm font-semibold text-green-600">{org.rate.toFixed(1)}%</span>
-                          </div>
-                        ))}
-                      </div>
+                )}
+                
+                {companySummary.lowPerformers && companySummary.lowPerformers.length > 0 && (
+                  <div>
+                    <h3 className="text-sm font-medium text-slate-700 mb-2 flex items-center gap-1">
+                      <AlertTriangle className="w-4 h-4 text-amber-500" />
+                      개선 필요 조직
+                    </h3>
+                    <div className="space-y-2">
+                      {companySummary.lowPerformers.slice(0, 3).map((org: any) => (
+                        <div key={org.org_id} className="flex items-center justify-between bg-amber-50 rounded px-3 py-2">
+                          <span className="text-sm text-slate-700">{org.org_name}</span>
+                          <span className="text-sm font-semibold text-amber-600">{org.rate.toFixed(1)}%</span>
+                        </div>
+                      ))}
                     </div>
-                  )}
-                  
-                  {companySummary.lowPerformers.length > 0 && (
-                    <div>
-                      <h3 className="text-sm font-medium text-slate-700 mb-2 flex items-center gap-1">
-                        <AlertTriangle className="w-4 h-4 text-amber-500" />
-                        개선 필요 조직
-                      </h3>
-                      <div className="space-y-2">
-                        {companySummary.lowPerformers.slice(0, 3).map((org) => (
-                          <div key={org.org_id} className="flex items-center justify-between bg-amber-50 rounded px-3 py-2">
-                            <span className="text-sm text-slate-700">{org.org_name}</span>
-                            <span className="text-sm font-semibold text-amber-600">{org.rate.toFixed(1)}%</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
-            )}
+            </div>
+          )}
 
-            {/* 조직별 스냅샷 목록 */}
+          {/* 스냅샷 데이터 없음 안내 */}
+          {!companySummary && snapshots.length === 0 && (
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-8 text-center mb-6">
+              <BarChart3 className="w-12 h-12 text-slate-300 mx-auto mb-4" />
+              <p className="text-slate-500">이 기간의 성과 스냅샷 데이터가 없습니다.</p>
+              <p className="text-slate-400 text-sm mt-1">마감 시 스냅샷이 자동 생성됩니다.</p>
+            </div>
+          )}
+
+          {/* 조직별 스냅샷 목록 */}
+          {snapshots.length > 0 && (
             <div className="bg-white rounded-xl border border-slate-200 p-6">
               <h2 className="text-lg font-semibold text-slate-900 mb-4 flex items-center gap-2">
                 <Users className="w-5 h-5 text-blue-600" />
                 조직별 성과 ({snapshots.length}개 조직)
               </h2>
               
-              {snapshots.length === 0 ? (
-                <div className="text-center py-8 text-slate-500">
-                  스냅샷 데이터가 없습니다.
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {snapshots.map(snapshot => {
-                    const orgInfo = getOrgInfo(snapshot.orgId);
-                    return (
-                      <OrgSnapshotCard
-                        key={snapshot.id}
-                        snapshot={snapshot}
-                        orgName={orgInfo.name}
-                        orgLevel={orgInfo.level}
-                        onViewDetails={() => {
-                          setSelectedSnapshot(snapshot);
-                          setShowDetailModal(true);
-                        }}
-                      />
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            {/* 마감 로그 */}
-            {closeLogs.length > 0 && (
-              <div className="mt-6 bg-white rounded-xl border border-slate-200 p-6">
-                <h2 className="text-lg font-semibold text-slate-900 mb-4 flex items-center gap-2">
-                  <Clock className="w-5 h-5 text-slate-500" />
-                  마감 이력
-                </h2>
-                <div className="space-y-2">
-                  {closeLogs.map(log => (
-                    <div key={log.id} className="flex items-center gap-4 text-sm py-2 border-b border-slate-100 last:border-0">
-                      <span className="text-slate-400 w-36">
-                        {new Date(log.createdAt).toLocaleString('ko-KR')}
-                      </span>
-                      <span className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded text-xs">
-                        {log.action}
-                      </span>
-                      <span className="text-slate-600">{log.actorName || '시스템'}</span>
-                    </div>
-                  ))}
-                </div>
+              <div className="space-y-2">
+                {snapshots.map(snapshot => {
+                  const orgInfo = getOrgInfo(snapshot.orgId);
+                  return (
+                    <OrgSnapshotCard
+                      key={snapshot.id}
+                      snapshot={snapshot}
+                      orgName={orgInfo.name}
+                      orgLevel={orgInfo.level}
+                      onViewDetails={() => {
+                        setSelectedSnapshot(snapshot);
+                        setShowDetailModal(true);
+                      }}
+                    />
+                  );
+                })}
               </div>
-            )}
-          </>
-        )}
-      </div>
+            </div>
+          )}
+
+          {/* 마감 로그 */}
+          {closeLogs.length > 0 && (
+            <div className="mt-6 bg-white rounded-xl border border-slate-200 p-6">
+              <h2 className="text-lg font-semibold text-slate-900 mb-4 flex items-center gap-2">
+                <Clock className="w-5 h-5 text-slate-500" />
+                마감 이력
+              </h2>
+              <div className="space-y-2">
+                {closeLogs.map((log: any) => (
+                  <div key={log.id} className="flex items-center gap-4 text-sm py-2 border-b border-slate-100 last:border-0">
+                    <span className="text-slate-400 w-36">
+                      {new Date(log.createdAt || log.created_at).toLocaleString('ko-KR')}
+                    </span>
+                    <span className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded text-xs">
+                      {log.action}
+                    </span>
+                    <span className="text-slate-600">{log.actorName || log.actor_name || '시스템'}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
 
       {/* 상세 OKR 모달 */}
       {showDetailModal && selectedSnapshot && (
@@ -566,6 +680,12 @@ export default function PeriodHistory() {
                   </div>
                 </div>
               ))}
+              
+              {selectedSnapshot.objectivesSnapshot.length === 0 && (
+                <div className="text-center py-8 text-slate-500">
+                  스냅샷된 OKR 데이터가 없습니다.
+                </div>
+              )}
             </div>
             
             <div className="px-6 py-4 border-t border-slate-200">
