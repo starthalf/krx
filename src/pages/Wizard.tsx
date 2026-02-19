@@ -161,6 +161,8 @@ export default function Wizard() {
     name: string;
     biiType: string;
     orgName: string;
+    orgLevel: string; // 전사, 부문, 본부, 팀
+    orgId: string;
   }
   const [parentObjectives, setParentObjectives] = useState<ParentObjective[]>([]);
 
@@ -294,6 +296,8 @@ export default function Wizard() {
             name: po.name,
             biiType: po.bii_type || 'Improve',
             orgName: org?.name || '상위 조직',
+            orgLevel: org?.level || '',
+            orgId: po.org_id,
           };
         });
         setParentObjectives(mapped);
@@ -1347,22 +1351,36 @@ export default function Wizard() {
 
             {/* 상위 조직 목표 참조 (접이식) */}
             {parentObjectives.length > 0 && (
-              <details className="bg-violet-50 border border-violet-200 rounded-xl">
+              <details className="bg-violet-50 border border-violet-200 rounded-xl" open>
                 <summary className="cursor-pointer px-4 py-3 flex items-center gap-2 text-sm font-semibold text-violet-900">
                   <GitBranch className="w-4 h-4 text-violet-600" />
                   상위 조직 목표 참조 ({parentObjectives.length}개)
                 </summary>
-                <div className="px-4 pb-3 space-y-1.5">
-                  {parentObjectives.map(po => (
-                    <div key={po.id} className="flex items-center gap-2 bg-white/60 rounded-lg px-3 py-1.5">
-                      <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${getBIIColor(po.biiType as BIIType).bg} ${getBIIColor(po.biiType as BIIType).text}`}>
-                        {po.biiType}
-                      </span>
-                      <span className="text-xs text-violet-600 font-medium">{po.orgName}</span>
-                      <span className="text-xs text-slate-400">›</span>
-                      <span className="text-sm text-slate-800">{po.name}</span>
-                    </div>
-                  ))}
+                <div className="px-4 pb-3 space-y-3">
+                  {/* 조직별 그루핑 */}
+                  {Array.from(new Set(parentObjectives.map(po => po.orgId))).map(orgId => {
+                    const orgObjs = parentObjectives.filter(po => po.orgId === orgId);
+                    const orgInfo = orgObjs[0];
+                    return (
+                      <div key={orgId}>
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <span className="text-xs bg-violet-200/60 text-violet-700 px-1.5 py-0.5 rounded font-medium">{orgInfo.orgLevel}</span>
+                          <span className="text-xs font-semibold text-violet-700">{orgInfo.orgName}</span>
+                        </div>
+                        <div className="space-y-1 ml-1">
+                          {orgObjs.map((po, idx) => (
+                            <div key={po.id} className="flex items-center gap-2 bg-white/60 rounded-lg px-3 py-1.5">
+                              <span className="text-xs font-bold text-violet-400"><i className="not-italic font-serif">O</i>{idx + 1}</span>
+                              <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${getBIIColor(po.biiType as BIIType).bg} ${getBIIColor(po.biiType as BIIType).text}`}>
+                                {po.biiType}
+                              </span>
+                              <span className="text-sm text-slate-800">{po.name}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </details>
             )}
@@ -1460,11 +1478,12 @@ export default function Wizard() {
                             {(() => {
                               const parentObj = parentObjectives.find(po => po.id === obj.parentObjId);
                               return parentObj ? (
-                                <div className="flex items-center gap-1.5 mt-2 bg-violet-50 border border-violet-200 rounded-lg px-2 py-1">
+                                <div className="flex items-center gap-1.5 mt-2 bg-violet-50 border border-violet-200 rounded-lg px-2.5 py-1.5">
                                   <Link2 className="w-3 h-3 text-violet-500 flex-shrink-0" />
-                                  <span className="text-xs text-violet-700 truncate">
-                                    ← {parentObj.orgName}: {parentObj.name}
-                                  </span>
+                                  <span className="text-xs bg-violet-200/60 text-violet-700 px-1 py-0.5 rounded font-medium">{parentObj.orgLevel}</span>
+                                  <span className="text-xs text-violet-700 font-medium">{parentObj.orgName}</span>
+                                  <span className="text-xs text-violet-400">›</span>
+                                  <span className="text-xs text-violet-800 truncate">{parentObj.name}</span>
                                 </div>
                               ) : obj.source === 'ai_draft' ? (
                                 <div className="flex items-center gap-1 mt-2">
@@ -1573,13 +1592,14 @@ export default function Wizard() {
                     <div className="bg-gradient-to-r from-violet-50 to-indigo-50 border-b border-violet-200 px-5 py-3">
                       <div className="flex items-center gap-2">
                         <GitBranch className="w-3.5 h-3.5 text-violet-500" />
-                        <span className="text-xs font-medium text-violet-600">상위 목표에서 계승</span>
+                        <span className="text-xs font-medium text-violet-600">상위 목표 연결</span>
                         <span className="text-xs text-violet-400">|</span>
-                        <span className="text-xs text-violet-500">{parentObj.orgName}</span>
+                        <span className="text-xs bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded font-medium">{parentObj.orgLevel}</span>
+                        <span className="text-xs text-violet-600 font-medium">{parentObj.orgName}</span>
                       </div>
                       <div className="flex items-center gap-2 mt-1.5">
                         <span className="text-xs font-bold text-violet-500 bg-violet-100 px-1.5 py-0.5 rounded">
-                          O{parentObjectives.filter(po => po.orgName === parentObj.orgName).indexOf(parentObj) + 1}
+                          <i className="not-italic font-serif">O</i>{parentObjectives.filter(po => po.orgId === parentObj.orgId).indexOf(parentObj) + 1}
                         </span>
                         <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${getBIIColor(parentObj.biiType as BIIType).bg} ${getBIIColor(parentObj.biiType as BIIType).text}`}>
                           {parentObj.biiType}
