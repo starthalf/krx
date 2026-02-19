@@ -1060,12 +1060,6 @@ export default function Wizard() {
               전사 OKR 초안 작업이 진행 중이거나, 수립 사이클이 아직 시작되지 않았습니다.<br />
               사이클이 시작되면 알림을 통해 안내드리겠습니다.
             </p>
-            {hasDraft && (
-              <div className="bg-white/60 border border-amber-200 rounded-xl p-4 mb-4 max-w-md mx-auto">
-                <p className="text-sm text-amber-800 font-medium mb-2">📋 현재 배포된 초안 ({objectives.filter(o => o.selected).length}개 목표)</p>
-                <p className="text-xs text-amber-600">사이클이 시작되면 이 초안을 바탕으로 수정할 수 있습니다.</p>
-              </div>
-            )}
             <button
               onClick={() => navigate(-1)}
               className="px-6 py-2.5 bg-amber-600 text-white rounded-lg font-medium hover:bg-amber-700 transition-colors"
