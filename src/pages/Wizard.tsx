@@ -1529,7 +1529,7 @@ export default function Wizard() {
               <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 flex items-start gap-3">
                 <Bot className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
                 <div>
-                  <p className="text-blue-900 font-semibold text-sm">CEO가 배포한 OKR 초안이 로딩되었습니다</p>
+                  <p className="text-blue-900 font-semibold text-sm">CEO가 배포한 AI 초안이 로딩되었습니다</p>
                   <p className="text-blue-700 text-xs mt-1">
                     각 목표와 KR을 검토한 후 자유롭게 수정하세요. 수정이 완료되면 "최종 확인" 단계에서 제출합니다.
                   </p>
@@ -1591,7 +1591,7 @@ export default function Wizard() {
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex items-start gap-3 flex-1 min-w-0">
                         <div className="w-8 h-8 rounded-lg bg-slate-900 text-white flex items-center justify-center text-sm font-bold flex-shrink-0">
-                          O{objIdx + 1}
+                          <i className="not-italic font-serif">O</i>{objIdx + 1}
                         </div>
                         <div className="flex-1 min-w-0">
                           <h3 className="font-bold text-slate-900 text-base leading-snug">{obj.name}</h3>
@@ -1606,11 +1606,6 @@ export default function Wizard() {
                           </div>
                         </div>
                       </div>
-
-                      {/* 액션: Step 2에서는 Objective 수정 불가 (Step 1에서만 수정) */}
-                      <span className="text-xs text-slate-400 flex-shrink-0 bg-slate-100 px-2 py-1 rounded">
-                        O 수정은 이전 단계에서
-                      </span>
                     </div>
                   </div>
 
@@ -1783,7 +1778,7 @@ export default function Wizard() {
                   {/* Objective 헤더 */}
                   <div className="bg-slate-50 border-b border-slate-200 px-5 py-3 flex items-center gap-3">
                     <div className="w-7 h-7 rounded-lg bg-slate-900 text-white flex items-center justify-center text-xs font-bold flex-shrink-0">
-                      O{objIdx + 1}
+                      <i className="not-italic font-serif">O</i>{objIdx + 1}
                     </div>
                     <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${biiColor.bg} ${biiColor.text}`}>
                       {obj.biiType}
@@ -1950,7 +1945,7 @@ export default function Wizard() {
                   <div key={obj.id} className={`border rounded-2xl overflow-hidden ${info.valid ? 'border-slate-200' : 'border-red-300'}`}>
                     <div className={`px-5 py-3 flex items-center justify-between ${info.valid ? 'bg-slate-50' : 'bg-red-50'}`}>
                       <div className="flex items-center gap-2">
-                        <div className="w-7 h-7 rounded-lg bg-slate-900 text-white flex items-center justify-center text-xs font-bold">O{objIdx + 1}</div>
+                        <div className="w-7 h-7 rounded-lg bg-slate-900 text-white flex items-center justify-center text-xs font-bold"><i className="not-italic font-serif">O</i>{objIdx + 1}</div>
                         <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${biiColor.bg} ${biiColor.text}`}>{obj.biiType}</span>
                         <span className="font-medium text-slate-900 text-sm truncate">{obj.name}</span>
                       </div>
@@ -2066,7 +2061,7 @@ export default function Wizard() {
               return (
                 <div key={obj.id} className="border border-slate-200 rounded-2xl overflow-hidden bg-white">
                   <div className="bg-slate-50 border-b border-slate-200 px-5 py-3 flex items-center gap-3">
-                    <div className="w-7 h-7 rounded-lg bg-slate-900 text-white flex items-center justify-center text-xs font-bold">O{objIdx + 1}</div>
+                    <div className="w-7 h-7 rounded-lg bg-slate-900 text-white flex items-center justify-center text-xs font-bold"><i className="not-italic font-serif">O</i>{objIdx + 1}</div>
                     <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${biiColor.bg} ${biiColor.text}`}>{obj.biiType}</span>
                     <span className="text-sm font-semibold text-slate-900 truncate">{obj.name}</span>
                   </div>
