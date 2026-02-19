@@ -571,8 +571,44 @@ export default function CEOOKRSetup() {
       return;
     }
 
+    // 조직별 상위 체인의 OKR 수집 함수
+    const getDirectParentOKRs = async (org: typeof childOrgs[0]) => {
+      // 직속 상위 조직의 OKR을 가져옴 (이미 생성된 ai_draft 포함)
+      if (!org.parentOrgId) return parentOKRs; // 상위가 전사면 전사 OKR 반환
+      
+      const parentOrg = organizations.find(o => o.id === org.parentOrgId);
+      if (!parentOrg || parentOrg.level === '전사') return parentOKRs; // 상위가 전사면 전사 OKR 반환
+      
+      // 직속 상위 조직(부문 등)의 objectives 조회
+      const { data: directParentObjs } = await supabase
+        .from('objectives')
+        .select('id, name, bii_type, key_results(id, name)')
+        .eq('org_id', parentOrg.id)
+        .eq('period', '2025-H1')
+        .in('source', ['ai_draft', 'manual'])
+        .order('sort_order');
+      
+      if (directParentObjs && directParentObjs.length > 0) {
+        return directParentObjs.map(obj => ({
+          objectiveId: obj.id,
+          objectiveName: obj.name,
+          biiType: obj.bii_type,
+          keyResults: (obj.key_results || []).map((kr: any) => kr.name),
+        }));
+      }
+      
+      // 직속 상위 조직에 OKR이 없으면 전사 OKR fallback
+      return parentOKRs;
+    };
+
     // 상태 초기화
-    const statuses: OrgDraftStatus[] = childOrgs.map(org => ({
+    // 레벨 순서: 부문 → 본부 → 팀 (상위 조직 초안이 먼저 생성되어야 하위에서 참조 가능)
+    const levelOrder: Record<string, number> = { '부문': 1, '본부': 2, '팀': 3, '센터': 3 };
+    const sortedChildOrgs = [...childOrgs].sort((a, b) => 
+      (levelOrder[a.level] || 99) - (levelOrder[b.level] || 99)
+    );
+
+    const statuses: OrgDraftStatus[] = sortedChildOrgs.map(org => ({
       orgId: org.id,
       orgName: org.name,
       level: org.level,
@@ -582,9 +618,9 @@ export default function CEOOKRSetup() {
     setOrgDraftStatuses(statuses);
     setIsGeneratingAllDrafts(true);
 
-    // 순차 생성 (API rate limit 고려)
-    for (let i = 0; i < childOrgs.length; i++) {
-      const org = childOrgs[i];
+    // 순차 생성 (API rate limit 고려, 상위 레벨부터)
+    for (let i = 0; i < sortedChildOrgs.length; i++) {
+      const org = sortedChildOrgs[i];
 
       // 상태: generating
       setOrgDraftStatuses(prev => prev.map(s =>
@@ -592,6 +628,12 @@ export default function CEOOKRSetup() {
       ));
 
       try {
+        // 직속 상위 조직의 OKR을 가져옴
+        const directParentOKRs = await getDirectParentOKRs(org);
+        const parentOrg = organizations.find(o => o.id === org.parentOrgId);
+        const parentOrgName = parentOrg?.name || '전사';
+        const parentOrgLevel = parentOrg?.level || '전사';
+
         const { data, error } = await supabase.functions.invoke('generate-objectives', {
           body: {
             orgName: org.name,
@@ -600,7 +642,10 @@ export default function CEOOKRSetup() {
             functionTags: org.functionTags || [],
             industry: company.industry,
             cascadingMode: true,
-            parentOKRs,
+            parentOKRs: directParentOKRs, // 직속 상위 OKR (부문 or 전사)
+            companyOKRs: parentOKRs, // 전사 OKR (항상 참조 컨텍스트로)
+            parentOrgName,
+            parentOrgLevel,
           }
         });
 
