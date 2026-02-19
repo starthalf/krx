@@ -32,6 +32,8 @@ interface ObjectiveCandidate {
   parentObjId?: string | null;
   cascadeType?: string;
   source?: string;
+  version?: number;
+  originalObjId?: string | null;
 }
 
 interface KRCandidate {
@@ -212,15 +214,17 @@ export default function Wizard() {
         cycleActive = cycles && cycles.length > 0 && cycles[0].status === 'in_progress';
       }
 
-      // 해당 조직의 objectives 조회 (ai_draft 또는 draft)
+      // 해당 조직의 objectives 조회 (최신 버전만)
       const { data: objs, error: objErr } = await supabase
         .from('objectives')
         .select(`
           id, name, bii_type, period, status, source, sort_order,
-          parent_obj_id, cascade_type, approval_status, perspective
+          parent_obj_id, cascade_type, approval_status, perspective,
+          version, is_latest, original_obj_id
         `)
         .eq('org_id', targetOrgId)
         .eq('period', '2025-H1')
+        .eq('is_latest', true)
         .in('source', ['ai_draft', 'manual'])
         .order('sort_order');
 
@@ -234,21 +238,24 @@ export default function Wizard() {
           id: obj.id,
           name: obj.name,
           biiType: obj.bii_type || 'Improve',
-          perspective: obj.perspective || '재무', // DB에서 perspective 로드
+          perspective: obj.perspective || '재무',
           selected: true,
           parentObjId: obj.parent_obj_id,
           cascadeType: obj.cascade_type || 'independent',
           source: obj.source,
+          version: obj.version || 0,
+          originalObjId: obj.original_obj_id || obj.id,
         }));
         setObjectives(loadedObjectives);
         setSelectedObjectiveTab(loadedObjectives[0]?.id || '');
 
-        // 각 objective의 KR 조회
+        // 각 objective의 KR 조회 (최신 버전만)
         const objIds = objs.map((o: any) => o.id);
         const { data: allKRs } = await supabase
           .from('key_results')
           .select('*')
           .in('objective_id', objIds)
+          .eq('is_latest', true)
           .order('created_at');
 
         if (allKRs && allKRs.length > 0) {
@@ -272,6 +279,8 @@ export default function Wizard() {
             quarterlyTargets: kr.quarterly_targets || { Q1: 0, Q2: 0, Q3: 0, Q4: 0 },
             selected: true,
             parentObjId: kr.parent_obj_id || null,
+            version: kr.version || 0,
+            originalKrId: kr.original_kr_id || kr.id,
           }));
           setKrs(loadedKRs);
         }
@@ -762,110 +771,107 @@ export default function Wizard() {
     try {
       const selectedObjectives = objectives.filter(o => o.selected);
       
+      // 기존 objectives의 ID → 이전 버전 is_latest=false 처리용
+      const existingObjIds = selectedObjectives
+        .filter(o => o.source && o.id && !o.id.startsWith('obj-new-'))
+        .map(o => o.id);
+
+      // 1) 기존 objectives를 is_latest=false로 아카이브
+      if (existingObjIds.length > 0) {
+        await supabase
+          .from('objectives')
+          .update({ is_latest: false })
+          .in('id', existingObjIds);
+      }
+
+      // 2) 기존 KR도 is_latest=false로 아카이브
+      if (existingObjIds.length > 0) {
+        await supabase
+          .from('key_results')
+          .update({ is_latest: false })
+          .in('objective_id', existingObjIds)
+          .eq('is_latest', true);
+      }
+
+      // 3) 새 버전 insert (objective + KR)
+      // objective ID 매핑: 이전 ID → 새 ID (KR의 objective_id 연결용)
+      const objIdMap: Record<string, string> = {};
+
       for (const obj of selectedObjectives) {
-        let savedObjId = obj.id;
+        const isExisting = obj.source && obj.id && !obj.id.startsWith('obj-new-');
+        const prevVersion = obj.version || 0;
+        const newVersion = isExisting ? prevVersion + 1 : 0;
+        const originalId = isExisting ? (obj.originalObjId || obj.id) : null;
 
-        // 기존 DB 레코드면 update, 새로 만든 거면 insert
-        const isExisting = obj.source === 'ai_draft' || obj.source === 'manual';
+        // INSERT 새 버전 objective
+        const { data: savedObj, error: objError } = await supabase
+          .from('objectives')
+          .insert({
+            org_id: orgId,
+            name: obj.name,
+            bii_type: obj.biiType,
+            perspective: obj.perspective,
+            period: '2025-H1',
+            status: 'draft',
+            source: isExisting ? 'manual' : (obj.source || 'manual'),
+            approval_status: 'draft',
+            parent_obj_id: obj.parentObjId || null,
+            cascade_type: obj.cascadeType || 'independent',
+            sort_order: selectedObjectives.indexOf(obj),
+            version: newVersion,
+            is_latest: true,
+            original_obj_id: originalId,
+          })
+          .select()
+          .single();
 
-        if (isExisting && obj.id && !obj.id.startsWith('obj-new-')) {
-          // UPDATE 기존 objective
-          const { error: objError } = await supabase
-            .from('objectives')
-            .update({
-              name: obj.name,
-              bii_type: obj.biiType,
-              source: 'manual', // 수정했으니 manual로
-              status: 'draft',
-              approval_status: 'draft',
-            })
-            .eq('id', obj.id);
+        if (objError) throw new Error(`목표 저장 실패: ${objError.message}`);
+        if (!savedObj) continue;
 
-          if (objError) throw new Error(`목표 수정 실패: ${objError.message}`);
-        } else {
-          // INSERT 새 objective
-          const { data: savedObj, error: objError } = await supabase
-            .from('objectives')
-            .insert({
-              org_id: orgId,
-              name: obj.name,
-              bii_type: obj.biiType,
-              period: '2025-H1',
-              status: 'draft',
-              source: 'manual',
-              approval_status: 'draft',
-              parent_obj_id: obj.parentObjId || null,
-              cascade_type: obj.cascadeType || 'independent',
-              sort_order: parseInt(obj.id) || 0
-            })
-            .select()
-            .single();
-
-          if (objError) throw new Error(`목표 저장 실패: ${objError.message}`);
-          if (!savedObj) continue;
-          savedObjId = savedObj.id;
-        }
+        objIdMap[obj.id] = savedObj.id;
 
         // KR 처리: 해당 objective의 KR들
         const relatedKRs = krs.filter(k => k.objectiveId === obj.id && k.selected !== false);
         
         for (const kr of relatedKRs) {
-          const krPayload = {
-            name: kr.name,
-            definition: kr.definition,
-            formula: kr.formula,
-            unit: kr.unit,
-            weight: kr.weight,
-            target_value: kr.targetValue,
-            bii_type: kr.biiType,
-            kpi_category: kr.kpiCategory,
-            perspective: kr.perspective,
-            indicator_type: kr.indicatorType,
-            measurement_cycle: kr.measurementCycle,
-            grade_criteria: kr.gradeCriteria,
-            quarterly_targets: kr.quarterlyTargets,
-          };
-
           const isExistingKR = kr.id && !kr.id.startsWith('kr-new-') && !kr.id.startsWith('kr-ai-') && !kr.id.startsWith('kr-pool-');
+          const krPrevVersion = (kr as any).version || 0;
+          const krNewVersion = isExistingKR ? krPrevVersion + 1 : 0;
+          const krOriginalId = isExistingKR ? ((kr as any).originalKrId || kr.id) : null;
 
-          if (isExistingKR) {
-            const { error } = await supabase
-              .from('key_results')
-              .update({ ...krPayload, source: 'manual' })
-              .eq('id', kr.id);
-            if (error) throw new Error(`KR 수정 실패: ${error.message}`);
-          } else {
-            const { error } = await supabase
-              .from('key_results')
-              .insert({
-                ...krPayload,
-                objective_id: savedObjId,
-                org_id: orgId,
-                current_value: 0,
-                source: 'manual',
-                status: 'draft'
-              });
-            if (error) throw new Error(`KR 저장 실패: ${error.message}`);
-          }
-        }
-
-        // 선택 해제된 KR 삭제
-        const deselectedKRs = krs.filter(k => k.objectiveId === obj.id && k.selected === false);
-        for (const dk of deselectedKRs) {
-          if (dk.id && !dk.id.startsWith('kr-new-')) {
-            await supabase.from('key_results').delete().eq('id', dk.id);
-          }
-        }
-      }
-
-      // 선택 해제된 Objective 삭제
-      const deselectedObjs = objectives.filter(o => !o.selected && o.source);
-      for (const dobj of deselectedObjs) {
-        if (dobj.id && !dobj.id.startsWith('obj-new-')) {
-          await supabase.from('key_results').delete().eq('objective_id', dobj.id);
-          await supabase.from('objectives').delete().eq('id', dobj.id);
+          const { error } = await supabase
+            .from('key_results')
+            .insert({
+              objective_id: savedObj.id,
+              org_id: orgId,
+              name: kr.name,
+              definition: kr.definition,
+              formula: kr.formula,
+              unit: kr.unit,
+              weight: kr.weight,
+              target_value: kr.targetValue,
+              bii_type: kr.biiType,
+              kpi_category: kr.kpiCategory,
+              perspective: kr.perspective,
+              indicator_type: kr.indicatorType,
+              measurement_cycle: kr.measurementCycle,
+              grade_criteria: kr.gradeCriteria,
+              quarterly_targets: kr.quarterlyTargets,
+              current_value: 0,
+              source: isExistingKR ? 'manual' : 'manual',
+              status: 'draft',
+              version: krNewVersion,
+              is_latest: true,
+              original_kr_id: krOriginalId,
+            });
+          if (error) throw new Error(`KR 저장 실패: ${error.message}`);
         }
       }
+
+      // 4) 선택 해제된 Objective — 삭제하지 않고 is_latest=false 유지 (이미 아카이브됨)
+      // 신규 생성 후 선택 해제한 것은 삭제
+      const deselectedNewObjs = objectives.filter(o => !o.selected && (!o.source || o.id.startsWith('obj-new-')));
+      // 이건 DB에 없으므로 무시
 
       await fetchObjectives(orgId);
       await fetchKRs(orgId);
