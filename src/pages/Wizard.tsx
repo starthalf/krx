@@ -246,9 +246,9 @@ export default function Wizard() {
           setKrs(loadedKRs);
         }
 
-        // 초안이 있으면 바로 KR 설정 단계로
+        // 초안이 있으면 목표수립 단계부터 시작
         setShowOneClickModal(false);
-        setCurrentStep(2);
+        setCurrentStep(1);
       } else {
         setHasDraft(false);
         // 초안 없으면 원클릭 모달
@@ -1367,8 +1367,8 @@ export default function Wizard() {
               </details>
             )}
 
-            <div className="grid grid-cols-2 gap-4">
-              {objectives.map((obj) => {
+            <div className="space-y-3">
+              {objectives.map((obj, objIdx) => {
                 const biiColor = getBIIColor(obj.biiType);
                 const isEditing = editingObjId === obj.id;
                 return (
@@ -1383,8 +1383,11 @@ export default function Wizard() {
                         type="checkbox"
                         checked={obj.selected}
                         onChange={() => toggleObjective(obj.id)}
-                        className="mt-1 w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                        className="mt-1.5 w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
                       />
+                      <div className="w-8 h-8 rounded-lg bg-slate-900 text-white flex items-center justify-center text-sm font-bold flex-shrink-0">
+                        <i className="not-italic font-serif">O</i>{objIdx + 1}
+                      </div>
                       <div className="flex-1 min-w-0">
                         {isEditing ? (
                           <div className="space-y-2">
