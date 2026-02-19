@@ -262,9 +262,16 @@ export default function PlanningCycleManager() {
 
     if (!confirm(confirmMessages[newStatus] || `상태를 '${newStatus}'로 변경하시겠습니까?`)) return;
 
-    // paused는 직접 update (RPC에 없을 수 있으므로)
+    // paused 관련 전환은 RPC에 정의되어 있지 않으므로 직접 update
     if (newStatus === 'paused') {
       await handleStatusChange(cycleId, 'paused');
+      return;
+    }
+
+    // paused에서 재개하는 경우도 직접 update
+    const currentCycle = cycles.find(c => c.id === cycleId);
+    if (currentCycle?.status === 'paused') {
+      await handleStatusChange(cycleId, newStatus);
       return;
     }
 
@@ -615,7 +622,6 @@ export default function PlanningCycleManager() {
               <div className="bg-amber-50 border-b border-amber-200 px-6 py-2.5 flex items-center gap-2">
                 <Pause className="w-4 h-4 text-amber-600" />
                 <span className="text-sm font-medium text-amber-800">사이클 일시중지됨</span>
-                <span className="text-xs text-amber-600 ml-2">— 전사 OKR 수립 페이지에서 초안을 재생성한 후 재개하세요</span>
               </div>
             )}
 
