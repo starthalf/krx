@@ -95,7 +95,6 @@ function daysUntil(dateStr: string) {
 export default function PlanningCycleManager() {
   const { user } = useAuth();
   const company = useStore(state => state.company);
-  const organizations = useStore(state => state.organizations);
 
   const [cycles, setCycles] = useState<PlanningCycle[]>([]);
   const [loading, setLoading] = useState(true);
@@ -314,19 +313,13 @@ export default function PlanningCycleManager() {
 
   // ─── 하위 조직 OKR 전체 삭제 ────────────────────────
   const handleDeleteAllChildOKRs = async (cycle: PlanningCycle) => {
-    const childOrgs = organizations.filter(o => o.level !== '전사');
-    if (childOrgs.length === 0) {
-      alert('하위 조직이 없습니다.');
-      return;
-    }
+    if (!company?.id) return;
 
     const msg =
       `🚨 하위 조직 OKR 전체 삭제\n\n` +
-      `대상: ${childOrgs.length}개 조직 (전사 OKR 제외)\n` +
       `기간: ${cycle.period}\n\n` +
-      `• 모든 하위 조직의 Objectives와 KR이 삭제됩니다\n` +
-      `• 조직장이 수정·제출한 내용도 모두 삭제됩니다\n` +
-      `• 전사 OKR은 유지됩니다\n\n` +
+      `• 전사 OKR을 제외한 모든 하위 조직의 Objectives와 KR이 삭제됩니다\n` +
+      `• 조직장이 수정·제출한 내용도 모두 삭제됩니다\n\n` +
       `이 작업은 되돌릴 수 없습니다. 계속하시겠습니까?`;
 
     if (!confirm(msg)) return;
@@ -334,32 +327,20 @@ export default function PlanningCycleManager() {
 
     setActionLoading(true);
     try {
-      let deletedObjCount = 0;
-      let deletedKrCount = 0;
+      // SECURITY DEFINER RPC로 RLS 우회하여 삭제
+      const { data, error } = await supabase.rpc('delete_child_org_okrs', {
+        p_company_id: company.id,
+        p_period: cycle.period,
+      });
 
-      for (const org of childOrgs) {
-        const { data: objs } = await supabase
-          .from('objectives')
-          .select('id')
-          .eq('org_id', org.id)
-          .eq('period', cycle.period);
+      if (error) throw error;
 
-        if (objs && objs.length > 0) {
-          const ids = objs.map(o => o.id);
-          const { count: krCount } = await supabase
-            .from('key_results')
-            .delete()
-            .in('objective_id', ids)
-            .select('id', { count: 'exact', head: true });
-          
-          await supabase.from('key_results').delete().in('objective_id', ids);
-          await supabase.from('objectives').delete().in('id', ids);
-          
-          deletedObjCount += objs.length;
-        }
-      }
-
-      alert(`✅ 삭제 완료\n\n${childOrgs.length}개 조직에서 ${deletedObjCount}개 목표가 삭제되었습니다.\n\n전사 OKR 수립 페이지에서 초안을 다시 생성하세요.`);
+      const result = data || { deleted_objectives: 0, deleted_key_results: 0, org_count: 0 };
+      alert(
+        `✅ 삭제 완료\n\n` +
+        `${result.org_count}개 조직에서 ${result.deleted_objectives}개 목표, ${result.deleted_key_results}개 KR이 삭제되었습니다.\n\n` +
+        `전사 OKR 수립 페이지에서 초안을 다시 생성하세요.`
+      );
       fetchCycles();
     } catch (err: any) {
       alert(`삭제 실패: ${err.message}`);
