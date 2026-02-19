@@ -1541,7 +1541,7 @@ export default function CEOOKRSetup() {
                       <div className="flex items-start gap-3">
                         <AlertCircle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
                         <div className="flex-1">
-                          <p className="text-red-900 font-semibold text-sm">사이클 진행 중 — 재생성하려면 먼저 사이클을 중지해야 합니다</p>
+                          <p className="text-red-900 font-semibold text-sm">사이클 진행 중 — 재생성 하면 지금까지 조직장들이 진행한 작업들이 모두 초기화 됩니다</p>
                           <p className="text-red-700 text-xs mt-1">
                             사이클을 중지하면 조직장에게 일시중지 알림이 발송됩니다. 재생성 후 사이클을 다시 시작할 수 있습니다.
                           </p>
