@@ -280,13 +280,7 @@ export default function CEOOKRSetup() {
 
       if (cycles && cycles.length > 0 && cycles[0].cycle_started_at) {
         const cycleStatus = cycles[0].status;
-        if (cycleStatus === 'paused') {
-          // 일시중지 상태 → 초안 재생성 단계
-          setCycleStarted(false);
-          setAllDraftsComplete(false);
-          setOrgDraftStatuses([]);
-          setCurrentStep(2);
-        } else if (cycleStatus === 'in_progress') {
+        if (cycleStatus === 'in_progress') {
           setCycleStarted(true);
           setCurrentStep(3);
         }
@@ -841,72 +835,6 @@ export default function CEOOKRSetup() {
       alert('사이클 시작 실패: ' + err.message);
     } finally {
       setIsCycleStarting(false);
-    }
-  };
-
-  // ─── 사이클 일시중지 → 초안 재생성 단계로 ─────────────
-  const handleResetCycle = async () => {
-    if (!company?.id) return;
-
-    const msg = cycleStarted
-      ? '⚠️ 진행 중인 사이클을 중지하고 초안 재생성 단계로 돌아갑니다.\n\n' +
-        '• 조직장에게 일시중지 알림이 발송됩니다\n' +
-        '• 이후 "전체 초안 재생성"을 누르면 기존 초안이 삭제되고 새로 만들어집니다\n' +
-        '• ⚠️ 조직장이 수정·제출한 내용도 모두 삭제됩니다\n\n' +
-        '계속하시겠습니까?'
-      : '초안 생성 단계로 되돌리시겠습니까?';
-
-    if (!confirm(msg)) return;
-
-    try {
-      if (cycleStarted) {
-        // 사이클 → paused
-        const { error } = await supabase
-          .from('okr_planning_cycles')
-          .update({ status: 'paused' })
-          .eq('company_id', company.id)
-          .eq('period', '2025-H1')
-          .eq('status', 'in_progress');
-
-        if (error) throw error;
-
-        // 조직장에게 일시중지 알림
-        const childOrgs = organizations.filter(o => o.level !== '전사');
-        const notifications = [];
-        for (const org of childOrgs) {
-          const { data: orgMembers } = await supabase
-            .from('user_roles')
-            .select('profile_id, roles!inner(level)')
-            .eq('org_id', org.id);
-
-          const leaders = orgMembers?.filter((m: any) => m.roles?.level >= 50) || [];
-          for (const leader of leaders) {
-            notifications.push({
-              recipient_id: leader.profile_id,
-              sender_id: user?.id,
-              sender_name: '대표이사',
-              type: 'okr_cycle_paused',
-              title: 'OKR 수립 사이클이 일시중지되었습니다',
-              message: '전사 OKR 재조정 중입니다. 잠시 후 재개 알림을 보내드리겠습니다.',
-              resource_type: 'cycle',
-              org_id: org.id,
-              priority: 'medium',
-            });
-          }
-        }
-        if (notifications.length > 0) {
-          await supabase.from('notifications').insert(notifications);
-        }
-      }
-
-      setCycleStarted(false);
-      setAllDraftsComplete(false);
-      setOrgDraftStatuses([]);
-      setCurrentStep(2);
-      alert('✅ 초안 재생성 단계로 돌아왔습니다. "전체 초안 재생성" 버튼을 눌러주세요.');
-    } catch (err: any) {
-      console.error('사이클 중지 실패:', err);
-      alert('실패: ' + err.message);
     }
   };
 
@@ -1523,31 +1451,6 @@ export default function CEOOKRSetup() {
                     </div>
                   </div>
 
-                  {/* 재생성 옵션 */}
-                  {!cycleStarted ? (
-                    <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
-                      <div className="flex items-start gap-3">
-                        <RefreshCw className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" />
-                        <div className="flex-1">
-                          <p className="text-amber-900 font-semibold text-sm">초안을 다시 생성하시겠습니까?</p>
-                          <p className="text-amber-700 text-xs mt-1">
-                            기존 AI 초안이 삭제되고 새로 생성됩니다. 조직장이 수정한 내용도 초기화됩니다.
-                          </p>
-                          <button
-                            onClick={() => {
-                              if (!confirm('⚠️ 기존 AI 초안이 모두 삭제되고 새로 생성됩니다.\n조직장이 수정한 내용도 초기화됩니다.\n\n계속하시겠습니까?')) return;
-                              setOrgDraftStatuses([]);
-                              handleGenerateAllDrafts();
-                            }}
-                            className="mt-3 px-4 py-2 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700 flex items-center gap-2"
-                          >
-                            <RefreshCw className="w-4 h-4" /> 전체 초안 재생성
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  ) : null}
-
                   <div className="flex gap-3">
                     <button
                       onClick={() => navigate('/okr-map')}
@@ -1658,19 +1561,12 @@ export default function CEOOKRSetup() {
                   </div>
 
                   {/* 하단 관리 링크 */}
-                  <div className="mt-8 pt-4 border-t border-slate-100 flex items-center justify-center gap-4">
+                  <div className="mt-8 pt-4 border-t border-slate-100 flex items-center justify-center">
                     <button
                       onClick={() => navigate('/admin?tab=cycles')}
                       className="text-sm text-slate-400 hover:text-blue-600 flex items-center gap-1.5 transition-colors"
                     >
                       <Megaphone className="w-3.5 h-3.5" /> 사이클 관리
-                    </button>
-                    <span className="text-slate-200">|</span>
-                    <button
-                      onClick={handleResetCycle}
-                      className="text-sm text-slate-400 hover:text-amber-600 flex items-center gap-1.5 transition-colors"
-                    >
-                      <RefreshCw className="w-3.5 h-3.5" /> 초안 재생성 (사이클 중지)
                     </button>
                   </div>
                 </div>
