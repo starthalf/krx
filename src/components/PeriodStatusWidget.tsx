@@ -1,14 +1,14 @@
 // src/components/PeriodStatusWidget.tsx
 // 대시보드에 표시되는 현재 기간 상태 및 요약 위젯
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Calendar, Clock, CheckCircle2, AlertTriangle, TrendingUp,
   ChevronRight, BarChart3, Target, Lock, Play, Archive,
   Loader2, ArrowUpRight, ArrowDownRight
 } from 'lucide-react';
-import { useStore } from '../store/useStore';
+import { useAuth } from '../contexts/AuthContext';
 import {
   fetchFiscalPeriods,
   fetchActivePeriod,
@@ -58,13 +58,17 @@ function PeriodProgressBar({ period }: { period: FiscalPeriod }) {
 // Status Badge
 // ─────────────────────────────────────────────────────────────
 function StatusBadge({ status }: { status: string }) {
-  const config = PERIOD_STATUS_CONFIG[status as keyof typeof PERIOD_STATUS_CONFIG];
-  if (!config) return null;
+  const config = PERIOD_STATUS_CONFIG[status] || {
+    label: status,
+    color: 'text-slate-600',
+    bgColor: 'bg-slate-100',
+  };
   
   const Icon = status === 'active' ? Play :
                status === 'closing' ? Lock :
                status === 'closed' ? CheckCircle2 :
-               status === 'archived' ? Archive : Clock;
+               status === 'archived' ? Archive :
+               Clock;
   
   return (
     <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${config.bgColor} ${config.color}`}>
@@ -83,25 +87,34 @@ interface PeriodStatusWidgetProps {
 
 export default function PeriodStatusWidget({ variant = 'full' }: PeriodStatusWidgetProps) {
   const navigate = useNavigate();
-  const company = useStore(state => state.company);
+  const { profile } = useAuth();
+  const companyId = profile?.company_id;
   
   const [loading, setLoading] = useState(true);
   const [activePeriod, setActivePeriod] = useState<FiscalPeriod | null>(null);
   const [previousPeriodSummary, setPreviousPeriodSummary] = useState<CompanyPeriodSummary | null>(null);
   const [recentPeriods, setRecentPeriods] = useState<FiscalPeriod[]>([]);
+  
+  const loadedRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!company?.id) return;
+    if (!companyId) {
+      setLoading(false);
+      return;
+    }
+    
+    if (loadedRef.current === companyId) return;
+    loadedRef.current = companyId;
     
     const loadData = async () => {
       setLoading(true);
       try {
         // 활성 기간 조회
-        const active = await fetchActivePeriod(company.id, 'half');
+        const active = await fetchActivePeriod(companyId, 'half');
         setActivePeriod(active);
         
         // 전체 기간 목록 (최근 것들)
-        const periods = await fetchFiscalPeriods(company.id);
+        const periods = await fetchFiscalPeriods(companyId);
         const recentHalves = periods
           .filter(p => p.periodType === 'half')
           .slice(0, 4);
@@ -110,8 +123,12 @@ export default function PeriodStatusWidget({ variant = 'full' }: PeriodStatusWid
         // 직전 마감 기간의 요약 조회
         const lastClosed = periods.find(p => p.status === 'closed' || p.status === 'archived');
         if (lastClosed) {
-          const summary = await fetchCompanyPeriodSummary(lastClosed.id, company.id);
-          setPreviousPeriodSummary(summary);
+          try {
+            const summary = await fetchCompanyPeriodSummary(lastClosed.id, companyId);
+            setPreviousPeriodSummary(summary);
+          } catch (e) {
+            // 요약 없을 수 있음
+          }
         }
       } catch (err) {
         console.error('기간 위젯 데이터 로드 실패:', err);
@@ -121,9 +138,9 @@ export default function PeriodStatusWidget({ variant = 'full' }: PeriodStatusWid
     };
     
     loadData();
-  }, [company?.id]);
+  }, [companyId]);
 
-  if (loading) {
+  if (!companyId || loading) {
     return (
       <div className="bg-white rounded-xl border border-slate-200 p-6">
         <div className="flex items-center justify-center py-8">
@@ -138,147 +155,149 @@ export default function PeriodStatusWidget({ variant = 'full' }: PeriodStatusWid
     return (
       <div className="bg-white rounded-xl border border-slate-200 p-4">
         <div className="flex items-center justify-between mb-3">
-          <h3 className="font-semibold text-slate-900 flex items-center gap-2">
-            <Calendar className="w-4 h-4 text-blue-600" />
-            현재 기간
-          </h3>
+          <div className="flex items-center gap-2">
+            <Calendar className="w-5 h-5 text-blue-600" />
+            <span className="font-medium text-slate-900">현재 기간</span>
+          </div>
           {activePeriod && <StatusBadge status={activePeriod.status} />}
         </div>
         
         {activePeriod ? (
           <>
-            <p className="text-lg font-bold text-slate-900 mb-2">{activePeriod.periodName}</p>
+            <h3 className="font-semibold text-slate-900 mb-2">{activePeriod.periodName}</h3>
             <PeriodProgressBar period={activePeriod} />
           </>
         ) : (
-          <p className="text-slate-500 text-sm">활성화된 기간이 없습니다</p>
+          <p className="text-slate-500 text-sm">활성 기간이 없습니다</p>
         )}
+        
+        <button
+          onClick={() => navigate('/admin?tab=periods')}
+          className="mt-3 w-full text-sm text-blue-600 hover:text-blue-700 flex items-center justify-center gap-1"
+        >
+          기간 관리 <ChevronRight className="w-4 h-4" />
+        </button>
       </div>
     );
   }
 
   // Full 버전
   return (
-    <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-      {/* Header */}
-      <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-        <h3 className="font-semibold text-slate-900 flex items-center gap-2">
+    <div className="bg-white rounded-xl border border-slate-200 p-6">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
           <Calendar className="w-5 h-5 text-blue-600" />
-          기간 현황
-        </h3>
+          <h2 className="font-semibold text-slate-900">기간 현황</h2>
+        </div>
         <button
           onClick={() => navigate('/admin?tab=periods')}
           className="text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1"
         >
-          전체 보기
-          <ChevronRight className="w-4 h-4" />
+          기간 관리 <ChevronRight className="w-4 h-4" />
         </button>
       </div>
-      
-      {/* Active Period */}
-      <div className="p-6">
-        {activePeriod ? (
-          <div className="mb-6">
-            <div className="flex items-center justify-between mb-3">
-              <div>
-                <span className="text-xs text-slate-500">현재 활성 기간</span>
-                <h4 className="text-xl font-bold text-slate-900">{activePeriod.periodName}</h4>
-              </div>
-              <StatusBadge status={activePeriod.status} />
-            </div>
-            <PeriodProgressBar period={activePeriod} />
-            
-            {/* Quick Actions */}
-            <div className="flex gap-2 mt-4">
-              {activePeriod.status === 'active' && (
-                <button
-                  onClick={() => navigate(`/period-close/${activePeriod.id}`)}
-                  className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-amber-50 text-amber-700 rounded-lg hover:bg-amber-100 text-sm font-medium transition-colors"
-                >
-                  <Lock className="w-4 h-4" />
-                  마감 시작
-                </button>
-              )}
-              <button
-                onClick={() => navigate('/wizard')}
-                className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 text-sm font-medium transition-colors"
-              >
-                <Target className="w-4 h-4" />
-                OKR 수립
-              </button>
-            </div>
+
+      {/* 활성 기간 */}
+      {activePeriod ? (
+        <div className="mb-6">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="font-semibold text-lg text-slate-900">{activePeriod.periodName}</h3>
+            <StatusBadge status={activePeriod.status} />
           </div>
-        ) : (
-          <div className="text-center py-6 mb-6 bg-slate-50 rounded-lg">
-            <Clock className="w-10 h-10 text-slate-300 mx-auto mb-2" />
-            <p className="text-slate-500">활성화된 기간이 없습니다</p>
+          <PeriodProgressBar period={activePeriod} />
+          
+          {/* 빠른 액션 */}
+          <div className="flex gap-2 mt-4">
+            {activePeriod.status === 'active' && (
+              <button
+                onClick={() => navigate(`/period-close/${activePeriod.id}`)}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-amber-50 text-amber-700 rounded-lg hover:bg-amber-100 transition-colors text-sm"
+              >
+                <Lock className="w-4 h-4" />
+                마감 시작
+              </button>
+            )}
             <button
-              onClick={() => navigate('/admin?tab=periods')}
-              className="mt-2 text-sm text-blue-600 hover:text-blue-700"
+              onClick={() => navigate('/wizard')}
+              className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition-colors text-sm"
             >
-              기간 생성하기
+              <Target className="w-4 h-4" />
+              OKR 수립
             </button>
           </div>
-        )}
-        
-        {/* Previous Period Summary */}
-        {previousPeriodSummary && (
-          <div className="border-t border-slate-100 pt-4">
-            <h4 className="text-sm font-medium text-slate-700 mb-3 flex items-center gap-2">
-              <BarChart3 className="w-4 h-4 text-slate-400" />
-              직전 기간 성과
-            </h4>
-            <div className="grid grid-cols-3 gap-3">
-              <div className="text-center p-3 bg-blue-50 rounded-lg">
-                <p className="text-xl font-bold text-blue-600">
-                  {previousPeriodSummary.companyAvgAchievement.toFixed(0)}%
-                </p>
-                <p className="text-xs text-blue-700">평균 달성률</p>
-              </div>
-              <div className="text-center p-3 bg-slate-50 rounded-lg">
-                <p className="text-xl font-bold text-slate-900">
-                  {previousPeriodSummary.totalObjectives}
-                </p>
-                <p className="text-xs text-slate-600">총 목표</p>
-              </div>
-              <div className="text-center p-3 bg-slate-50 rounded-lg">
-                <p className="text-xl font-bold text-slate-900">
-                  {previousPeriodSummary.totalOrgs}
-                </p>
-                <p className="text-xs text-slate-600">참여 조직</p>
-              </div>
+        </div>
+      ) : (
+        <div className="mb-6 p-4 bg-slate-50 rounded-lg text-center">
+          <AlertTriangle className="w-8 h-8 text-amber-400 mx-auto mb-2" />
+          <p className="text-slate-600">활성 기간이 없습니다</p>
+          <button
+            onClick={() => navigate('/admin?tab=periods')}
+            className="mt-2 text-sm text-blue-600 hover:text-blue-700"
+          >
+            기간 설정하기
+          </button>
+        </div>
+      )}
+
+      {/* 직전 기간 성과 요약 */}
+      {previousPeriodSummary && (
+        <div className="border-t border-slate-100 pt-4">
+          <h4 className="text-sm font-medium text-slate-700 mb-3 flex items-center gap-2">
+            <BarChart3 className="w-4 h-4 text-slate-400" />
+            직전 기간 성과
+          </h4>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="text-center p-3 bg-blue-50 rounded-lg">
+              <p className="text-xl font-bold text-blue-600">
+                {previousPeriodSummary.companyAvgAchievement.toFixed(0)}%
+              </p>
+              <p className="text-xs text-blue-700">평균 달성률</p>
+            </div>
+            <div className="text-center p-3 bg-slate-50 rounded-lg">
+              <p className="text-xl font-bold text-slate-700">{previousPeriodSummary.totalObjectives}</p>
+              <p className="text-xs text-slate-500">목표</p>
+            </div>
+            <div className="text-center p-3 bg-slate-50 rounded-lg">
+              <p className="text-xl font-bold text-slate-700">{previousPeriodSummary.totalOrgs}</p>
+              <p className="text-xs text-slate-500">참여 조직</p>
             </div>
           </div>
-        )}
-        
-        {/* Recent Periods List */}
-        {recentPeriods.length > 0 && (
-          <div className="border-t border-slate-100 pt-4 mt-4">
-            <h4 className="text-sm font-medium text-slate-700 mb-3">최근 기간</h4>
-            <div className="space-y-2">
-              {recentPeriods.slice(0, 3).map(period => (
-                <div 
-                  key={period.id}
-                  className="flex items-center justify-between py-2 px-3 bg-slate-50 rounded-lg hover:bg-slate-100 cursor-pointer transition-colors"
-                  onClick={() => {
-                    if (['closed', 'archived'].includes(period.status)) {
-                      navigate(`/period-history/${period.id}`);
-                    }
-                  }}
-                >
-                  <div className="flex items-center gap-2">
-                    <span className={`w-2 h-2 rounded-full ${
-                      PERIOD_STATUS_CONFIG[period.status]?.bgColor.replace('bg-', 'bg-') || 'bg-slate-300'
-                    }`} />
-                    <span className="text-sm text-slate-700">{period.periodName}</span>
-                  </div>
-                  <StatusBadge status={period.status} />
-                </div>
-              ))}
-            </div>
+          
+          <button
+            onClick={() => navigate('/period-history')}
+            className="mt-3 w-full text-sm text-slate-600 hover:text-slate-800 flex items-center justify-center gap-1"
+          >
+            히스토리 보기 <ChevronRight className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {/* 최근 기간 목록 */}
+      {recentPeriods.length > 0 && !previousPeriodSummary && (
+        <div className="border-t border-slate-100 pt-4">
+          <h4 className="text-sm font-medium text-slate-700 mb-3">최근 기간</h4>
+          <div className="space-y-2">
+            {recentPeriods.map(period => (
+              <div
+                key={period.id}
+                onClick={() => {
+                  if (['closed', 'archived'].includes(period.status)) {
+                    navigate(`/period-history/${period.id}`);
+                  }
+                }}
+                className={`flex items-center justify-between p-2 rounded-lg ${
+                  ['closed', 'archived'].includes(period.status) 
+                    ? 'hover:bg-slate-50 cursor-pointer' 
+                    : ''
+                }`}
+              >
+                <span className="text-sm text-slate-700">{period.periodName}</span>
+                <StatusBadge status={period.status} />
+              </div>
+            ))}
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
