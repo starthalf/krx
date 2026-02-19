@@ -155,6 +155,9 @@ export default function Wizard() {
   const [isLoadingDraft, setIsLoadingDraft] = useState(false);
   const [hasDraft, setHasDraft] = useState(false);
 
+  // CEO 초안 작업 상태 (사이클 미시작 or 일시중지 → 편집 불가)
+  const [ceoDraftInProgress, setCeoDraftInProgress] = useState(false);
+
   // 상위 조직 OKR (Cascading 시각화용)
   interface ParentObjective {
     id: string;
@@ -183,7 +186,25 @@ export default function Wizard() {
   // DB에서 AI 초안 로딩
   const loadDraftFromDB = async (targetOrgId: string) => {
     setIsLoadingDraft(true);
+    setCeoDraftInProgress(false);
     try {
+      // 0. 사이클 상태 확인 — in_progress가 아니면 CEO 작업 중으로 간주
+      const targetOrg = organizations.find(o => o.id === targetOrgId);
+      const companyId = targetOrg?.companyId;
+      let cycleActive = false;
+
+      if (companyId) {
+        const { data: cycles } = await supabase
+          .from('okr_planning_cycles')
+          .select('status')
+          .eq('company_id', companyId)
+          .eq('period', '2025-H1')
+          .order('created_at', { ascending: false })
+          .limit(1);
+
+        cycleActive = cycles && cycles.length > 0 && cycles[0].status === 'in_progress';
+      }
+
       // 해당 조직의 objectives 조회 (ai_draft 또는 draft)
       const { data: objs, error: objErr } = await supabase
         .from('objectives')
@@ -251,10 +272,33 @@ export default function Wizard() {
         // 초안이 있으면 목표수립 단계부터 시작
         setShowOneClickModal(false);
         setCurrentStep(1);
+
+        // 사이클이 in_progress가 아니면 CEO 작업 중 → 읽기 전용
+        if (!cycleActive) {
+          setCeoDraftInProgress(true);
+        }
       } else {
         setHasDraft(false);
-        // 초안 없으면 원클릭 모달
-        if (!urlOrgId) setShowOneClickModal(true);
+        let isCeoPreparing = false;
+        // 초안 없으면: 사이클 미시작이면 CEO 작업 중, 아니면 원클릭 모달
+        if (companyId) {
+          // 전사 OKR이 존재하는지 체크 (CEO가 초안 작업 중인지 판단)
+          const companyOrg = organizations.find(o => o.companyId === companyId && o.level === '전사');
+          if (companyOrg) {
+            const { count } = await supabase
+              .from('objectives')
+              .select('id', { count: 'exact', head: true })
+              .eq('org_id', companyOrg.id)
+              .eq('period', '2025-H1');
+            
+            if ((count || 0) > 0 && !cycleActive) {
+              // 전사 OKR은 있는데 사이클이 안 돌고 있고 이 조직에는 초안이 없음 → CEO 작업 중
+              isCeoPreparing = true;
+              setCeoDraftInProgress(true);
+            }
+          }
+        }
+        if (!urlOrgId && !isCeoPreparing) setShowOneClickModal(true);
       }
     } catch (err) {
       console.error('AI 초안 로딩 실패:', err);
@@ -1004,8 +1048,36 @@ export default function Wizard() {
         </div>
       )}
 
+      {/* CEO 초안 작업 중 — 사이클 미시작 또는 일시중지 */}
+      {ceoDraftInProgress && !showOrgSelector && (
+        <div className="max-w-3xl mx-auto mt-8">
+          <div className="bg-amber-50 border-2 border-amber-200 rounded-2xl p-8 text-center">
+            <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <Clock className="w-8 h-8 text-amber-600" />
+            </div>
+            <h3 className="text-xl font-bold text-amber-900 mb-2">CEO가 OKR 초안을 준비 중입니다</h3>
+            <p className="text-amber-700 mb-4">
+              전사 OKR 초안 작업이 진행 중이거나, 수립 사이클이 아직 시작되지 않았습니다.<br />
+              사이클이 시작되면 알림을 통해 안내드리겠습니다.
+            </p>
+            {hasDraft && (
+              <div className="bg-white/60 border border-amber-200 rounded-xl p-4 mb-4 max-w-md mx-auto">
+                <p className="text-sm text-amber-800 font-medium mb-2">📋 현재 배포된 초안 ({objectives.filter(o => o.selected).length}개 목표)</p>
+                <p className="text-xs text-amber-600">사이클이 시작되면 이 초안을 바탕으로 수정할 수 있습니다.</p>
+              </div>
+            )}
+            <button
+              onClick={() => navigate(-1)}
+              className="px-6 py-2.5 bg-amber-600 text-white rounded-lg font-medium hover:bg-amber-700 transition-colors"
+            >
+              돌아가기
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* 모달: 수립 방식 선택 (초안이 없을 때만) */}
-      {showOneClickModal && !hasDraft && (
+      {showOneClickModal && !hasDraft && !ceoDraftInProgress && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl p-8 max-w-3xl w-full mx-4 relative">
             <button 
@@ -1245,6 +1317,9 @@ export default function Wizard() {
         </div>
       )}
 
+      {/* Stepper + Main Content — CEO 작업 중이면 숨김 */}
+      {!ceoDraftInProgress && (
+      <>
       {/* Stepper */}
       <div className="bg-white rounded-xl border border-slate-200 px-6 py-4 mb-6">
         <div className="flex items-center justify-between">
@@ -2491,6 +2566,8 @@ export default function Wizard() {
           )}
         </div>
       </div>
+      </>
+      )}
     </div>
   );
 }
