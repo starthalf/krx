@@ -1,4 +1,6 @@
 // src/components/Sidebar.tsx
+// 기간 히스토리 메뉴 추가됨
+
 import { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { 
@@ -12,7 +14,10 @@ import {
   Bell,
   GitBranch,
   Megaphone,
-  ClipboardList
+  ClipboardList,
+  Archive,
+  Calendar,
+  Settings
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -22,7 +27,8 @@ interface NavItem {
   href?: string;
   icon: any;
   requiredLevel?: number; // 이 레벨 이상만 표시
-  children?: { name: string; href: string }[];
+  children?: { name: string; href: string; requiredLevel?: number }[];
+  divider?: boolean; // 구분선 표시
 }
 
 export default function Sidebar() {
@@ -51,11 +57,13 @@ export default function Sidebar() {
 
   const navigation: NavItem[] = [
     { name: '대시보드', href: '/', icon: Home },
-   // CEO/관리자 전용 (level >= 90)
+    
+    // CEO/관리자 전용 (level >= 90)
     { name: '전사 OKR 수립', href: '/ceo-okr-setup', icon: ClipboardList, requiredLevel: 90 },
     { name: '조직 OKR 수립', href: '/wizard', icon: Target },
-       { name: '수립 현황', href: '/okr-setup', icon: Megaphone, requiredLevel: 90 },
+    { name: '수립 현황', href: '/okr-setup', icon: Megaphone, requiredLevel: 90 },
     { name: 'OKR Map', href: '/okr-map', icon: GitBranch },
+    
     {
       name: 'OKR 현황',
       icon: TrendingUp,
@@ -65,21 +73,45 @@ export default function Sidebar() {
         { name: '팀별 OKR', href: '/okr/team' }
       ]
     },
+    
     { name: '체크인', href: '/checkin', icon: CheckSquare },
     { name: '승인 대기함', href: '/approval-inbox', icon: Inbox },
     { name: '알림', href: '/notifications', icon: Bell },
+    
+    // 구분선
+    { name: 'divider1', icon: null, divider: true },
+    
+    // 기간 관리 섹션 (관리자 전용)
+    {
+      name: '기간 관리',
+      icon: Calendar,
+      requiredLevel: 90,
+      children: [
+        { name: '기간 설정', href: '/admin?tab=periods' },
+        { name: '기간 히스토리', href: '/period-history' },
+      ]
+    },
+    
     { name: '조직 관리', href: '/organization', icon: Building2 },
-    { name: 'KR지표 DB', href: '/kpi-pool', icon: BookOpen }
+    { name: 'KR지표 DB', href: '/kpi-pool', icon: BookOpen },
+    
+    // 관리자 설정
+    { name: '관리자 설정', href: '/admin', icon: Settings, requiredLevel: 90 },
   ];
 
   // 역할 레벨에 따른 메뉴 필터링
   const filteredNavigation = navigation.filter(item => {
+    if (item.divider) return true;
     if (!item.requiredLevel) return true;
     return maxRoleLevel >= item.requiredLevel;
   });
 
   const isActive = (href: string) => {
     if (href === '/') return location.pathname === '/';
+    // 쿼리 파라미터 포함 체크
+    if (href.includes('?')) {
+      return location.pathname + location.search === href;
+    }
     return location.pathname.startsWith(href);
   };
 
@@ -97,8 +129,22 @@ export default function Sidebar() {
 
       {/* 네비게이션 */}
       <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
-        {filteredNavigation.map((item) => {
+        {filteredNavigation.map((item, idx) => {
+          // 구분선
+          if (item.divider) {
+            return <div key={`divider-${idx}`} className="my-3 border-t border-slate-200" />;
+          }
+          
+          // 자식 메뉴가 있는 경우
           if (item.children) {
+            // 자식 중 접근 가능한 것만 필터링
+            const visibleChildren = item.children.filter(child => {
+              if (!child.requiredLevel) return true;
+              return maxRoleLevel >= child.requiredLevel;
+            });
+            
+            if (visibleChildren.length === 0) return null;
+            
             return (
               <div key={item.name} className="space-y-1">
                 <div className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-slate-700">
@@ -106,7 +152,7 @@ export default function Sidebar() {
                   <span>{item.name}</span>
                 </div>
                 <div className="ml-6 space-y-1">
-                  {item.children.map((child) => (
+                  {visibleChildren.map((child) => (
                     <Link
                       key={child.href}
                       to={child.href}
@@ -124,6 +170,7 @@ export default function Sidebar() {
             );
           }
 
+          // 일반 메뉴
           return (
             <Link
               key={item.name}
@@ -144,7 +191,7 @@ export default function Sidebar() {
       {/* 하단 정보 */}
       <div className="p-4 border-t border-slate-200">
         <div className="text-xs text-slate-400 text-center">
-          OKRio v1.1.0
+          OKRio v1.2.0
         </div>
       </div>
     </div>
