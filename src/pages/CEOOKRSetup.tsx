@@ -121,6 +121,9 @@ export default function CEOOKRSetup() {
   const [orgDraftStatuses, setOrgDraftStatuses] = useState<OrgDraftStatus[]>([]);
   const [isGeneratingAllDrafts, setIsGeneratingAllDrafts] = useState(false);
   const [allDraftsComplete, setAllDraftsComplete] = useState(false);
+  const [previewOrg, setPreviewOrg] = useState<{ orgId: string; orgName: string; level: string } | null>(null);
+  const [previewOKRs, setPreviewOKRs] = useState<any[]>([]);
+  const [previewLoading, setPreviewLoading] = useState(false);
 
   // Step 3: 사이클 시작
   const [deadlineDate, setDeadlineDate] = useState('');
@@ -838,6 +841,27 @@ export default function CEOOKRSetup() {
     }
   };
 
+  // ─── 조직 초안 미리보기 ─────────────────────────────────
+  const handlePreviewOrg = async (orgId: string, orgName: string, level: string) => {
+    setPreviewOrg({ orgId, orgName, level });
+    setPreviewLoading(true);
+    try {
+      const { data } = await supabase
+        .from('objectives')
+        .select('id, name, bii_type, perspective, parent_obj_id, key_results(id, name, definition, formula)')
+        .eq('org_id', orgId)
+        .eq('period', '2025-H1')
+        .order('created_at', { ascending: true });
+
+      setPreviewOKRs(data || []);
+    } catch (err) {
+      console.error('미리보기 로드 실패:', err);
+      setPreviewOKRs([]);
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
   // ─── Objective 수정 핸들러 ─────────────────────────────
 
   const handleObjChange = (objId: string, field: string, value: any) => {
@@ -901,6 +925,86 @@ export default function CEOOKRSetup() {
 
   return (
     <div className="min-h-screen bg-slate-50">
+      {/* 조직 초안 미리보기 모달 */}
+      {previewOrg && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setPreviewOrg(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[80vh] overflow-hidden" onClick={e => e.stopPropagation()}>
+            {/* 모달 헤더 */}
+            <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-gradient-to-r from-indigo-50 to-violet-50">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded font-medium">{previewOrg.level}</span>
+                  <h3 className="text-lg font-bold text-slate-900">{previewOrg.orgName}</h3>
+                </div>
+                <p className="text-sm text-slate-500 mt-0.5">AI 생성 초안 · {previewOKRs.length}개 목표</p>
+              </div>
+              <button onClick={() => setPreviewOrg(null)} className="p-2 hover:bg-white/80 rounded-lg transition-colors">
+                <X className="w-5 h-5 text-slate-500" />
+              </button>
+            </div>
+
+            {/* 모달 본문 */}
+            <div className="px-6 py-4 overflow-y-auto max-h-[calc(80vh-80px)] space-y-4">
+              {previewLoading ? (
+                <div className="flex justify-center py-12">
+                  <Loader2 className="w-8 h-8 text-indigo-600 animate-spin" />
+                </div>
+              ) : previewOKRs.length === 0 ? (
+                <div className="text-center py-12 text-slate-400">초안이 없습니다</div>
+              ) : (
+                previewOKRs.map((obj: any, idx: number) => {
+                  const parentObj = obj.parent_obj_id
+                    ? objectives.find(o => o.id === obj.parent_obj_id)
+                    : null;
+                  return (
+                    <div key={obj.id} className="border border-slate-200 rounded-xl overflow-hidden">
+                      {/* Objective 헤더 */}
+                      <div className="px-4 py-3 bg-slate-50 border-b border-slate-100">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-bold text-indigo-700 bg-indigo-100 px-2 py-0.5 rounded">
+                            <i className="not-italic font-serif">O</i>{idx + 1}
+                          </span>
+                          <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${
+                            obj.bii_type === 'Build' ? 'bg-blue-100 text-blue-700' :
+                            obj.bii_type === 'Innovate' ? 'bg-purple-100 text-purple-700' :
+                            'bg-green-100 text-green-700'
+                          }`}>
+                            {obj.bii_type || 'Improve'}
+                          </span>
+                          {obj.perspective && <span className="text-xs text-slate-400">{obj.perspective}</span>}
+                        </div>
+                        <p className="text-sm font-semibold text-slate-900 mt-1">{obj.name}</p>
+                        {parentObj && (
+                          <div className="flex items-center gap-1.5 mt-1.5 text-xs text-violet-600">
+                            <GitBranch className="w-3 h-3" />
+                            <span>상위: {parentObj.name}</span>
+                          </div>
+                        )}
+                      </div>
+                      {/* KR 목록 */}
+                      <div className="px-4 py-2 space-y-2">
+                        {(obj.key_results || []).map((kr: any, krIdx: number) => (
+                          <div key={kr.id} className="flex items-start gap-2 py-1.5">
+                            <span className="text-xs font-bold text-slate-400 mt-0.5 w-8 flex-shrink-0">KR{krIdx + 1}</span>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm text-slate-800">{kr.name}</p>
+                              {kr.definition && <p className="text-xs text-slate-400 mt-0.5">{kr.definition}</p>}
+                            </div>
+                          </div>
+                        ))}
+                        {(!obj.key_results || obj.key_results.length === 0) && (
+                          <p className="text-xs text-slate-400 py-2">KR 없음</p>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 헤더 */}
       <div className="bg-white border-b border-slate-200 sticky top-0 z-10">
         <div className="max-w-6xl mx-auto px-6 py-4">
@@ -1412,12 +1516,16 @@ export default function CEOOKRSetup() {
                   {/* 조직별 상태 */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     {orgDraftStatuses.map(s => (
-                      <div key={s.orgId} className={`flex items-center gap-3 p-3 rounded-lg border ${
-                        s.status === 'done' ? 'bg-green-50 border-green-200' :
-                        s.status === 'generating' ? 'bg-blue-50 border-blue-200' :
-                        s.status === 'error' ? 'bg-red-50 border-red-200' :
-                        'bg-slate-50 border-slate-200'
-                      }`}>
+                      <div
+                        key={s.orgId}
+                        onClick={() => s.status === 'done' && handlePreviewOrg(s.orgId, s.orgName, s.level)}
+                        className={`flex items-center gap-3 p-3 rounded-lg border transition-all ${
+                          s.status === 'done' ? 'bg-green-50 border-green-200 cursor-pointer hover:bg-green-100 hover:shadow-sm' :
+                          s.status === 'generating' ? 'bg-blue-50 border-blue-200' :
+                          s.status === 'error' ? 'bg-red-50 border-red-200' :
+                          'bg-slate-50 border-slate-200'
+                        }`}
+                      >
                         {s.status === 'generating' && <Loader2 className="w-5 h-5 text-blue-600 animate-spin" />}
                         {s.status === 'done' && <CheckCircle2 className="w-5 h-5 text-green-600" />}
                         {s.status === 'error' && <AlertCircle className="w-5 h-5 text-red-600" />}
