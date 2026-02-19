@@ -1653,23 +1653,7 @@ export default function Wizard() {
               </div>
             )}
 
-            <div className="flex items-center justify-between">
-              <h2 className="text-xl font-bold text-slate-900">OKR 검토 및 수정</h2>
-              <div className="flex gap-2">
-                <button
-                  onClick={handleAddKR}
-                  className="px-3 py-1.5 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 text-sm font-medium flex items-center gap-1.5"
-                >
-                  <Plus className="w-3.5 h-3.5" /> KR 추가
-                </button>
-                <button
-                  onClick={handleOpenPoolModal}
-                  className="px-3 py-1.5 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 text-sm font-medium flex items-center gap-1.5"
-                >
-                  <BookOpen className="w-3.5 h-3.5" /> Pool
-                </button>
-              </div>
-            </div>
+            <h2 className="text-xl font-bold text-slate-900">OKR 검토 및 수정</h2>
 
             {/* ── Objective별 통합 카드 ── */}
             {objectives.filter(o => o.selected).map((obj, objIdx) => {
