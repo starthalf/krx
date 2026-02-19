@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useStore } from '../store/useStore';
+import { useAuth } from '../contexts/AuthContext';
 import { getBIIColor, getKPICategoryColor } from '../utils/helpers';
 import type { BIIType } from '../types';
 import OKRCommentPanel from '../components/OKRCommentPanel';
@@ -55,9 +56,9 @@ interface KRCandidate {
 
 export default function Wizard() {
   const navigate = useNavigate();
-  // URL 파라미터 처리 (조직 ID가 없을 수도 있음)
   const { orgId: urlOrgId } = useParams<{ orgId: string }>();
   const { fetchObjectives, fetchKRs, organizations } = useStore();
+  const { user } = useAuth();
 
   // ==================== State 관리 ====================
   
@@ -837,89 +838,106 @@ export default function Wizard() {
   // ==================== Render ====================
 
   // [화면 1] 조직 선택 화면 (URL 파라미터 없을 때)
+  // 내가 속한 조직 필터 (user_roles 기반)
+  const [myOrgIds, setMyOrgIds] = useState<string[]>([]);
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    const loadMyOrgs = async () => {
+      if (!user?.id) return;
+      try {
+        const { data } = await supabase
+          .from('user_roles')
+          .select('org_id, roles!inner(level)')
+          .eq('profile_id', user.id);
+
+        if (data) {
+          setMyOrgIds(data.map((r: any) => r.org_id).filter(Boolean));
+          const maxLevel = Math.max(...data.map((r: any) => r.roles?.level || 0));
+          setIsAdmin(maxLevel >= 90);
+        }
+      } catch (err) {
+        console.warn('내 조직 조회 실패:', err);
+      }
+    };
+    loadMyOrgs();
+  }, [user?.id]);
+
   if (showOrgSelector) {
+    // 내가 속한 조직만 (전사 제외)
+    const myOrgs = organizations.filter(o => 
+      o.level !== '전사' && myOrgIds.includes(o.id)
+    );
+
     return (
-      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-        <div className="bg-white rounded-2xl p-8 max-w-4xl w-full mx-4 max-h-[80vh] overflow-y-auto">
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-2xl font-bold text-slate-900">조직 선택</h2>
-            <button 
-              onClick={() => navigate(-1)}
-              className="text-slate-400 hover:text-slate-600 transition-colors"
-            >
-              <X className="w-6 h-6" />
-            </button>
-          </div>
-
-          <p className="text-slate-600 mb-6">
-            목표를 수립할 조직을 선택해주세요
-          </p>
-
-          {/* 전사 OKR은 CEO OKR 수립 메뉴에서 수립 — 여기서는 하위 조직만 */}
-
-          {/* 부문 */}
-          {organizations.filter(o => o.level === '부문').length > 0 && (
-            <div className="mb-6">
-              <h3 className="text-sm font-semibold text-slate-700 mb-3">부문</h3>
-              <div className="grid grid-cols-2 gap-3">
-                {organizations
-                  .filter(o => o.level === '부문')
-                  .map(org => (
-                    <button
-                      key={org.id}
-                      onClick={() => handleSelectOrg(org.id)}
-                      className="text-left border-2 border-slate-200 rounded-xl p-4 hover:border-blue-500 hover:bg-blue-50 transition-all"
-                    >
-                      <div className="text-sm text-slate-500">{org.level} • {org.orgType}</div>
-                      <div className="text-base font-semibold text-slate-900 mt-1">{org.name}</div>
-                    </button>
-                  ))}
-              </div>
-            </div>
-          )}
-
-          {/* 본부 */}
-          {organizations.filter(o => o.level === '본부').length > 0 && (
-            <div className="mb-6">
-              <h3 className="text-sm font-semibold text-slate-700 mb-3">본부</h3>
-              <div className="grid grid-cols-2 gap-3">
-                {organizations
-                  .filter(o => o.level === '본부')
-                  .map(org => (
-                    <button
-                      key={org.id}
-                      onClick={() => handleSelectOrg(org.id)}
-                      className="text-left border-2 border-slate-200 rounded-xl p-4 hover:border-blue-500 hover:bg-blue-50 transition-all"
-                    >
-                      <div className="text-sm text-slate-500">{org.level} • {org.orgType}</div>
-                      <div className="text-base font-semibold text-slate-900 mt-1">{org.name}</div>
-                    </button>
-                  ))}
-              </div>
-            </div>
-          )}
-
-          {/* 팀 */}
-          {organizations.filter(o => o.level === '팀').length > 0 && (
-            <div>
-              <h3 className="text-sm font-semibold text-slate-700 mb-3">팀</h3>
-              <div className="grid grid-cols-2 gap-3">
-                {organizations
-                  .filter(o => o.level === '팀')
-                  .map(org => (
-                    <button
-                      key={org.id}
-                      onClick={() => handleSelectOrg(org.id)}
-                      className="text-left border-2 border-slate-200 rounded-xl p-4 hover:border-blue-500 hover:bg-blue-50 transition-all"
-                    >
-                      <div className="text-sm text-slate-500">{org.level} • {org.orgType}</div>
-                      <div className="text-base font-semibold text-slate-900 mt-1">{org.name}</div>
-                    </button>
-                  ))}
-              </div>
-            </div>
-          )}
+      <div className="p-6 max-w-3xl mx-auto">
+        <div className="flex items-center gap-4 mb-6">
+          <button 
+            onClick={() => navigate(-1)}
+            className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-600"
+          >
+            <ArrowLeft className="w-6 h-6" />
+          </button>
+          <h1 className="text-2xl font-bold text-slate-900">조직 OKR 수립</h1>
         </div>
+
+        {/* CEO 안내 */}
+        {isAdmin && (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-5 mb-6">
+            <div className="flex items-start gap-3">
+              <AlertCircle className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" />
+              <div>
+                <p className="text-amber-900 font-semibold text-sm">전사 OKR은 별도 메뉴에서 수립합니다</p>
+                <p className="text-amber-700 text-sm mt-1">
+                  CEO는 <strong>"전사 OKR 수립"</strong> 메뉴에서 전사 OKR 초안을 먼저 수립해주세요.
+                  전사 초안이 완성되면 하위 조직 초안이 자동 배포됩니다.
+                </p>
+                <button
+                  onClick={() => navigate('/ceo-okr-setup')}
+                  className="mt-3 px-4 py-2 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700 transition-colors"
+                >
+                  전사 OKR 수립으로 이동 →
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 내가 속한 조직 목록 */}
+        {myOrgs.length > 0 ? (
+          <div>
+            <p className="text-slate-600 text-sm mb-4">내가 속한 조직의 OKR을 수립합니다.</p>
+            <div className="grid grid-cols-1 gap-3">
+              {myOrgs.map(org => (
+                <button
+                  key={org.id}
+                  onClick={() => handleSelectOrg(org.id)}
+                  className="text-left border-2 border-slate-200 rounded-xl p-5 hover:border-blue-500 hover:bg-blue-50 transition-all"
+                >
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-xs text-slate-500 bg-slate-100 px-2 py-0.5 rounded">{org.level}</span>
+                        <span className="text-xs text-slate-500">{org.orgType}</span>
+                      </div>
+                      <div className="text-lg font-semibold text-slate-900">{org.name}</div>
+                      {org.mission && (
+                        <div className="text-sm text-slate-500 mt-1">{org.mission}</div>
+                      )}
+                    </div>
+                    <ChevronRight className="w-5 h-5 text-slate-400" />
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-8 text-center">
+            <Target className="w-10 h-10 text-slate-300 mx-auto mb-3" />
+            <p className="text-slate-500 text-sm">배정된 조직이 없습니다</p>
+            <p className="text-slate-400 text-xs mt-1">관리자에게 조직 배정을 요청하세요</p>
+          </div>
+        )}
       </div>
     );
   }
