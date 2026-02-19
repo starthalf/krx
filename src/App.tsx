@@ -21,6 +21,9 @@ import Notifications from './pages/Notifications';
 import ApprovalInbox from './pages/ApprovalInbox';
 import OKRMap from './pages/OKRMap';
 import CEOOKRSetup from './pages/CEOOKRSetup';
+// [NEW] 기간 관리 페이지
+import PeriodCloseWizard from './pages/PeriodCloseWizard';
+import PeriodHistory from './pages/PeriodHistory';
 
 function App() {
   return (
@@ -63,6 +66,18 @@ function App() {
               <ProtectedRoute>
                 <WithOnboardingCheck>
                   <AdminSettings />
+                </WithOnboardingCheck>
+              </ProtectedRoute>
+            }
+          />
+          
+          {/* [NEW] 기간 마감 위자드 (전체 화면) */}
+          <Route
+            path="/period-close/:periodId"
+            element={
+              <ProtectedRoute>
+                <WithOnboardingCheck>
+                  <PeriodCloseWizard />
                 </WithOnboardingCheck>
               </ProtectedRoute>
             }
@@ -119,6 +134,10 @@ function App() {
             
             {/* 내 설정 */}
             <Route path="my-settings" element={<MySettings />} />
+            
+            {/* [NEW] 기간 히스토리 */}
+            <Route path="period-history" element={<PeriodHistory />} />
+            <Route path="period-history/:periodId" element={<PeriodHistory />} />
           </Route>
           
           {/* 없는 경로 → 대시보드로 리다이렉트 */}
