@@ -792,8 +792,13 @@ export default function PlanningCycleManager() {
               <div className="mt-3 pt-3 border-t border-slate-100 flex items-center justify-end">
                 <button
                   onClick={() => handleDeleteAllChildOKRs(cycle)}
-                  disabled={actionLoading}
-                  className="text-xs text-red-400 hover:text-red-600 flex items-center gap-1.5 transition-colors disabled:opacity-50"
+                  disabled={actionLoading || cycle.status !== 'paused'}
+                  className={`text-xs flex items-center gap-1.5 transition-colors disabled:opacity-30 ${
+                    cycle.status === 'paused'
+                      ? 'text-red-400 hover:text-red-600 cursor-pointer'
+                      : 'text-slate-300 cursor-not-allowed'
+                  }`}
+                  title={cycle.status !== 'paused' ? '일시중지 상태에서만 삭제할 수 있습니다' : ''}
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                   하위 조직 OKR 전체 삭제 (전사 OKR 유지)
@@ -836,4 +841,4 @@ export default function PlanningCycleManager() {
       )}
     </div>
   );
-} 
+}
