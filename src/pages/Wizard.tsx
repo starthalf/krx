@@ -217,7 +217,7 @@ export default function Wizard() {
         .from('objectives')
         .select(`
           id, name, bii_type, period, status, source, sort_order,
-          parent_obj_id, cascade_type, approval_status
+          parent_obj_id, cascade_type, approval_status, perspective
         `)
         .eq('org_id', targetOrgId)
         .eq('period', '2025-H1')
@@ -234,7 +234,7 @@ export default function Wizard() {
           id: obj.id,
           name: obj.name,
           biiType: obj.bii_type || 'Improve',
-          perspective: '재무', // DB에 perspective 없으면 기본값
+          perspective: obj.perspective || '재무', // DB에서 perspective 로드
           selected: true,
           parentObjId: obj.parent_obj_id,
           cascadeType: obj.cascade_type || 'independent',
@@ -1538,6 +1538,36 @@ export default function Wizard() {
                                 <option value="학습성장">학습성장</option>
                               </select>
                             </div>
+                            {/* 상위 목표 연결 */}
+                            {parentObjectives.length > 0 && (
+                              <div>
+                                <label className="block text-xs text-slate-500 mb-1">
+                                  <Link2 className="w-3 h-3 inline mr-1" />상위 목표 연결
+                                </label>
+                                <select
+                                  value={obj.parentObjId || ''}
+                                  onChange={(e) => setObjectives(prev => prev.map(o => 
+                                    o.id === obj.id ? { ...o, parentObjId: e.target.value || null } : o
+                                  ))}
+                                  className="w-full px-2 py-1.5 border border-violet-300 bg-violet-50/50 rounded text-xs focus:ring-2 focus:ring-violet-400 outline-none"
+                                >
+                                  <option value="">독립 목표 (연결 없음)</option>
+                                  {Array.from(new Set(parentObjectives.map(po => po.orgId))).map(pOrgId => {
+                                    const orgObjs = parentObjectives.filter(po => po.orgId === pOrgId);
+                                    const orgInfo = orgObjs[0];
+                                    return (
+                                      <optgroup key={pOrgId} label={`${orgInfo.orgLevel} · ${orgInfo.orgName}`}>
+                                        {orgObjs.map((po, idx) => (
+                                          <option key={po.id} value={po.id}>
+                                            O{idx + 1} [{po.biiType}] {po.name}
+                                          </option>
+                                        ))}
+                                      </optgroup>
+                                    );
+                                  })}
+                                </select>
+                              </div>
+                            )}
                             <div className="flex gap-1 justify-end">
                               <button
                                 onClick={() => setEditingObjId(null)}
@@ -1579,11 +1609,11 @@ export default function Wizard() {
                                   <span className="text-xs text-violet-400">›</span>
                                   <span className="text-xs text-violet-800 truncate">{parentObj.name}</span>
                                 </div>
-                              ) : obj.source === 'ai_draft' ? (
+                              ) : (
                                 <div className="flex items-center gap-1 mt-2">
                                   <span className="text-xs text-slate-400">독립 목표</span>
                                 </div>
-                              ) : null;
+                              );
                             })()}
                           </div>
                         )}
@@ -1608,14 +1638,6 @@ export default function Wizard() {
 
             <div className="flex gap-2">
               <button 
-                onClick={handleAIGenerateObjectives}
-                disabled={isAIGenerating}
-                className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors text-sm font-medium flex items-center gap-2"
-              >
-                <RefreshCw className={`w-4 h-4 ${isAIGenerating ? 'animate-spin' : ''}`} />
-                {isAIGenerating ? '생성 중...' : 'AI 재생성'}
-              </button>
-              <button 
                 onClick={() => {
                   const newId = `obj-new-${Date.now()}`;
                   const newObj: ObjectiveCandidate = {
@@ -1623,7 +1645,8 @@ export default function Wizard() {
                     name: '',
                     biiType: 'Improve',
                     perspective: '재무',
-                    selected: true
+                    selected: true,
+                    parentObjId: null,
                   };
                   setObjectives(prev => [...prev, newObj]);
                   setEditingObjId(newId);
