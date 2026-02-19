@@ -4,12 +4,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Calendar, Plus, ChevronRight, CheckCircle2, Clock,
-  AlertTriangle, Archive, Play, Lock, Loader2,
-  ChevronDown, Building2, BarChart3, History
+  Calendar, Plus, ChevronRight, AlertTriangle, Archive, 
+  Play, Lock, Loader2, ChevronDown, BarChart3, History
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
-import { useStore } from '../../store/useStore';
 import {
   fetchFiscalPeriods,
   fetchPeriodHierarchy,
@@ -152,14 +150,14 @@ function PeriodCard({ period, childPeriods, onAction, level = 0 }: PeriodCardPro
           </div>
           
           <div className="flex items-center gap-2">
-            {actions.map((action, idx) => (
+            {actions.map((act, idx) => (
               <button
                 key={idx}
-                onClick={() => onAction(period, action.action)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${action.color}`}
+                onClick={() => onAction(period, act.action)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${act.color}`}
               >
-                <action.icon className="w-3.5 h-3.5" />
-                {action.label}
+                <act.icon className="w-3.5 h-3.5" />
+                {act.label}
               </button>
             ))}
           </div>
@@ -194,8 +192,10 @@ function PeriodCard({ period, childPeriods, onAction, level = 0 }: PeriodCardPro
 // ─────────────────────────────────────────────────────────────
 export default function FiscalPeriodManager() {
   const navigate = useNavigate();
-  const { user } = useAuth();
-  const company = useStore(state => state.company);
+  const { user, profile } = useAuth();
+  
+  // profile.company_id 사용
+  const companyId = profile?.company_id;
   
   const [loading, setLoading] = useState(true);
   const [periods, setPeriods] = useState<FiscalPeriod[]>([]);
@@ -206,32 +206,32 @@ export default function FiscalPeriodManager() {
   const [error, setError] = useState<string | null>(null);
   
   // 중복 로드 방지
-  const loadedRef = useRef(false);
-  const companyIdRef = useRef<string | null>(null);
+  const loadedCompanyIdRef = useRef<string | null>(null);
 
   // ─────────────────────────────────────────────────────────
   // Data Loading
   // ─────────────────────────────────────────────────────────
   useEffect(() => {
     const loadPeriods = async () => {
-      // company가 없으면 스킵
-      if (!company?.id) {
+      // companyId가 없으면 대기
+      if (!companyId) {
         setLoading(false);
         return;
       }
       
       // 이미 같은 company로 로드했으면 스킵
-      if (companyIdRef.current === company.id && loadedRef.current) {
+      if (loadedCompanyIdRef.current === companyId) {
         return;
       }
       
-      companyIdRef.current = company.id;
-      loadedRef.current = true;
+      loadedCompanyIdRef.current = companyId;
       setLoading(true);
       setError(null);
       
       try {
-        const data = await fetchFiscalPeriods(company.id);
+        console.log('📅 기간 데이터 로드 시작:', companyId);
+        const data = await fetchFiscalPeriods(companyId);
+        console.log('📅 기간 데이터:', data);
         setPeriods(data);
         
         // 연도별로 그룹핑하여 계층 구조 로드
@@ -240,10 +240,12 @@ export default function FiscalPeriodManager() {
           .map(p => parseInt(p.periodCode))
         );
         
+        console.log('📅 연도 목록:', Array.from(years));
+        
         const hierarchyMap = new Map<number, FiscalPeriod>();
         for (const year of years) {
           try {
-            const hierarchy = await fetchPeriodHierarchy(company.id, year);
+            const hierarchy = await fetchPeriodHierarchy(companyId, year);
             if (hierarchy) {
               hierarchyMap.set(year, hierarchy);
             }
@@ -261,18 +263,17 @@ export default function FiscalPeriodManager() {
     };
     
     loadPeriods();
-  }, [company?.id]);
+  }, [companyId]);
   
   // 데이터 새로고침 함수
   const refreshPeriods = async () => {
-    if (!company?.id) return;
+    if (!companyId) return;
     
-    loadedRef.current = false;
-    companyIdRef.current = null;
+    loadedCompanyIdRef.current = null; // 리셋하여 다시 로드
     setLoading(true);
     
     try {
-      const data = await fetchFiscalPeriods(company.id);
+      const data = await fetchFiscalPeriods(companyId);
       setPeriods(data);
       
       const years = new Set(data
@@ -282,14 +283,13 @@ export default function FiscalPeriodManager() {
       
       const hierarchyMap = new Map<number, FiscalPeriod>();
       for (const year of years) {
-        const hierarchy = await fetchPeriodHierarchy(company.id, year);
+        const hierarchy = await fetchPeriodHierarchy(companyId, year);
         if (hierarchy) {
           hierarchyMap.set(year, hierarchy);
         }
       }
       setHierarchyByYear(hierarchyMap);
-      loadedRef.current = true;
-      companyIdRef.current = company.id;
+      loadedCompanyIdRef.current = companyId;
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -301,11 +301,11 @@ export default function FiscalPeriodManager() {
   // Actions
   // ─────────────────────────────────────────────────────────
   const handleCreateYear = async () => {
-    if (!company?.id || !user?.id) return;
+    if (!companyId || !user?.id) return;
     
     setActionLoading(true);
     try {
-      const result = await createFiscalYear(company.id, newYear, user.id);
+      const result = await createFiscalYear(companyId, newYear, user.id);
       if (!result.success) {
         alert(result.error || '기간 생성 실패');
         return;
@@ -313,7 +313,7 @@ export default function FiscalPeriodManager() {
       
       alert(`${newYear}년 기간이 생성되었습니다.\n(연도 + 반기 2개 + 분기 4개)`);
       setShowCreateForm(false);
-      refreshPeriods();
+      await refreshPeriods();
     } catch (err: any) {
       alert(`오류: ${err.message}`);
     } finally {
@@ -334,7 +334,7 @@ export default function FiscalPeriodManager() {
             alert(result.error || '활성화 실패');
             return;
           }
-          refreshPeriods();
+          await refreshPeriods();
         } catch (err: any) {
           alert(`오류: ${err.message}`);
         } finally {
@@ -361,6 +361,15 @@ export default function FiscalPeriodManager() {
   // ─────────────────────────────────────────────────────────
   // Render
   // ─────────────────────────────────────────────────────────
+  if (!companyId) {
+    return (
+      <div className="text-center py-12 text-slate-500">
+        <Loader2 className="w-8 h-8 animate-spin mx-auto mb-4 text-slate-400" />
+        회사 정보를 불러오는 중...
+      </div>
+    );
+  }
+  
   if (loading) {
     return (
       <div className="flex justify-center py-12">
@@ -380,14 +389,6 @@ export default function FiscalPeriodManager() {
         >
           다시 시도
         </button>
-      </div>
-    );
-  }
-  
-  if (!company?.id) {
-    return (
-      <div className="text-center py-12 text-slate-500">
-        회사 정보를 불러오는 중...
       </div>
     );
   }
