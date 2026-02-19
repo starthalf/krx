@@ -4,9 +4,9 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import {
-  CalendarClock, Plus, Play, Square, CheckCircle2, Clock,
+  CalendarClock, Plus, Play, Square, CheckCircle2, Clock, Pause,
   AlertTriangle, ChevronRight, Edit3, Trash2, ArrowRight,
-  Megaphone, X, Calendar, FileText, Users, Timer
+  Megaphone, X, Calendar, FileText, Users, Timer, RefreshCw
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -18,12 +18,15 @@ interface PlanningCycle {
   company_id: string;
   period: string;
   title: string;
-  status: 'planning' | 'in_progress' | 'closed' | 'finalized';
+  status: 'planning' | 'in_progress' | 'paused' | 'closed' | 'finalized' | 'cancelled';
   starts_at: string;
   deadline_at: string;
   grace_period_at: string | null;
   company_okr_finalized: boolean;
   company_okr_finalized_at: string | null;
+  all_orgs_draft_generated: boolean;
+  all_orgs_draft_generated_at: string | null;
+  cycle_started_at: string | null;
   message: string | null;
   target_org_levels: string[] | null;
   auto_remind_days: number[];
@@ -45,8 +48,10 @@ interface CycleFormData {
 const STATUS_CONFIG: Record<string, { label: string; color: string; icon: typeof Clock; bgColor: string }> = {
   planning: { label: '준비중', color: 'text-slate-600', icon: Clock, bgColor: 'bg-slate-100' },
   in_progress: { label: '수립 진행중', color: 'text-blue-600', icon: Play, bgColor: 'bg-blue-100' },
-  closed: { label: '마감', color: 'text-amber-600', icon: Square, bgColor: 'bg-amber-100' },
+  paused: { label: '일시중지', color: 'text-amber-600', icon: Pause, bgColor: 'bg-amber-100' },
+  closed: { label: '마감', color: 'text-orange-600', icon: Square, bgColor: 'bg-orange-100' },
   finalized: { label: '확정', color: 'text-green-600', icon: CheckCircle2, bgColor: 'bg-green-100' },
+  cancelled: { label: '취소됨', color: 'text-red-600', icon: Trash2, bgColor: 'bg-red-100' },
 };
 
 const PERIOD_OPTIONS = [
@@ -124,7 +129,6 @@ export default function PlanningCycleManager() {
       if (error) throw error;
       setCycles(data || []);
     } catch (err: any) {
-      // 테이블이 없거나 에러 → 빈 배열로 처리 (첫 사용 시 정상)
       console.warn('사이클 조회:', err.message);
       setCycles([]);
     } finally {
@@ -165,7 +169,6 @@ export default function PlanningCycleManager() {
     setShowForm(true);
   };
 
-  // period 선택 시 title 자동 생성
   const handlePeriodChange = (period: string) => {
     const periodLabel = PERIOD_OPTIONS.find(p => p.value === period)?.label || period;
     setForm(prev => ({
@@ -230,24 +233,57 @@ export default function PlanningCycleManager() {
     }
   };
 
-  // ─── 상태 전환 ───────────────────────────────────────
+  // ─── 상태 전환 (직접 update) ─────────────────────────
+  const handleStatusChange = async (cycleId: string, newStatus: string) => {
+    setActionLoading(true);
+    try {
+      const { error } = await supabase
+        .from('okr_planning_cycles')
+        .update({ status: newStatus })
+        .eq('id', cycleId);
+
+      if (error) throw error;
+      fetchCycles();
+    } catch (err: any) {
+      alert(`상태 전환 실패: ${err.message}`);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // ─── 상태 전환 (RPC 사용 - 알림 포함) ────────────────
   const handleTransition = async (cycleId: string, newStatus: string) => {
     const confirmMessages: Record<string, string> = {
-      in_progress: '전사 OKR이 확정되었고, 하위 조직의 수립을 시작하시겠습니까?\n\n시작하면 모든 조직에 수립 시작 알림이 발송됩니다.',
+      in_progress: '수립을 시작(재개)하시겠습니까?\n\n모든 조직에 수립 시작 알림이 발송됩니다.',
+      paused: '사이클을 일시중지하시겠습니까?\n\n조직장에게 일시중지 알림이 발송됩니다.\n초안 재생성이 필요한 경우 전사 OKR 수립 페이지에서 진행하세요.',
       closed: '수립 기간을 마감하시겠습니까?\n\n마감 후에는 신규 제출이 불가합니다.',
       finalized: '사이클을 최종 확정하시겠습니까?\n\n확정 후에는 실행/체크인 모드로 전환됩니다.',
     };
 
     if (!confirm(confirmMessages[newStatus] || `상태를 '${newStatus}'로 변경하시겠습니까?`)) return;
 
+    // paused는 직접 update (RPC에 없을 수 있으므로)
+    if (newStatus === 'paused') {
+      await handleStatusChange(cycleId, 'paused');
+      return;
+    }
+
     setActionLoading(true);
     try {
-      const { data, error } = await supabase.rpc('transition_cycle_status', {
+      // RPC가 있으면 사용, 없으면 직접 update
+      const { error: rpcError } = await supabase.rpc('transition_cycle_status', {
         p_cycle_id: cycleId,
         p_new_status: newStatus,
       });
 
-      if (error) throw error;
+      if (rpcError) {
+        // RPC가 없는 경우 fallback으로 직접 update
+        if (rpcError.message?.includes('function') || rpcError.message?.includes('does not exist')) {
+          await handleStatusChange(cycleId, newStatus);
+        } else {
+          throw rpcError;
+        }
+      }
       fetchCycles();
     } catch (err: any) {
       alert(`상태 전환 실패: ${err.message}`);
@@ -275,33 +311,67 @@ export default function PlanningCycleManager() {
     }
   };
 
-  // ─── 상태별 액션 버튼 ────────────────────────────────
-  const getNextAction = (cycle: PlanningCycle) => {
+  // ─── 상태별 액션 버튼들 ──────────────────────────────
+  const getActions = (cycle: PlanningCycle) => {
+    const actions: { label: string; action: () => void; icon: typeof Play; color: string; variant?: 'primary' | 'secondary' | 'danger' }[] = [];
+
     switch (cycle.status) {
       case 'planning':
-        return {
+        actions.push({
           label: '수립 시작',
           action: () => handleTransition(cycle.id, 'in_progress'),
           icon: Play,
           color: 'bg-blue-600 hover:bg-blue-700 text-white',
-        };
+          variant: 'primary',
+        });
+        break;
+
       case 'in_progress':
-        return {
+        actions.push({
+          label: '일시중지',
+          action: () => handleTransition(cycle.id, 'paused'),
+          icon: Pause,
+          color: 'border border-amber-300 text-amber-700 bg-amber-50 hover:bg-amber-100',
+          variant: 'secondary',
+        });
+        actions.push({
           label: '수립 마감',
           action: () => handleTransition(cycle.id, 'closed'),
           icon: Square,
-          color: 'bg-amber-600 hover:bg-amber-700 text-white',
-        };
+          color: 'bg-orange-600 hover:bg-orange-700 text-white',
+          variant: 'primary',
+        });
+        break;
+
+      case 'paused':
+        actions.push({
+          label: '수립 재개',
+          action: () => handleTransition(cycle.id, 'in_progress'),
+          icon: Play,
+          color: 'bg-blue-600 hover:bg-blue-700 text-white',
+          variant: 'primary',
+        });
+        break;
+
       case 'closed':
-        return {
+        actions.push({
+          label: '재오픈',
+          action: () => handleTransition(cycle.id, 'in_progress'),
+          icon: RefreshCw,
+          color: 'border border-slate-300 text-slate-600 hover:bg-slate-50',
+          variant: 'secondary',
+        });
+        actions.push({
           label: '최종 확정',
           action: () => handleTransition(cycle.id, 'finalized'),
           icon: CheckCircle2,
           color: 'bg-green-600 hover:bg-green-700 text-white',
-        };
-      default:
-        return null;
+          variant: 'primary',
+        });
+        break;
     }
+
+    return actions;
   };
 
   // ─── 렌더링 ──────────────────────────────────────────
@@ -313,8 +383,8 @@ export default function PlanningCycleManager() {
     );
   }
 
-  const activeCycles = cycles.filter(c => c.status !== 'finalized');
-  const pastCycles = cycles.filter(c => c.status === 'finalized');
+  const activeCycles = cycles.filter(c => !['finalized', 'cancelled'].includes(c.status));
+  const pastCycles = cycles.filter(c => ['finalized', 'cancelled'].includes(c.status));
 
   return (
     <div className="space-y-6">
@@ -353,7 +423,6 @@ export default function PlanningCycleManager() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            {/* 기간 선택 */}
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1.5">
                 <Calendar className="w-3.5 h-3.5 inline mr-1" />
@@ -370,7 +439,6 @@ export default function PlanningCycleManager() {
               </select>
             </div>
 
-            {/* 제목 */}
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1.5">
                 <FileText className="w-3.5 h-3.5 inline mr-1" />
@@ -385,11 +453,8 @@ export default function PlanningCycleManager() {
               />
             </div>
 
-            {/* 시작일 */}
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1.5">
-                수립 시작일 *
-              </label>
+              <label className="block text-sm font-medium text-slate-700 mb-1.5">수립 시작일 *</label>
               <input
                 type="date"
                 value={form.starts_at}
@@ -398,11 +463,8 @@ export default function PlanningCycleManager() {
               />
             </div>
 
-            {/* 마감일 */}
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1.5">
-                수립 마감일 *
-              </label>
+              <label className="block text-sm font-medium text-slate-700 mb-1.5">수립 마감일 *</label>
               <input
                 type="date"
                 value={form.deadline_at}
@@ -411,7 +473,6 @@ export default function PlanningCycleManager() {
               />
             </div>
 
-            {/* 유예 마감일 (선택) */}
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1.5">
                 유예 마감일 <span className="text-slate-400">(선택)</span>
@@ -425,7 +486,6 @@ export default function PlanningCycleManager() {
               <p className="text-xs text-slate-400 mt-1">마감 후에도 제출을 허용할 추가 기한</p>
             </div>
 
-            {/* 자동 알림 */}
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1.5">
                 <Timer className="w-3.5 h-3.5 inline mr-1" />
@@ -454,7 +514,6 @@ export default function PlanningCycleManager() {
             </div>
           </div>
 
-          {/* 메시지 */}
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1.5">
               <Megaphone className="w-3.5 h-3.5 inline mr-1" />
@@ -463,18 +522,14 @@ export default function PlanningCycleManager() {
             <textarea
               value={form.message}
               onChange={e => setForm(prev => ({ ...prev, message: e.target.value }))}
-              placeholder="예: 이번 분기는 수익성 중심으로 목표를 수립해 주세요. 전사 OKR을 참고하여..."
+              placeholder="예: 이번 분기는 수익성 중심으로 목표를 수립해 주세요."
               rows={3}
               className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none"
             />
           </div>
 
-          {/* 폼 액션 */}
           <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100">
-            <button
-              onClick={resetForm}
-              className="px-4 py-2 text-sm text-slate-600 hover:text-slate-900 transition-colors"
-            >
+            <button onClick={resetForm} className="px-4 py-2 text-sm text-slate-600 hover:text-slate-900 transition-colors">
               취소
             </button>
             <button
@@ -507,14 +562,25 @@ export default function PlanningCycleManager() {
       )}
 
       {activeCycles.map(cycle => {
-        const statusConf = STATUS_CONFIG[cycle.status];
+        const statusConf = STATUS_CONFIG[cycle.status] || STATUS_CONFIG['planning'];
         const StatusIcon = statusConf.icon;
-        const nextAction = getNextAction(cycle);
+        const actions = getActions(cycle);
         const days = daysUntil(cycle.deadline_at);
         const isOverdue = days < 0;
 
         return (
-          <div key={cycle.id} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+          <div key={cycle.id} className={`bg-white rounded-xl border overflow-hidden ${
+            cycle.status === 'paused' ? 'border-amber-300' : 'border-slate-200'
+          }`}>
+            {/* 일시중지 배너 */}
+            {cycle.status === 'paused' && (
+              <div className="bg-amber-50 border-b border-amber-200 px-6 py-2.5 flex items-center gap-2">
+                <Pause className="w-4 h-4 text-amber-600" />
+                <span className="text-sm font-medium text-amber-800">사이클 일시중지됨</span>
+                <span className="text-xs text-amber-600 ml-2">— 전사 OKR 수립 페이지에서 초안을 재생성한 후 재개하세요</span>
+              </div>
+            )}
+
             {/* 사이클 헤더 */}
             <div className="px-6 py-4 border-b border-slate-100">
               <div className="flex items-start justify-between">
@@ -535,8 +601,8 @@ export default function PlanningCycleManager() {
                   </div>
                 </div>
 
-                {/* 편집/삭제 (planning 상태에서만) */}
-                {cycle.status === 'planning' && (
+                {/* 편집/삭제 (planning 또는 paused 상태에서) */}
+                {['planning', 'paused'].includes(cycle.status) && (
                   <div className="flex items-center gap-1">
                     <button
                       onClick={() => openEditForm(cycle)}
@@ -559,7 +625,6 @@ export default function PlanningCycleManager() {
 
             {/* 사이클 상세 정보 */}
             <div className="px-6 py-4 space-y-4">
-              {/* 일정 정보 */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div>
                   <p className="text-xs text-slate-400 mb-0.5">시작일</p>
@@ -579,7 +644,8 @@ export default function PlanningCycleManager() {
                     days <= 7 ? 'text-blue-600' :
                     'text-slate-900'
                   }`}>
-                    {isOverdue ? `마감 ${Math.abs(days)}일 초과` :
+                    {cycle.status === 'paused' ? '⏸ 중지됨' :
+                     isOverdue ? `마감 ${Math.abs(days)}일 초과` :
                      days === 0 ? '오늘 마감' :
                      `D-${days}`}
                   </p>
@@ -592,7 +658,6 @@ export default function PlanningCycleManager() {
                 </div>
               </div>
 
-              {/* 유예 기간 */}
               {cycle.grace_period_at && (
                 <div className="flex items-center gap-2 text-sm text-slate-500 bg-slate-50 px-3 py-2 rounded-lg">
                   <AlertTriangle className="w-4 h-4 text-amber-500" />
@@ -600,7 +665,6 @@ export default function PlanningCycleManager() {
                 </div>
               )}
 
-              {/* 안내 메시지 */}
               {cycle.message && (
                 <div className="bg-blue-50 border border-blue-100 rounded-lg px-4 py-3">
                   <p className="text-sm text-blue-800 flex items-start gap-2">
@@ -610,7 +674,6 @@ export default function PlanningCycleManager() {
                 </div>
               )}
 
-              {/* 자동 알림 설정 */}
               <div className="flex items-center gap-2 text-xs text-slate-400">
                 <Timer className="w-3.5 h-3.5" />
                 자동 알림:
@@ -629,27 +692,36 @@ export default function PlanningCycleManager() {
                     const stepConf = STATUS_CONFIG[step];
                     const StepIcon = stepConf.icon;
                     const stages = ['planning', 'in_progress', 'closed', 'finalized'];
-                    const currentIdx = stages.indexOf(cycle.status);
+                    // paused는 in_progress와 같은 위치
+                    const currentStage = cycle.status === 'paused' ? 'in_progress' : cycle.status;
+                    const currentIdx = stages.indexOf(currentStage);
                     const stepIdx = stages.indexOf(step);
                     const isCompleted = stepIdx < currentIdx;
                     const isCurrent = stepIdx === currentIdx;
+                    const isPaused = cycle.status === 'paused' && step === 'in_progress';
 
                     return (
                       <div key={step} className="flex items-center">
                         <div className="flex flex-col items-center">
                           <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
                             isCompleted ? 'bg-green-100 text-green-600' :
+                            isPaused ? 'bg-amber-500 text-white ring-2 ring-amber-200' :
                             isCurrent ? 'bg-blue-600 text-white ring-2 ring-blue-200' :
                             'bg-slate-200 text-slate-400'
                           }`}>
                             {isCompleted ? (
                               <CheckCircle2 className="w-4 h-4" />
+                            ) : isPaused ? (
+                              <Pause className="w-4 h-4" />
                             ) : (
                               <StepIcon className="w-4 h-4" />
                             )}
                           </div>
-                          <span className={`text-xs mt-1 ${isCurrent ? 'font-medium text-blue-600' : 'text-slate-400'}`}>
-                            {stepConf.label}
+                          <span className={`text-xs mt-1 ${
+                            isPaused ? 'font-medium text-amber-600' :
+                            isCurrent ? 'font-medium text-blue-600' : 'text-slate-400'
+                          }`}>
+                            {isPaused ? '일시중지' : stepConf.label}
                           </span>
                         </div>
                         {idx < 3 && (
@@ -662,30 +734,20 @@ export default function PlanningCycleManager() {
                   })}
                 </div>
 
-                {/* 다음 액션 버튼 */}
-                {nextAction && (
-                  <button
-                    onClick={nextAction.action}
-                    disabled={actionLoading}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 ${nextAction.color}`}
-                  >
-                    <nextAction.icon className="w-4 h-4" />
-                    {nextAction.label}
-                    <ArrowRight className="w-3.5 h-3.5" />
-                  </button>
-                )}
-
-                {/* 마감 후 재오픈 */}
-                {cycle.status === 'closed' && (
-                  <button
-                    onClick={() => handleTransition(cycle.id, 'in_progress')}
-                    disabled={actionLoading}
-                    className="flex items-center gap-1.5 px-3 py-2 text-sm text-slate-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                  >
-                    <Play className="w-3.5 h-3.5" />
-                    재오픈
-                  </button>
-                )}
+                {/* 액션 버튼들 */}
+                <div className="flex items-center gap-2">
+                  {actions.map((action, idx) => (
+                    <button
+                      key={idx}
+                      onClick={action.action}
+                      disabled={actionLoading}
+                      className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 ${action.color}`}
+                    >
+                      <action.icon className="w-4 h-4" />
+                      {action.label}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
           </div>
@@ -697,23 +759,28 @@ export default function PlanningCycleManager() {
         <div className="space-y-3">
           <h3 className="text-sm font-medium text-slate-500 flex items-center gap-2">
             <CheckCircle2 className="w-4 h-4" />
-            완료된 사이클 ({pastCycles.length})
+            완료/취소된 사이클 ({pastCycles.length})
           </h3>
           <div className="space-y-2">
-            {pastCycles.map(cycle => (
-              <div key={cycle.id} className="bg-white rounded-lg border border-slate-200 px-5 py-3 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <CheckCircle2 className="w-5 h-5 text-green-500" />
-                  <div>
-                    <p className="text-sm font-medium text-slate-700">{cycle.title}</p>
-                    <p className="text-xs text-slate-400">
-                      {cycle.period} · {formatDate(cycle.starts_at)} ~ {formatDate(cycle.deadline_at)}
-                    </p>
+            {pastCycles.map(cycle => {
+              const conf = STATUS_CONFIG[cycle.status] || STATUS_CONFIG['finalized'];
+              return (
+                <div key={cycle.id} className="bg-white rounded-lg border border-slate-200 px-5 py-3 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <conf.icon className={`w-5 h-5 ${conf.color}`} />
+                    <div>
+                      <p className="text-sm font-medium text-slate-700">{cycle.title}</p>
+                      <p className="text-xs text-slate-400">
+                        {cycle.period} · {formatDate(cycle.starts_at)} ~ {formatDate(cycle.deadline_at)}
+                      </p>
+                    </div>
                   </div>
+                  <span className={`text-xs px-2 py-1 rounded-full font-medium ${conf.bgColor} ${conf.color}`}>
+                    {conf.label}
+                  </span>
                 </div>
-                <span className="text-xs text-green-600 bg-green-50 px-2 py-1 rounded-full font-medium">확정 완료</span>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
