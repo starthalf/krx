@@ -1668,7 +1668,7 @@ export default function CEOOKRSetup() {
                   {/* 하단 관리 링크 */}
                   <div className="mt-8 pt-4 border-t border-slate-100 flex items-center justify-center gap-4">
                     <button
-                      onClick={() => navigate('/okr-setup')}
+                      onClick={() => navigate('/admin?tab=cycles')}
                       className="text-sm text-slate-400 hover:text-blue-600 flex items-center gap-1.5 transition-colors"
                     >
                       <Megaphone className="w-3.5 h-3.5" /> 사이클 관리
