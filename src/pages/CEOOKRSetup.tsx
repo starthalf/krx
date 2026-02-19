@@ -1678,8 +1678,8 @@ export default function CEOOKRSetup() {
                   </div>
                   <h3 className="text-xl font-bold text-slate-900 mb-2">사이클이 시작되었습니다! 🎉</h3>
                   <p className="text-slate-600 mb-6">모든 조직장에게 알림이 발송되었습니다.</p>
-                  <p className="text-slate-600 mb-1">각 조직장은 각 조직별 OKR 초안 수정을 시작합니다.</p>
-                  <div className="flex gap-3 justify-center">
+                  <p className="text-slate-600 mb-6">각 조직장은 각 조직별 OKR 초안 수정을 시작합니다.</p>
+                  <div className="flex gap-10 justify-center">
                     <button
                       onClick={() => navigate('/okr-setup')}
                       className="px-6 py-2.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 flex items-center gap-2"
