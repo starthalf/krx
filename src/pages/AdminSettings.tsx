@@ -1,7 +1,11 @@
 // src/pages/AdminSettings.tsx
+// 관리자 설정 페이지 - 기간 관리(periods) 탭 추가 버전
 import { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { Shield, Users, Layers, Lock, Settings as SettingsIcon, ChevronRight, Building2, Mail, CalendarClock, ArrowLeft, X, Calendar } from 'lucide-react';
+import { 
+  Shield, Users, Layers, Lock, Settings as SettingsIcon, ChevronRight, 
+  Building2, Mail, CalendarClock, ArrowLeft, X, Calendar 
+} from 'lucide-react';
 import UserRolesManager from '../components/admin/UserRolesManager';
 import OrgStructureSettings from '../components/admin/OrgStructureSettings';
 import OrgStructureManager from '../components/admin/OrgStructureManager';
@@ -9,15 +13,16 @@ import RolePermissionsManager from '../components/admin/RolePermissionsManager';
 import CompanyManagement from '../components/admin/CompanyManagement';
 import UserInvitation from '../components/admin/UserInvitation';
 import PlanningCycleManager from '../components/PlanningCycleManager';
-// [NEW] 기간 관리
-import FiscalPeriodManager from '../components/admin/FiscalPeriodManager';
+import PeriodLifecycleManager from '../components/period/PeriodLifecycleManager';
 
+// ==================== 'periods' 탭 추가 ====================
 type TabType = 'companies' | 'invite' | 'users' | 'roles' | 'structure' | 'levels' | 'permissions' | 'cycles' | 'periods';
 
 const TAB_ALIASES: Record<string, TabType> = {
   'planning-cycles': 'cycles',
   'cycles': 'cycles',
-  'periods': 'periods',
+  'periods': 'periods',           // NEW
+  'fiscal-periods': 'periods',    // NEW alias
   'users': 'users',
   'invite': 'invite',
   'roles': 'roles',
@@ -83,12 +88,13 @@ export default function AdminSettings() {
     }
   };
 
+  // ==================== tabs 배열에 'periods' 추가 ====================
   const tabs = [
     { id: 'companies' as TabType, name: '회사 관리', icon: Building2, description: '등록된 회사 목록 및 관리 (Super Admin)', minLevel: 100 },
     { id: 'invite' as TabType, name: '사용자 초대', icon: Mail, description: '새로운 팀원 초대 및 초대 관리', minLevel: 90 },
     { id: 'users' as TabType, name: '사용자 관리', icon: Users, description: '사용자별 역할 및 권한 할당', minLevel: 90 },
+    { id: 'periods' as TabType, name: '기간 관리', icon: Calendar, description: '회계연도/분기/반기 기간 정의 및 라이프사이클', minLevel: 90 },  // NEW
     { id: 'cycles' as TabType, name: '수립 사이클', icon: CalendarClock, description: 'OKR 수립 기간 선언 및 관리', minLevel: 90 },
-    { id: 'periods' as TabType, name: '기간 관리', icon: Calendar, description: '연도/반기/분기 기간 및 마감 관리', minLevel: 90 },
     { id: 'structure' as TabType, name: '조직 편집', icon: Building2, description: '조직 추가/수정/삭제 및 AI 생성', minLevel: 90 },
     { id: 'levels' as TabType, name: '조직 계층', icon: Layers, description: '조직 계층 구조 템플릿 설정', minLevel: 90 },
     { id: 'roles' as TabType, name: '역할 관리', icon: Shield, description: '역할별 권한 설정 및 수정', minLevel: 100 },
@@ -178,7 +184,7 @@ export default function AdminSettings() {
                 {activeTab === 'levels' && '회사의 조직 계층 구조(전사-본부-팀 등)를 정의합니다.'}
                 {activeTab === 'permissions' && '시스템의 모든 권한 목록을 확인할 수 있습니다.'}
                 {activeTab === 'cycles' && 'OKR 수립 기간을 선언하고 진행 상황을 관리합니다. 수립 시작 → 마감 → 확정 순서로 사이클을 운영합니다.'}
-                {activeTab === 'periods' && '연도/반기/분기 기간을 생성하고 마감 프로세스를 관리합니다. 마감 시 성과 스냅샷이 자동 저장됩니다.'}
+                {activeTab === 'periods' && '회계연도, 분기, 반기 등의 기간을 정의하고 라이프사이클(활성/마감/집계)을 관리합니다.'}
                 {activeTab === 'companies' && '등록된 회사 목록을 관리하고 새 회사를 추가할 수 있습니다.'}
                 {activeTab === 'invite' && '이메일로 새로운 팀원을 초대하거나 팀 초대 링크를 생성할 수 있습니다.'}
               </p>
@@ -196,7 +202,7 @@ export default function AdminSettings() {
               {activeTab === 'levels' && <LevelSettings />}
               {activeTab === 'permissions' && <PermissionsList />}
               {activeTab === 'cycles' && <PlanningCycleManager />}
-              {activeTab === 'periods' && <FiscalPeriodManager />}
+              {activeTab === 'periods' && <PeriodLifecycleManager />}
             </div>
           </div>
         </div>
