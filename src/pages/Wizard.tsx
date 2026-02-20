@@ -12,6 +12,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { getBIIColor, getKPICategoryColor } from '../utils/helpers';
 import type { BIIType } from '../types';
 import OKRCommentPanel from '../components/OKRCommentPanel';
+import PeriodSelector, { useActivePeriod } from '../components/period/PeriodSelector';
+import { fetchActivePeriod } from '../lib/period-api';
 
 // Wizard 전용 타입
 type ApprovalStatus = 'draft' | 'submitted' | 'under_review' | 'approved' | 'rejected' | 'revision_requested';
@@ -63,6 +65,7 @@ export default function Wizard() {
   const { user } = useAuth();
 
   // ==================== State 관리 ====================
+
   
   // 조직 선택 관련
   const [selectedOrgId, setSelectedOrgId] = useState<string | null>(urlOrgId || null);
