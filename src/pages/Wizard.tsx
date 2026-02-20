@@ -850,7 +850,7 @@ useEffect(() => {
             name: obj.name,
             bii_type: obj.biiType,
             perspective: obj.perspective,
-period: selectedPeriodCode
+period: selectedPeriodCode,
             status: 'draft',
             source: isExisting ? 'manual' : (obj.source || 'manual'),
             approval_status: 'draft',
