@@ -11,6 +11,7 @@ import {
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useStore } from '../store/useStore';
+import { fetchActivePeriod } from '../lib/period-api';
 
 // ─── Types ───────────────────────────────────────────────
 interface PlanningCycle {
@@ -101,6 +102,7 @@ export default function PlanningCycleManager() {
   const [showForm, setShowForm] = useState(false);
   const [editingCycle, setEditingCycle] = useState<PlanningCycle | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
+  const [defaultPeriodCode, setDefaultPeriodCode] = useState<string>('');
 
   const [form, setForm] = useState<CycleFormData>({
     period: '2025-H1',
@@ -140,10 +142,35 @@ export default function PlanningCycleManager() {
     fetchCycles();
   }, [fetchCycles]);
 
+  // ─── 기본 기간 로드 ─────────────────────────────────────
+  useEffect(() => {
+    const loadDefaultPeriod = async () => {
+      if (!company?.id) return;
+      
+      try {
+        // 반기 기준 활성 기간 가져오기
+        const activePeriod = await fetchActivePeriod(company.id, 'half');
+        if (activePeriod) {
+          setDefaultPeriodCode(activePeriod.periodCode);
+        } else {
+          // 반기가 없으면 분기 확인
+          const activeQuarter = await fetchActivePeriod(company.id, 'quarter');
+          if (activeQuarter) {
+            setDefaultPeriodCode(activeQuarter.periodCode);
+          }
+        }
+      } catch (err) {
+        console.error('기본 기간 로드 실패:', err);
+      }
+    };
+
+    loadDefaultPeriod();
+  }, [company?.id]);
+
   // ─── 폼 초기화 ───────────────────────────────────────
   const resetForm = () => {
     setForm({
-      period: '2025-H1',
+      period: defaultPeriodCode || '2025-H1',
       title: '',
       starts_at: '',
       deadline_at: '',
@@ -847,4 +874,4 @@ export default function PlanningCycleManager() {
       )}
     </div>
   );
-} 
+}
