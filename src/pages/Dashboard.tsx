@@ -11,6 +11,7 @@ import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer 
 } from 'recharts';
 import { getMyRoleLevel, checkCanManageOrg } from '../lib/permissions';
+import PeriodStatusWidget from '../components/PeriodStatusWidget';
 
 export default function Dashboard() {
   const { 
@@ -189,69 +190,77 @@ export default function Dashboard() {
               </span>
             )}
           </div>
-          <p className="text-slate-600 mt-1">
-            {currentOrg ? `${currentOrg.name}의 성과 현황입니다.` : '데이터를 불러오는 중...'}
-          </p>
+          <p className="text-slate-500 mt-1">{currentOrg?.name || '조직을 선택하세요'}</p>
         </div>
-        <div className="flex gap-3">
-          <select 
-            className="px-4 py-2 border border-slate-300 rounded-lg bg-white text-sm font-medium focus:ring-2 focus:ring-blue-500 outline-none"
-            value={selectedOrgId}
-            onChange={(e) => setSelectedOrgId(e.target.value)}
-          >
-            {selectableOrgs.map(org => (
-              <option key={org.id} value={org.id}>{org.name}</option>
-            ))}
-          </select>
-          <button className="px-4 py-2 bg-white border border-slate-300 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50 flex items-center gap-2">
-            <Calendar className="w-4 h-4" />
-            2025년 1분기
-          </button>
-        </div>
+
+        <select
+          className="bg-white border border-slate-200 px-4 py-2 rounded-lg text-sm font-medium text-slate-700 shadow-sm"
+          value={selectedOrgId}
+          onChange={(e) => setSelectedOrgId(e.target.value)}
+        >
+          {selectableOrgs.map((org) => (
+            <option key={org.id} value={org.id}>
+              {org.name}
+            </option>
+          ))}
+        </select>
       </div>
 
-      {/* KPI 카드들 */}
-      <div className="grid grid-cols-4 gap-6">
+      {/* 기간 현황 + 상단 카드 */}
+      <div className="grid grid-cols-5 gap-6">
+        {/* 기간 현황 위젯 */}
+        <div className="col-span-1">
+          <PeriodStatusWidget variant="compact" />
+        </div>
+        
+        {/* 전체 달성률 */}
         <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
           <div className="flex items-center justify-between mb-4">
-            <span className="text-sm font-medium text-slate-600">전체 진행률</span>
-            <div className={`p-2 rounded-lg ${totalProgress >= 80 ? 'bg-green-50' : 'bg-blue-50'}`}>
-              <TrendingUp className={`w-5 h-5 ${totalProgress >= 80 ? 'text-green-600' : 'text-blue-600'}`} />
+            <span className="text-sm font-medium text-slate-600">전체 달성률</span>
+            <div className="p-2 bg-blue-50 rounded-lg">
+              <TrendingUp className="w-5 h-5 text-blue-600" />
             </div>
           </div>
-          <div className="flex items-end gap-2">
-            <span className="text-4xl font-bold text-slate-900">{totalProgress}%</span>
-            <span className="text-sm text-green-600 font-medium mb-1 flex items-center">
-              <ArrowUpRight className="w-3 h-3 mr-0.5" /> 4%p
-            </span>
-          </div>
-          <div className="mt-3 h-2 bg-slate-100 rounded-full overflow-hidden">
-            <div
-              className={`h-full rounded-full transition-all duration-1000 ${totalProgress >= 100 ? 'bg-green-500' : 'bg-blue-600'}`}
-              style={{ width: `${Math.min(totalProgress, 100)}%` }}
-            />
+          <div>
+            <div className="flex items-end gap-2 mb-2">
+              <span className="text-3xl font-bold text-slate-900">{totalProgress}%</span>
+              <span className="text-xs text-green-600 font-semibold mb-1 flex items-center">
+                <ArrowUpRight className="w-3 h-3" />+3%
+              </span>
+            </div>
+            <div className="w-full bg-slate-100 rounded-full h-2">
+              <div className="bg-blue-500 h-2 rounded-full" style={{ width: `${Math.min(100, totalProgress)}%` }}></div>
+            </div>
+            <p className="text-xs text-slate-500 mt-2">{allKRs.length}개 KR 기준</p>
           </div>
         </div>
 
+        {/* 활성 목표 */}
         <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
           <div className="flex items-center justify-between mb-4">
-            <span className="text-sm font-medium text-slate-600">OKR 현황</span>
-            <div className="p-2 bg-violet-50 rounded-lg">
-              <Target className="w-5 h-5 text-violet-600" />
+            <span className="text-sm font-medium text-slate-600">활성 목표</span>
+            <div className="p-2 bg-purple-50 rounded-lg">
+              <Target className="w-5 h-5 text-purple-600" />
             </div>
           </div>
-          <div className="space-y-3">
-            <div className="text-2xl font-bold text-slate-900">
-              {activeObjectives.length} <span className="text-base font-normal text-slate-500">Goal</span> / {allKRs.length} <span className="text-base font-normal text-slate-500">KR</span>
-            </div>
-            <div className="flex gap-2">
-              <span className="px-2 py-1 bg-violet-100 text-violet-700 text-xs rounded font-medium">B {biiStats.Build}</span>
-              <span className="px-2 py-1 bg-blue-100 text-blue-700 text-xs rounded font-medium">I {biiStats.Innovate}</span>
-              <span className="px-2 py-1 bg-green-100 text-green-700 text-xs rounded font-medium">I {biiStats.Improve}</span>
+          <div>
+            <div className="text-3xl font-bold text-slate-900">{activeObjectives.length}</div>
+            <div className="flex gap-2 mt-3">
+              {Object.entries(biiStats).map(([key, count]) => (
+                count > 0 && (
+                  <span
+                    key={key}
+                    className={`px-2 py-1 rounded text-xs font-medium ${getBIIColor(key as any)}`}
+                  >
+                    {key}: {count}
+                  </span>
+                )
+              ))}
             </div>
           </div>
         </div>
 
+        {/* 체크인 현황 */}
         <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
           <div className="flex items-center justify-between mb-4">
             <span className="text-sm font-medium text-slate-600">체크인 현황</span>
@@ -271,6 +280,7 @@ export default function Dashboard() {
           </div>
         </div>
 
+        {/* 주의 필요 */}
         <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
           <div className="flex items-center justify-between mb-4">
             <span className="text-sm font-medium text-slate-600">주의 필요</span>
