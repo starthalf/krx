@@ -130,6 +130,36 @@ const [periodLoading, setPeriodLoading] = useState(true);
 
   // ==================== Effects ====================
 
+useEffect(() => {
+  const loadActivePeriod = async () => {
+    const targetOrgId = selectedOrgId || urlOrgId;
+    if (!targetOrgId) return;
+    
+    const targetOrg = organizations.find(o => o.id === targetOrgId);
+    if (!targetOrg?.companyId) return;
+    
+    setPeriodLoading(true);
+    try {
+      // 분기 기준 활성 기간 가져오기
+      const activePeriod = await fetchActivePeriod(targetOrg.companyId, 'quarter');
+      if (activePeriod) {
+        setSelectedPeriodId(activePeriod.id);
+        setSelectedPeriodCode(activePeriod.periodCode);
+      } else {
+        // 활성 분기가 없으면 반기 확인
+        const activeHalf = await fetchActivePeriod(targetOrg.companyId, 'half');
+        if (activeHalf) {
+          setSelectedPeriodId(activeHalf.id);
+          setSelectedPeriodCode(activeHalf.periodCode);
+        }
+      }
+    } catch (err) {
+      console.error('활성 기간 로드 실패:', err);
+    } finally {
+      setPeriodLoading(false);
+    }
+  };
+  
   // 조직 선택이 완료되면 초기 모달 띄우기
   useEffect(() => {
     if (selectedOrgId && showOrgSelector) {
