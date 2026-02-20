@@ -584,3 +584,90 @@ export async function migratePeriodToFiscalPeriod(
   const period = await fetchPeriodByCode(companyId, periodCode);
   return period?.id || null;
 }
+
+// ─────────────────────────────────────────────────────────────
+// 합산 결산 함수
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * 하위 기간 마감 상태 확인
+ */
+export async function checkChildPeriodsStatus(
+  periodId: string
+): Promise<{
+  periodType: string;
+  children: Array<{ id: string; name: string; status: string; isClosed: boolean }>;
+  closedCount: number;
+  totalCount: number;
+  allClosed: boolean;
+  canAggregate: boolean;
+} | null> {
+  const { data, error } = await supabase.rpc('check_child_periods_status', {
+    p_period_id: periodId,
+  });
+
+  if (error) {
+    console.error('하위 기간 상태 확인 실패:', error);
+    return null;
+  }
+
+  return {
+    periodType: data.period_type,
+    children: (data.children || []).map((c: any) => ({
+      id: c.id,
+      name: c.name,
+      status: c.status,
+      isClosed: c.is_closed,
+    })),
+    closedCount: data.closed_count,
+    totalCount: data.total_count,
+    allClosed: data.all_closed,
+    canAggregate: data.can_aggregate,
+  };
+}
+
+/**
+ * 반기 결산 (하위 분기 합산)
+ */
+export async function closeHalfYearWithAggregation(
+  halfPeriodId: string,
+  actorId: string
+): Promise<{ success: boolean; snapshotCount?: number; error?: string }> {
+  const { data, error } = await supabase.rpc('close_half_year_with_aggregation', {
+    p_half_period_id: halfPeriodId,
+    p_actor_id: actorId,
+  });
+
+  if (error) {
+    return { success: false, error: error.message };
+  }
+
+  return {
+    success: data?.success || false,
+    snapshotCount: data?.snapshot_count,
+    error: data?.error,
+  };
+}
+
+/**
+ * 연도 결산 (하위 반기 합산)
+ */
+export async function closeYearWithAggregation(
+  yearPeriodId: string,
+  actorId: string
+): Promise<{ success: boolean; snapshotCount?: number; error?: string }> {
+  const { data, error } = await supabase.rpc('close_year_with_aggregation', {
+    p_year_period_id: yearPeriodId,
+    p_actor_id: actorId,
+  });
+
+  if (error) {
+    return { success: false, error: error.message };
+  }
+
+  return {
+    success: data?.success || false,
+    snapshotCount: data?.snapshot_count,
+    error: data?.error,
+  };
+}
