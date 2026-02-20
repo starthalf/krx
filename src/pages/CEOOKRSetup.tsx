@@ -15,6 +15,7 @@ import { useStore } from '../store/useStore';
 import { useAuth } from '../contexts/AuthContext';
 import { getBIIColor } from '../utils/helpers';
 import type { BIIType, Company } from '../types';
+import { fetchActivePeriod } from '../lib/period-api';
 
 // ─── Types ───────────────────────────────────────────────
 
@@ -95,6 +96,11 @@ export default function CEOOKRSetup() {
   const { user } = useAuth();
   const { company, organizations } = useStore();
 
+  // ==================== 기간 관련 State (NEW) ====================
+  const [selectedPeriodId, setSelectedPeriodId] = useState<string | null>(null);
+  const [selectedPeriodCode, setSelectedPeriodCode] = useState<string>('');
+  const [periodLoading, setPeriodLoading] = useState(true);
+
   // 단계 관리
   const [currentStep, setCurrentStep] = useState(0);
 
@@ -169,17 +175,50 @@ export default function CEOOKRSetup() {
     loadCompany();
   }, [user?.id, company]);
 
-  // 컨텍스트 + 기존 진행 상태 복원
+  // ==================== 활성 기간 로드 (NEW) ====================
   useEffect(() => {
-    if (company?.id) {
+    const loadActivePeriod = async () => {
+      if (!company?.id) {
+        setPeriodLoading(false);
+        return;
+      }
+
+      setPeriodLoading(true);
+      try {
+        // 반기 기준 활성 기간 가져오기 (CEO는 보통 반기/연 단위)
+        const activePeriod = await fetchActivePeriod(company.id, 'half');
+        if (activePeriod) {
+          setSelectedPeriodId(activePeriod.id);
+          setSelectedPeriodCode(activePeriod.periodCode);
+        } else {
+          // 반기가 없으면 분기 확인
+          const activeQuarter = await fetchActivePeriod(company.id, 'quarter');
+          if (activeQuarter) {
+            setSelectedPeriodId(activeQuarter.id);
+            setSelectedPeriodCode(activeQuarter.periodCode);
+          }
+        }
+      } catch (err) {
+        console.error('활성 기간 로드 실패:', err);
+      } finally {
+        setPeriodLoading(false);
+      }
+    };
+
+    loadActivePeriod();
+  }, [company?.id]);
+
+  // 컨텍스트 + 기존 진행 상태 복원 (기간 로드 완료 후)
+  useEffect(() => {
+    if (company?.id && selectedPeriodCode) {
       loadExistingContext();
       loadExistingProgress();
     }
-  }, [company?.id]);
+  }, [company?.id, selectedPeriodCode]);
 
   // 기존 진행 상태 복원 (전사 OKR 확정 여부, 조직 초안 생성 여부)
   const loadExistingProgress = async () => {
-    if (!company?.id) return;
+    if (!company?.id || !selectedPeriodCode) return;
     try {
       const companyOrg = organizations.find(o => o.level === '전사');
       if (!companyOrg) return;
@@ -192,7 +231,7 @@ export default function CEOOKRSetup() {
           key_results(id, name, definition, formula, unit, weight, target_value, indicator_type, perspective, bii_type, measurement_cycle, grade_criteria, quarterly_targets)
         `)
         .eq('org_id', companyOrg.id)
-        .eq('period', '2025-H1')
+        .eq('period', selectedPeriodCode)
         .order('sort_order');
 
       if (companyObjs && companyObjs.length > 0) {
@@ -244,7 +283,7 @@ export default function CEOOKRSetup() {
             .from('objectives')
             .select('id', { count: 'exact' })
             .eq('org_id', org.id)
-            .eq('period', '2025-H1')
+            .eq('period', selectedPeriodCode)
             .eq('source', 'ai_draft');
 
           const objCount = count || 0;
@@ -277,7 +316,7 @@ export default function CEOOKRSetup() {
         .from('okr_planning_cycles')
         .select('*')
         .eq('company_id', company.id)
-        .eq('period', '2025-H1')
+        .eq('period', selectedPeriodCode)
         .order('created_at', { ascending: false })
         .limit(1);
 
@@ -326,7 +365,7 @@ export default function CEOOKRSetup() {
   // ─── Step 0: 컨텍스트 저장 ─────────────────────────────
 
   const handleSaveContext = async () => {
-    if (!company?.id || !user?.id) return;
+    if (!company?.id || !user?.id || !selectedPeriodCode) return;
 
     try {
       // 기존 레코드 확인
@@ -356,7 +395,7 @@ export default function CEOOKRSetup() {
           .from('company_okr_contexts')
           .insert({
             company_id: company.id,
-            period: '2025-H1',
+            period: selectedPeriodCode,
             current_situation: context.currentSituation,
             annual_goals: context.annualGoals,
             key_strategies: context.keyStrategies,
@@ -438,7 +477,7 @@ export default function CEOOKRSetup() {
 
   // 전사 OKR 확정 (DB 저장)
   const handleFinalizeCompanyOKR = async () => {
-    if (!company?.id || !user?.id) return;
+    if (!company?.id || !user?.id || !selectedPeriodCode) return;
 
     const selectedObjs = objectives.filter(o => o.selected);
     if (selectedObjs.length === 0) {
@@ -461,7 +500,7 @@ export default function CEOOKRSetup() {
         .from('objectives')
         .select('id')
         .eq('org_id', companyOrg.id)
-        .eq('period', '2025-H1');
+        .eq('period', selectedPeriodCode);
 
       if (existingObjs && existingObjs.length > 0) {
         const objIds = existingObjs.map(o => o.id);
@@ -477,7 +516,7 @@ export default function CEOOKRSetup() {
             org_id: companyOrg.id,
             name: obj.name,
             bii_type: obj.biiType,
-            period: '2025-H1',
+            period: selectedPeriodCode,
             status: 'active',
             source: 'ai_draft',
             approval_status: 'finalized',
@@ -539,7 +578,7 @@ export default function CEOOKRSetup() {
   // ─── Step 2: 전체 조직 초안 일괄 생성 ─────────────────
 
   const handleGenerateAllDrafts = async () => {
-    if (!company?.id) return;
+    if (!company?.id || !selectedPeriodCode) return;
 
     const companyOrg = organizations.find(o => o.level === '전사');
     if (!companyOrg) {
@@ -555,7 +594,7 @@ export default function CEOOKRSetup() {
         key_results(id, name)
       `)
       .eq('org_id', companyOrg.id)
-      .eq('period', '2025-H1')
+      .eq('period', selectedPeriodCode)
       .eq('approval_status', 'finalized');
 
     if (!companyObjs || companyObjs.length === 0) {
@@ -590,7 +629,7 @@ export default function CEOOKRSetup() {
         .from('objectives')
         .select('id, name, bii_type, key_results(id, name)')
         .eq('org_id', parentOrg.id)
-        .eq('period', '2025-H1')
+        .eq('period', selectedPeriodCode)
         .in('source', ['ai_draft', 'manual'])
         .order('sort_order');
       
@@ -666,7 +705,7 @@ export default function CEOOKRSetup() {
             .from('objectives')
             .select('id')
             .eq('org_id', org.id)
-            .eq('period', '2025-H1');
+            .eq('period', selectedPeriodCode);
 
           if (existingObjs && existingObjs.length > 0) {
             const ids = existingObjs.map(o => o.id);
@@ -684,7 +723,7 @@ export default function CEOOKRSetup() {
                 org_id: org.id,
                 name: obj.name,
                 bii_type: obj.biiType || 'Improve',
-                period: '2025-H1',
+                period: selectedPeriodCode,
                 status: 'draft',
                 source: 'ai_draft',
                 approval_status: 'ai_draft',
@@ -761,7 +800,7 @@ export default function CEOOKRSetup() {
   // ─── Step 3: 사이클 시작 ───────────────────────────────
 
   const handleStartCycle = async () => {
-    if (!company?.id || !user?.id || !deadlineDate) {
+    if (!company?.id || !user?.id || !deadlineDate || !selectedPeriodCode) {
       alert('마감일을 설정해주세요.');
       return;
     }
@@ -775,8 +814,8 @@ export default function CEOOKRSetup() {
         .from('okr_planning_cycles')
         .insert({
           company_id: company.id,
-          period: '2025-H1',
-          title: '2025년 상반기 OKR 수립',
+          period: selectedPeriodCode,
+          title: `${selectedPeriodCode} OKR 수립`,
           status: 'in_progress',
           starts_at: new Date().toISOString(),
           deadline_at: new Date(deadlineDate + 'T23:59:59').toISOString(),
@@ -843,6 +882,8 @@ export default function CEOOKRSetup() {
 
   // ─── 조직 초안 미리보기 ─────────────────────────────────
   const handlePreviewOrg = async (orgId: string, orgName: string, level: string) => {
+    if (!selectedPeriodCode) return;
+    
     setPreviewOrg({ orgId, orgName, level });
     setPreviewLoading(true);
     try {
@@ -851,13 +892,13 @@ export default function CEOOKRSetup() {
         .from('objectives')
         .select('id, name, bii_type, perspective, parent_obj_id')
         .eq('org_id', orgId)
-        .eq('period', '2025-H1')
+        .eq('period', selectedPeriodCode)
         .order('created_at', { ascending: true });
 
       if (objError) console.error('objectives 조회 에러:', objError);
 
       if (!objs || objs.length === 0) {
-        console.warn('objectives 0건 — orgId:', orgId, 'period: 2025-H1');
+        console.warn('objectives 0건 — orgId:', orgId, 'period:', selectedPeriodCode);
         setPreviewOKRs([]);
         setPreviewLoading(false);
         return;
@@ -945,6 +986,38 @@ export default function CEOOKRSetup() {
   const canProceedStep0 = contextFilled;
   const canProceedStep1 = objectives.length > 0 && selectedCount >= 1;
   const canProceedStep2 = companyOKRFinalized;
+
+  // ─── 로딩 상태 ──────────────────────────────────────────
+  if (periodLoading) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="w-10 h-10 text-blue-600 animate-spin mx-auto mb-4" />
+          <p className="text-slate-600">기간 정보를 불러오는 중...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!selectedPeriodCode) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="text-center max-w-md mx-auto p-8 bg-white rounded-xl border border-slate-200">
+          <AlertCircle className="w-12 h-12 text-amber-500 mx-auto mb-4" />
+          <h3 className="text-lg font-semibold text-slate-900 mb-2">활성 기간이 없습니다</h3>
+          <p className="text-slate-600 text-sm mb-4">
+            관리자 설정에서 먼저 기간을 생성하고 활성화해주세요.
+          </p>
+          <button
+            onClick={() => navigate('/admin?tab=periods')}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700"
+          >
+            기간 관리로 이동
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   // ─── Render ────────────────────────────────────────────
 
@@ -1047,6 +1120,12 @@ export default function CEOOKRSetup() {
                   <p className="text-sm text-slate-500">{company?.name} · {company?.industry}</p>
                 </div>
               </div>
+            </div>
+            {/* 기간 표시 배지 */}
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-slate-500 bg-slate-100 px-3 py-1.5 rounded-lg font-medium">
+                📅 {selectedPeriodCode}
+              </span>
             </div>
           </div>
         </div>
