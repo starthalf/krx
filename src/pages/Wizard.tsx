@@ -246,7 +246,7 @@ useEffect(() => {
           .from('okr_planning_cycles')
           .select('status')
           .eq('company_id', companyId)
-          .eq('period', '2025-H1')
+ .eq('period', selectedPeriodCode)
           .order('created_at', { ascending: false })
           .limit(1);
 
@@ -262,7 +262,7 @@ useEffect(() => {
           version, is_latest, original_obj_id
         `)
         .eq('org_id', targetOrgId)
-        .eq('period', '2025-H1')
+   .eq('period', selectedPeriodCode)
         .eq('is_latest', true)
         .in('source', ['ai_draft', 'manual'])
         .order('sort_order');
@@ -344,7 +344,7 @@ useEffect(() => {
               .from('objectives')
               .select('id', { count: 'exact', head: true })
               .eq('org_id', companyOrg.id)
-              .eq('period', '2025-H1');
+      .eq('period', selectedPeriodCode)
             
             if ((count || 0) > 0 && !cycleActive) {
               // 전사 OKR은 있는데 사이클이 안 돌고 있고 이 조직에는 초안이 없음 → CEO 작업 중
@@ -384,7 +384,7 @@ useEffect(() => {
         .from('objectives')
         .select('id, name, bii_type, org_id, status')
         .in('org_id', parentIds)
-        .eq('period', '2025-H1')
+.eq('period', selectedPeriodCode)
         .in('status', ['finalized', 'active', 'draft']);
 
       if (parentObjs) {
