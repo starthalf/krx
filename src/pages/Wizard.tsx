@@ -66,7 +66,10 @@ export default function Wizard() {
 
   // ==================== State 관리 ====================
 
-  
+  // 기간 관련 state 추가
+const [selectedPeriodId, setSelectedPeriodId] = useState<string | null>(null);
+const [selectedPeriodCode, setSelectedPeriodCode] = useState<string>('');
+const [periodLoading, setPeriodLoading] = useState(true);
   // 조직 선택 관련
   const [selectedOrgId, setSelectedOrgId] = useState<string | null>(urlOrgId || null);
   const [showOrgSelector, setShowOrgSelector] = useState(!urlOrgId); // URL에 ID가 없으면 선택창 표시
