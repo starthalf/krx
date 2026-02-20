@@ -1,5 +1,5 @@
 // src/components/Sidebar.tsx
-// 기간 히스토리 메뉴 추가됨
+// 기간 관리 메뉴를 제거하고 관리자 설정에 통합
 
 import { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
@@ -15,8 +15,6 @@ import {
   GitBranch,
   Megaphone,
   ClipboardList,
-  Archive,
-  Calendar,
   Settings
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
@@ -81,21 +79,12 @@ export default function Sidebar() {
     // 구분선
     { name: 'divider1', icon: null, divider: true },
     
-    // 기간 관리 섹션 (관리자 전용)
-    {
-      name: '기간 관리',
-      icon: Calendar,
-      requiredLevel: 90,
-      children: [
-        { name: '기간 설정', href: '/admin?tab=periods' },
-        { name: '기간 히스토리', href: '/period-history' },
-      ]
-    },
+    // 기간 관리 섹션 제거됨 - 관리자 설정(/admin?tab=periods)으로 통합
     
     { name: '조직 관리', href: '/organization', icon: Building2 },
     { name: 'KR지표 DB', href: '/kpi-pool', icon: BookOpen },
     
-    // 관리자 설정
+    // 관리자 설정 (기간 관리, 수립 사이클 등 모두 포함)
     { name: '관리자 설정', href: '/admin', icon: Settings, requiredLevel: 90 },
   ];
 
