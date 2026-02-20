@@ -344,7 +344,7 @@ useEffect(() => {
               .from('objectives')
               .select('id', { count: 'exact', head: true })
               .eq('org_id', companyOrg.id)
-      .eq('period', selectedPeriodCode)
+      .eq('period', selectedPeriodCode);
             
             if ((count || 0) > 0 && !cycleActive) {
               // 전사 OKR은 있는데 사이클이 안 돌고 있고 이 조직에는 초안이 없음 → CEO 작업 중
