@@ -159,6 +159,9 @@ useEffect(() => {
       setPeriodLoading(false);
     }
   };
+
+    loadActivePeriod();
+}, [selectedOrgId, urlOrgId, organizations]);
   
   // 조직 선택이 완료되면 초기 모달 띄우기
   useEffect(() => {
