@@ -10,7 +10,6 @@ import {
   BarChart3, Users, FileCheck, Clock
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
-import { useStore } from '../store/useStore';
 import {
   fetchFiscalPeriod,
   fetchIncompleteItems,
@@ -52,8 +51,8 @@ const STEPS: StepConfig[] = [
 export default function PeriodCloseWizard() {
   const navigate = useNavigate();
   const { periodId } = useParams<{ periodId: string }>();
-  const { user } = useAuth();
-  const company = useStore(state => state.company);
+  const { user, profile } = useAuth();
+  const companyId = profile?.company_id;
 
   // State
   const [loading, setLoading] = useState(true);
