@@ -190,8 +190,12 @@ export default function UnifiedPeriodManager() {
 
   // ─── 연도 생성 (자동 계층 생성) ──────────────────────────
 
-  const handleCreateYear = async () => {
-    if (!company?.id || !user?.id) return;
+const handleCreateYear = async () => {
+  console.log('handleCreateYear called', { companyId: company?.id, userId: user?.id, newYear });
+  if (!company?.id || !user?.id) {
+    console.log('early return - missing company or user');
+    return;
+  }
 
     setLoading(true);
     try {
