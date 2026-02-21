@@ -1,4 +1,4 @@
-// src/components/admin/UnifiedPeriodManager.tsx
+// src/components/admin/UnifiedPeriodManager.tsx 
 // 기간(Period)과 수립(Planning) 관리를 단일 인터페이스로 통합
 // CEO가 한 곳에서 모든 기간/수립 작업 수행
 
