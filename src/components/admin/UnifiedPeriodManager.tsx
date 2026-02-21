@@ -379,7 +379,7 @@ export default function UnifiedPeriodManager() {
       yearPeriod: periods.find((p) => p.period_code === `${year}-Y`),
       halves: periods.filter((p) => p.period_code.startsWith(`${year}-H`)).sort((a, b) => a.period_code.localeCompare(b.period_code)),
       quarters: periods.filter((p) => p.period_code.startsWith(`${year}-Q`)).sort((a, b) => a.period_code.localeCompare(b.period_code)),
-    }));
+    })).filter(({ yearPeriod, halves, quarters }) => yearPeriod || halves.length > 0 || quarters.length > 0);
   };
 
   const hierarchy = getHierarchy();
