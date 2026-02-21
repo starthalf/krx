@@ -137,11 +137,11 @@ const PERIOD_TYPE_LABELS: Record<string, string> = {
   year: '연도',
 };
 
-// ─── Main Component ──────────────────────────────────────
+// ─── Main Component ────────────────────────────────────── 
 
 export default function UnifiedPeriodManager() {
-const { user, profile } = useAuth();
-const companyId = profile?.company_id;
+  const { user } = useAuth();
+  const company = useStore((state) => state.company);
 
   const [activeTab, setActiveTab] = useState<TabType>('periods');
   const [periods, setPeriods] = useState<FiscalPeriod[]>([]);
