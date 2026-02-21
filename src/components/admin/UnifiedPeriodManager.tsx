@@ -318,50 +318,13 @@ export default function UnifiedPeriodManager() {
     const year = getYearFromCode(period.period_code);
     if (period.period_type === 'year') {
       if (!confirm(`${year}년도 전체를 삭제하시겠습니까?\n\n연도를 삭제하면 하위 반기/분기도 모두 삭제됩니다.\n삭제된 데이터는 복구할 수 없습니다.`)) return;
-    } else if (period.period_type === 'half') {
-      if (!confirm(`${period.period_name}을(를) 삭제하시겠습니까?\n\n하위 분기도 함께 삭제됩니다.\n삭제된 데이터는 복구할 수 없습니다.`)) return;
     } else {
-      if (!confirm(`${period.period_name}을(를) 삭제하시겠습니까?\n\n삭제된 데이터는 복구할 수 없습니다.`)) return;
+      if (!confirm(`${period.period_code}를 삭제하시겠습니까?\n\n삭제된 데이터는 복구할 수 없습니다.`)) return;
     }
     setLoading(true);
     try {
-      if (period.period_type === 'year') {
-        // 연도 삭제: 하위 분기 → 하위 반기 → 연도 순서로 삭제
-        // 1) 이 연도에 속한 분기 삭제 (quarter)
-        const quarters = periods.filter(
-          (p) => p.period_type === 'quarter' && p.period_code.startsWith(`${year}-Q`)
-        );
-        for (const q of quarters) {
-          const { error } = await supabase.from('fiscal_periods').delete().eq('id', q.id);
-          if (error) throw new Error(`분기 ${q.period_code} 삭제 실패: ${error.message}`);
-        }
-        // 2) 이 연도에 속한 반기 삭제 (half)
-        const halves = periods.filter(
-          (p) => p.period_type === 'half' && p.period_code.startsWith(`${year}-H`)
-        );
-        for (const h of halves) {
-          const { error } = await supabase.from('fiscal_periods').delete().eq('id', h.id);
-          if (error) throw new Error(`반기 ${h.period_code} 삭제 실패: ${error.message}`);
-        }
-        // 3) 연도 삭제
-        const { error } = await supabase.from('fiscal_periods').delete().eq('id', period.id);
-        if (error) throw new Error(`연도 삭제 실패: ${error.message}`);
-      } else if (period.period_type === 'half') {
-        // 반기 삭제: 하위 분기 → 반기 순서로 삭제
-        const childQuarters = periods.filter(
-          (p) => p.period_type === 'quarter' && p.parent_period_id === period.id
-        );
-        for (const q of childQuarters) {
-          const { error } = await supabase.from('fiscal_periods').delete().eq('id', q.id);
-          if (error) throw new Error(`분기 ${q.period_code} 삭제 실패: ${error.message}`);
-        }
-        const { error } = await supabase.from('fiscal_periods').delete().eq('id', period.id);
-        if (error) throw new Error(`반기 삭제 실패: ${error.message}`);
-      } else {
-        // 분기 단독 삭제
-        const { error } = await supabase.from('fiscal_periods').delete().eq('id', period.id);
-        if (error) throw error;
-      }
+      const { error } = await supabase.from('fiscal_periods').delete().eq('id', period.id);
+      if (error) throw error;
       alert('삭제되었습니다.');
       fetchPeriods();
     } catch (err: any) { alert(`삭제 실패: ${err.message}`); }
@@ -813,4 +776,4 @@ function ClosingStatusCard({ period, onStartClosing, onFinalizeClosing }: Closin
       </div>
     </div>
   );
-}
+} 
