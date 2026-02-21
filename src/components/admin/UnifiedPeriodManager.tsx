@@ -1164,4 +1164,4 @@ function ClosingStatusCard({ period, onStartClosing, onFinalizeClosing }: Closin
       </div>
     </div>
   );
-}
+} 
