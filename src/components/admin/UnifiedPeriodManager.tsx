@@ -114,12 +114,12 @@ const PERIOD_TYPE_LABELS: Record<string, string> = { quarter: '분기', half: '�
 
 export default function UnifiedPeriodManager() {
   // ✅ FIX: profile.company_id를 직접 사용 (useStore의 company 의존성 제거)
-  const { user, profile } = useAuth();
+  const { user, profile, loading: authLoading } = useAuth();
   const companyId = profile?.company_id;
 
   const [activeTab, setActiveTab] = useState<TabType>('periods');
   const [periods, setPeriods] = useState<FiscalPeriod[]>([]);
-  const [loading, setLoading] = useState(true); // ✅ 초기값 true: profile 로딩 대기
+  const [loading, setLoading] = useState(false);
   const [selectedPeriod, setSelectedPeriod] = useState<FiscalPeriod | null>(null);
   const [showCreateYear, setShowCreateYear] = useState(false);
   const [newYear, setNewYear] = useState(new Date().getFullYear());
@@ -136,10 +136,7 @@ export default function UnifiedPeriodManager() {
   // ─── Data Fetching ───────────────────────────────────────
 
   const fetchPeriods = useCallback(async () => {
-    if (!companyId) {
-      setLoading(false); // ✅ companyId 없으면 로딩 해제 (빈 상태 표시)
-      return;
-    }
+    if (!companyId) return;
     setLoading(true);
     try {
       const { data, error } = await supabase
@@ -157,7 +154,12 @@ export default function UnifiedPeriodManager() {
     }
   }, [companyId]);
 
-  useEffect(() => { fetchPeriods(); }, [fetchPeriods]);
+  // ✅ authLoading이 끝나고 companyId가 있을 때만 fetch
+  useEffect(() => {
+    if (!authLoading && companyId) {
+      fetchPeriods();
+    }
+  }, [authLoading, companyId, fetchPeriods]);
 
   // ─── 연도 생성 ──────────────────────────────────────────
 
@@ -446,7 +448,7 @@ export default function UnifiedPeriodManager() {
       </div>
 
       {/* Tab Content */}
-      {loading ? (
+      {(authLoading || loading) ? (
         <div className="text-center py-12 text-slate-500">
           <RefreshCw className="w-8 h-8 animate-spin mx-auto mb-2" />
           로딩 중...
