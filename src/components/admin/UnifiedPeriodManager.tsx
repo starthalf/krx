@@ -19,13 +19,13 @@ interface FiscalPeriod {
   id: string;
   company_id: string;
   period_code: string;
+  period_name: string; // ✅ period_name 추가
   period_type: 'quarter' | 'half' | 'year';
-  year: number;
-  sequence: number;
+  // year, sequence 제거 (period_code에서 추출)
   starts_at: string;
   ends_at: string;
   parent_period_id: string | null;
-  status: 'upcoming' | 'planning' | 'active' | 'closing' | 'closed';
+  status: 'upcoming' | 'planning' | 'active' | 'closing' | 'closed' | 'archived';
   
   // Planning fields
   planning_starts_at: string | null;
@@ -64,32 +64,21 @@ interface PlanningSetupForm {
 
 type TabType = 'periods' | 'planning' | 'closing';
 
-// ─── 상태/타입별 설정 ────────────────────────────────────
-
-const STATUS_CONFIG: Record<string, { label: string; color: string; icon: any; bgColor: string }> = {
-  upcoming: { label: '예정', color: 'text-slate-600', icon: Clock, bgColor: 'bg-slate-100' },
-  planning: { label: '수립중', color: 'text-blue-600', icon: Edit3, bgColor: 'bg-blue-100' },
-  active: { label: '실행중', color: 'text-green-600', icon: Play, bgColor: 'bg-green-100' },
-  closing: { label: '마감중', color: 'text-orange-600', icon: Square, bgColor: 'bg-orange-100' },
-  closed: { label: '완료', color: 'text-gray-600', icon: Archive, bgColor: 'bg-gray-100' },
-};
-
-const PLANNING_STATUS_CONFIG: Record<string, { label: string; color: string }> = {
-  not_started: { label: '미시작', color: 'text-slate-500' },
-  setup: { label: '설정중', color: 'text-blue-500' },
-  drafting: { label: '초안작성', color: 'text-indigo-500' },
-  in_progress: { label: '진행중', color: 'text-green-600' },
-  closing: { label: '마감중', color: 'text-orange-600' },
-  completed: { label: '완료', color: 'text-gray-600' },
-};
-
-const PERIOD_TYPE_LABELS: Record<string, string> = {
-  quarter: '분기',
-  half: '반기',
-  year: '연도',
-};
-
 // ─── Helper Functions ────────────────────────────────────
+
+function getYearFromCode(periodCode: string): number {
+  return parseInt(periodCode.substring(0, 4));
+}
+
+function getSequenceFromCode(periodCode: string): number {
+  if (periodCode.includes('-Q')) {
+    return parseInt(periodCode.charAt(periodCode.length - 1));
+  }
+  if (periodCode.includes('-H')) {
+    return parseInt(periodCode.charAt(periodCode.length - 1));
+  }
+  return 1; // Year
+}
 
 function formatDate(dateStr: string | null) {
   if (!dateStr) return '-';
@@ -121,6 +110,32 @@ function daysUntil(dateStr: string | null) {
   const diff = new Date(dateStr).getTime() - Date.now();
   return Math.ceil(diff / (1000 * 60 * 60 * 24));
 }
+
+// ─── 상태/타입별 설정 ────────────────────────────────────
+
+const STATUS_CONFIG: Record<string, { label: string; color: string; icon: any; bgColor: string }> = {
+  upcoming: { label: '예정', color: 'text-slate-600', icon: Clock, bgColor: 'bg-slate-100' },
+  planning: { label: '수립중', color: 'text-blue-600', icon: Edit3, bgColor: 'bg-blue-100' },
+  active: { label: '실행중', color: 'text-green-600', icon: Play, bgColor: 'bg-green-100' },
+  closing: { label: '마감중', color: 'text-orange-600', icon: Square, bgColor: 'bg-orange-100' },
+  closed: { label: '완료', color: 'text-gray-600', icon: Archive, bgColor: 'bg-gray-100' },
+  archived: { label: '보관', color: 'text-purple-600', icon: Archive, bgColor: 'bg-purple-100' },
+};
+
+const PLANNING_STATUS_CONFIG: Record<string, { label: string; color: string }> = {
+  not_started: { label: '미시작', color: 'text-slate-500' },
+  setup: { label: '설정중', color: 'text-blue-500' },
+  drafting: { label: '초안작성', color: 'text-indigo-500' },
+  in_progress: { label: '진행중', color: 'text-green-600' },
+  closing: { label: '마감중', color: 'text-orange-600' },
+  completed: { label: '완료', color: 'text-gray-600' },
+};
+
+const PERIOD_TYPE_LABELS: Record<string, string> = {
+  quarter: '분기',
+  half: '반기',
+  year: '연도',
+};
 
 // ─── Main Component ──────────────────────────────────────
 
@@ -157,8 +172,7 @@ export default function UnifiedPeriodManager() {
         .from('fiscal_periods')
         .select('*')
         .eq('company_id', company.id)
-        .order('year', { ascending: false })
-        .order('sequence', { ascending: true });
+        .order('period_code', { ascending: false });
 
       if (error) throw error;
       setPeriods(data || []);
@@ -430,10 +444,12 @@ export default function UnifiedPeriodManager() {
   // ─── 기간 삭제 ───────────────────────────────────────────
 
   const handleDeletePeriod = async (period: FiscalPeriod) => {
+    const year = getYearFromCode(period.period_code);
+    
     if (period.period_type === 'year') {
       if (
         !confirm(
-          `${period.year}년도 전체를 삭제하시겠습니까?\n\n연도를 삭제하면 하위 반기/분기도 모두 삭제됩니다.\n삭제된 데이터는 복구할 수 없습니다.`
+          `${year}년도 전체를 삭제하시겠습니까?\n\n연도를 삭제하면 하위 반기/분기도 모두 삭제됩니다.\n삭제된 데이터는 복구할 수 없습니다.`
         )
       )
         return;
@@ -468,16 +484,22 @@ export default function UnifiedPeriodManager() {
     setExpandedYears(newSet);
   };
 
-  const getYearPeriods = (year: number) => {
-    return periods.filter((p) => p.year === year);
-  };
-
   const getHierarchy = () => {
-    const years = [...new Set(periods.map((p) => p.year))].sort((a, b) => b - a);
+    // year를 period_code에서 추출
+    const years = [
+      ...new Set(periods.map((p) => getYearFromCode(p.period_code)))
+    ].sort((a, b) => b - a);
+
     return years.map((year) => {
-      const yearPeriod = periods.find((p) => p.year === year && p.period_type === 'year');
-      const halves = periods.filter((p) => p.year === year && p.period_type === 'half').sort((a, b) => a.sequence - b.sequence);
-      const quarters = periods.filter((p) => p.year === year && p.period_type === 'quarter').sort((a, b) => a.sequence - b.sequence);
+      const yearPeriod = periods.find(
+        (p) => p.period_code === `${year}-Y`
+      );
+      const halves = periods
+        .filter((p) => p.period_code.startsWith(`${year}-H`))
+        .sort((a, b) => a.period_code.localeCompare(b.period_code));
+      const quarters = periods
+        .filter((p) => p.period_code.startsWith(`${year}-Q`))
+        .sort((a, b) => a.period_code.localeCompare(b.period_code));
 
       return { year, yearPeriod, halves, quarters };
     });
@@ -563,7 +585,7 @@ export default function UnifiedPeriodManager() {
                             <ChevronRight className="w-5 h-5 text-slate-500" />
                           )}
                           <div className="flex items-center gap-3">
-                            <div className="text-xl font-bold text-slate-900">{year}년</div>
+                            <div className="text-xl font-bold text-slate-900">{yearPeriod.period_name}</div>
                             <span className={`px-3 py-1 rounded-full text-xs font-medium ${STATUS_CONFIG[yearPeriod.status].bgColor} ${STATUS_CONFIG[yearPeriod.status].color}`}>
                               {STATUS_CONFIG[yearPeriod.status].label}
                             </span>
@@ -741,7 +763,7 @@ export default function UnifiedPeriodManager() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto">
           <div className="bg-white rounded-lg max-w-2xl w-full p-6 space-y-4 my-8">
             <div className="flex items-center justify-between">
-              <h3 className="text-lg font-bold text-slate-900">수립 설정 - {selectedPeriod.period_code}</h3>
+              <h3 className="text-lg font-bold text-slate-900">수립 설정 - {selectedPeriod.period_name}</h3>
               <button onClick={() => setShowPlanningSetup(false)} className="p-1 hover:bg-slate-100 rounded">
                 <X className="w-5 h-5" />
               </button>
@@ -882,7 +904,7 @@ function PeriodCard({
       <div className="flex items-start justify-between">
         <div className="flex-1">
           <div className="flex items-center gap-3 mb-2">
-            <h4 className="font-semibold text-slate-900">{period.period_code}</h4>
+            <h4 className="font-semibold text-slate-900">{period.period_name}</h4>
             <span className={`px-2 py-1 rounded-full text-xs font-medium ${STATUS_CONFIG[period.status].bgColor} ${STATUS_CONFIG[period.status].color}`}>
               {STATUS_CONFIG[period.status].label}
             </span>
@@ -1031,7 +1053,7 @@ function PlanningStatusCard({ period, onClosePlanning, onFinalizePlanning }: Pla
     <div className="border border-blue-200 bg-blue-50 rounded-lg p-4">
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-3">
-          <h4 className="font-bold text-slate-900">{period.period_code}</h4>
+          <h4 className="font-bold text-slate-900">{period.period_name}</h4>
           <span className={`px-2 py-1 rounded-full text-xs font-medium bg-white ${PLANNING_STATUS_CONFIG[period.planning_status].color}`}>
             {PLANNING_STATUS_CONFIG[period.planning_status].label}
           </span>
@@ -1094,7 +1116,7 @@ function ClosingStatusCard({ period, onStartClosing, onFinalizeClosing }: Closin
     <div className="border border-orange-200 bg-orange-50 rounded-lg p-4">
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-3">
-          <h4 className="font-bold text-slate-900">{period.period_code}</h4>
+          <h4 className="font-bold text-slate-900">{period.period_name}</h4>
           <span className={`px-2 py-1 rounded-full text-xs font-medium ${STATUS_CONFIG[period.status].bgColor} ${STATUS_CONFIG[period.status].color}`}>
             {STATUS_CONFIG[period.status].label}
           </span>
