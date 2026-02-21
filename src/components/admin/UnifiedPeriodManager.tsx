@@ -1,8 +1,8 @@
-// src/components/admin/UnifiedPeriodManager.tsx 
+// src/components/admin/UnifiedPeriodManager.tsx
 // 기간(Period)과 수립(Planning) 관리를 단일 인터페이스로 통합
 // CEO가 한 곳에서 모든 기간/수립 작업 수행
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Calendar, Plus, Play, Square, CheckCircle2, Clock, Edit3, Trash2,
   ChevronDown, ChevronRight, AlertCircle, Info, Users, FileText,
@@ -63,12 +63,6 @@ function getYearFromCode(periodCode: string): number {
   return parseInt(periodCode.substring(0, 4));
 }
 
-function getSequenceFromCode(periodCode: string): number {
-  if (periodCode.includes('-Q')) return parseInt(periodCode.charAt(periodCode.length - 1));
-  if (periodCode.includes('-H')) return parseInt(periodCode.charAt(periodCode.length - 1));
-  return 1;
-}
-
 function formatDate(dateStr: string | null) {
   if (!dateStr) return '-';
   return new Date(dateStr).toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' });
@@ -108,12 +102,9 @@ const PLANNING_STATUS_CONFIG: Record<string, { label: string; color: string }> =
   completed: { label: '완료', color: 'text-gray-600' },
 };
 
-const PERIOD_TYPE_LABELS: Record<string, string> = { quarter: '분기', half: '반기', year: '연도' };
-
 // ─── Main Component ──────────────────────────────────────
 
 export default function UnifiedPeriodManager() {
-  // ✅ FIX: profile.company_id를 직접 사용 (useStore의 company 의존성 제거)
   const { user, profile, loading: authLoading } = useAuth();
   const companyId = profile?.company_id;
 
@@ -133,29 +124,44 @@ export default function UnifiedPeriodManager() {
     planning_auto_remind_days: [7, 3, 1],
   });
 
-  // ─── Data Fetching ───────────────────────────────────────
+  // ─── Data Fetching (useRef로 안정적 fetch) ─────────────
+
+  // ✅ 핵심 수정: companyId를 ref로 추적하여 클로저 문제 방지
+  const companyIdRef = useRef(companyId);
+  companyIdRef.current = companyId;
 
   const fetchPeriods = useCallback(async () => {
-    if (!companyId) return;
+    const cid = companyIdRef.current;
+    console.log('📋 fetchPeriods 호출', { cid, authLoading });
+    if (!cid) {
+      console.log('⚠️ companyId 없음, skip');
+      return;
+    }
     setLoading(true);
     try {
       const { data, error } = await supabase
         .from('fiscal_periods')
         .select('*')
-        .eq('company_id', companyId)
+        .eq('company_id', cid)
         .order('period_code', { ascending: false });
       if (error) throw error;
+      console.log('✅ 기간 로드 성공:', data?.length, '건');
       setPeriods(data || []);
+      // ✅ 로드 후 모든 연도를 자동 펼침
+      const years = new Set((data || []).map((p: any) => getYearFromCode(p.period_code)));
+      setExpandedYears(years);
     } catch (err: any) {
       console.error('기간 로드 실패:', err);
       alert(`기간 로드 실패: ${err.message}`);
     } finally {
       setLoading(false);
     }
-  }, [companyId]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  // ✅ authLoading이 끝나고 companyId가 있을 때만 fetch
+  // authLoading 완료 + companyId 있을 때 fetch
   useEffect(() => {
+    console.log('🔄 useEffect 트리거', { authLoading, companyId });
     if (!authLoading && companyId) {
       fetchPeriods();
     }
@@ -164,27 +170,22 @@ export default function UnifiedPeriodManager() {
   // ─── 연도 생성 ──────────────────────────────────────────
 
   const handleCreateYear = async () => {
-    console.log('=== handleCreateYear ===', { companyId, userId: user?.id, newYear });
     if (!companyId || !user?.id) {
-      console.log('❌ early return - companyId:', companyId, 'user:', user?.id);
       alert('회사 정보를 불러올 수 없습니다. 페이지를 새로고침 해주세요.');
       return;
     }
     setLoading(true);
     try {
-      console.log('📡 RPC 호출 시작');
       const { data, error } = await supabase.rpc('create_fiscal_year_with_hierarchy', {
         p_company_id: companyId,
         p_year: newYear,
       });
-      console.log('📡 RPC 결과:', { data, error });
       if (error) throw error;
       alert(`${newYear}년도 및 하위 기간이 생성되었습니다.`);
       setShowCreateYear(false);
-      fetchPeriods();
+      await fetchPeriods();
       setExpandedYears((prev) => new Set(prev).add(newYear));
     } catch (err: any) {
-      console.error('❌ 에러:', err);
       if (err.message?.includes('duplicate')) {
         alert(`${newYear}년도가 이미 존재합니다.`);
       } else {
@@ -319,23 +320,14 @@ export default function UnifiedPeriodManager() {
 
   // ─── 기간 삭제 ──────────────────────────────────────────
 
-  // 단일 period 삭제 헬퍼 (.select()로 실제 삭제 확인)
   const deleteSinglePeriod = async (id: string, label: string): Promise<void> => {
-    console.log(`🗑️ 삭제 시도: ${label} (${id})`);
     const { data, error } = await supabase
       .from('fiscal_periods')
       .delete()
       .eq('id', id)
       .select();
-
-    console.log(`🗑️ 삭제 결과:`, { label, data, error, count: data?.length });
-
-    if (error) {
-      throw new Error(`${label} 삭제 실패: ${error.message}`);
-    }
-    if (!data || data.length === 0) {
-      throw new Error(`${label} 삭제 실패: RLS 정책에 의해 삭제가 차단되었습니다. Supabase에서 fiscal_periods 테이블의 DELETE RLS 정책을 확인해주세요.`);
-    }
+    if (error) throw new Error(`${label} 삭제 실패: ${error.message}`);
+    if (!data || data.length === 0) throw new Error(`${label} 삭제 실패: RLS DELETE 정책을 확인해주세요.`);
   };
 
   const handleDeletePeriod = async (period: FiscalPeriod) => {
@@ -350,38 +342,22 @@ export default function UnifiedPeriodManager() {
     setLoading(true);
     try {
       if (period.period_type === 'year') {
-        // 연도 삭제: 분기 → 반기 → 연도 순서
-        const quarters = periods.filter(
-          (p) => p.period_type === 'quarter' && p.period_code.startsWith(`${year}-Q`)
-        );
-        for (const q of quarters) {
-          await deleteSinglePeriod(q.id, `분기 ${q.period_code}`);
-        }
-        const halves = periods.filter(
-          (p) => p.period_type === 'half' && p.period_code.startsWith(`${year}-H`)
-        );
-        for (const h of halves) {
-          await deleteSinglePeriod(h.id, `반기 ${h.period_code}`);
-        }
-        await deleteSinglePeriod(period.id, `연도 ${period.period_code}`);
+        const quarters = periods.filter((p) => p.period_type === 'quarter' && p.period_code.startsWith(`${year}-Q`));
+        for (const q of quarters) await deleteSinglePeriod(q.id, q.period_code);
+        const halves = periods.filter((p) => p.period_type === 'half' && p.period_code.startsWith(`${year}-H`));
+        for (const h of halves) await deleteSinglePeriod(h.id, h.period_code);
+        await deleteSinglePeriod(period.id, period.period_code);
       } else if (period.period_type === 'half') {
-        // 반기 삭제: 하위 분기 → 반기
-        const childQuarters = periods.filter(
-          (p) => p.period_type === 'quarter' && p.parent_period_id === period.id
-        );
-        for (const q of childQuarters) {
-          await deleteSinglePeriod(q.id, `분기 ${q.period_code}`);
-        }
-        await deleteSinglePeriod(period.id, `반기 ${period.period_code}`);
+        const childQuarters = periods.filter((p) => p.period_type === 'quarter' && p.parent_period_id === period.id);
+        for (const q of childQuarters) await deleteSinglePeriod(q.id, q.period_code);
+        await deleteSinglePeriod(period.id, period.period_code);
       } else {
-        await deleteSinglePeriod(period.id, `분기 ${period.period_code}`);
+        await deleteSinglePeriod(period.id, period.period_code);
       }
       alert('삭제되었습니다.');
       fetchPeriods();
     } catch (err: any) {
-      console.error('❌ 삭제 에러:', err);
       alert(`삭제 실패: ${err.message}`);
-      // 부분 삭제가 됐을 수 있으므로 새로고침
       fetchPeriods();
     } finally {
       setLoading(false);
@@ -392,18 +368,18 @@ export default function UnifiedPeriodManager() {
 
   const toggleYear = (year: number) => {
     const newSet = new Set(expandedYears);
-    if (newSet.has(year)) { newSet.delete(year); } else { newSet.add(year); }
+    if (newSet.has(year)) newSet.delete(year); else newSet.add(year);
     setExpandedYears(newSet);
   };
 
   const getHierarchy = () => {
     const years = [...new Set(periods.map((p) => getYearFromCode(p.period_code)))].sort((a, b) => b - a);
-    return years.map((year) => {
-      const yearPeriod = periods.find((p) => p.period_code === `${year}-Y`);
-      const halves = periods.filter((p) => p.period_code.startsWith(`${year}-H`)).sort((a, b) => a.period_code.localeCompare(b.period_code));
-      const quarters = periods.filter((p) => p.period_code.startsWith(`${year}-Q`)).sort((a, b) => a.period_code.localeCompare(b.period_code));
-      return { year, yearPeriod, halves, quarters };
-    });
+    return years.map((year) => ({
+      year,
+      yearPeriod: periods.find((p) => p.period_code === `${year}-Y`),
+      halves: periods.filter((p) => p.period_code.startsWith(`${year}-H`)).sort((a, b) => a.period_code.localeCompare(b.period_code)),
+      quarters: periods.filter((p) => p.period_code.startsWith(`${year}-Q`)).sort((a, b) => a.period_code.localeCompare(b.period_code)),
+    }));
   };
 
   const hierarchy = getHierarchy();
@@ -417,7 +393,7 @@ export default function UnifiedPeriodManager() {
         <div>
           <h2 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
             <Calendar className="w-6 h-6" />
-            기간 &amp; 수립 관리
+            기간 & 수립 관리
           </h2>
           <p className="text-sm text-slate-600 mt-1">기간 생성, 수립 일정 설정, 진행 현황 관리를 한 곳에서</p>
         </div>
@@ -430,14 +406,14 @@ export default function UnifiedPeriodManager() {
       {/* Tabs */}
       <div className="border-b border-slate-200">
         <div className="flex gap-6">
-          {[
-            { id: 'periods', label: '기간 목록', icon: Calendar },
-            { id: 'planning', label: '수립 현황', icon: Edit3 },
-            { id: 'closing', label: '마감 관리', icon: Archive },
-          ].map((tab) => {
+          {([
+            { id: 'periods' as TabType, label: '기간 목록', icon: Calendar },
+            { id: 'planning' as TabType, label: '수립 현황', icon: Edit3 },
+            { id: 'closing' as TabType, label: '마감 관리', icon: Archive },
+          ]).map((tab) => {
             const Icon = tab.icon;
             return (
-              <button key={tab.id} onClick={() => setActiveTab(tab.id as TabType)}
+              <button key={tab.id} onClick={() => setActiveTab(tab.id)}
                 className={`pb-3 px-1 flex items-center gap-2 border-b-2 transition ${activeTab === tab.id ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-600 hover:text-slate-900'}`}>
                 <Icon className="w-4 h-4" />
                 {tab.label}
@@ -466,25 +442,47 @@ export default function UnifiedPeriodManager() {
               ) : (
                 hierarchy.map(({ year, yearPeriod, halves, quarters }) => (
                   <div key={year} className="border border-slate-200 rounded-lg overflow-hidden">
-                    {yearPeriod && (
-                      <div className="bg-slate-50 p-4 flex items-center justify-between border-b border-slate-200">
-                        <button onClick={() => toggleYear(year)} className="flex items-center gap-3 flex-1">
-                          {expandedYears.has(year) ? <ChevronDown className="w-5 h-5 text-slate-500" /> : <ChevronRight className="w-5 h-5 text-slate-500" />}
-                          <div className="flex items-center gap-3">
-                            <div className="text-xl font-bold text-slate-900">{yearPeriod.period_name}</div>
-                            <span className={`px-3 py-1 rounded-full text-xs font-medium ${STATUS_CONFIG[yearPeriod.status].bgColor} ${STATUS_CONFIG[yearPeriod.status].color}`}>
-                              {STATUS_CONFIG[yearPeriod.status].label}
+                    {/* 연도 헤더: yearPeriod 레코드가 없어도 표시 */}
+                    <div className="bg-slate-50 p-4 flex items-center justify-between border-b border-slate-200">
+                      <button onClick={() => toggleYear(year)} className="flex items-center gap-3 flex-1">
+                        {expandedYears.has(year) ? <ChevronDown className="w-5 h-5 text-slate-500" /> : <ChevronRight className="w-5 h-5 text-slate-500" />}
+                        <div className="flex items-center gap-3">
+                          <div className="text-xl font-bold text-slate-900">{yearPeriod?.period_name || `${year}년`}</div>
+                          {yearPeriod && (
+                            <span className={`px-3 py-1 rounded-full text-xs font-medium ${STATUS_CONFIG[yearPeriod.status]?.bgColor} ${STATUS_CONFIG[yearPeriod.status]?.color}`}>
+                              {STATUS_CONFIG[yearPeriod.status]?.label}
                             </span>
-                          </div>
-                        </button>
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm text-slate-600">{formatDate(yearPeriod.starts_at)} ~ {formatDate(yearPeriod.ends_at)}</span>
-                          <button onClick={() => handleDeletePeriod(yearPeriod)} className="p-2 text-red-600 hover:bg-red-50 rounded" title="삭제">
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          )}
                         </div>
+                      </button>
+                      <div className="flex items-center gap-2">
+                        {yearPeriod && (
+                          <span className="text-sm text-slate-600">{formatDate(yearPeriod.starts_at)} ~ {formatDate(yearPeriod.ends_at)}</span>
+                        )}
+                        <button onClick={() => {
+                          if (yearPeriod) { handleDeletePeriod(yearPeriod); }
+                          else {
+                            // yearPeriod 없으면 하위 전체 삭제
+                            if (!confirm(`${year}년도 전체를 삭제하시겠습니까?\n\n삭제된 데이터는 복구할 수 없습니다.`)) return;
+                            const allForYear = periods.filter(p => p.period_code.startsWith(`${year}-`));
+                            (async () => {
+                              setLoading(true);
+                              try {
+                                const qs = allForYear.filter(p => p.period_type === 'quarter');
+                                for (const q of qs) await deleteSinglePeriod(q.id, q.period_code);
+                                const hs = allForYear.filter(p => p.period_type === 'half');
+                                for (const h of hs) await deleteSinglePeriod(h.id, h.period_code);
+                                alert('삭제되었습니다.');
+                                fetchPeriods();
+                              } catch (err: any) { alert(`삭제 실패: ${err.message}`); fetchPeriods(); }
+                              finally { setLoading(false); }
+                            })();
+                          }
+                        }} className="p-2 text-red-600 hover:bg-red-50 rounded" title="삭제">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
                       </div>
-                    )}
+                    </div>
                     {expandedYears.has(year) && (
                       <div className="p-4 space-y-3">
                         {halves.map((half) => {
@@ -514,7 +512,7 @@ export default function UnifiedPeriodManager() {
                 <Info className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
                 <div className="text-sm text-blue-900">
                   <p className="font-medium mb-1">수립 진행 중인 기간</p>
-                  <p className="text-blue-700">각 기간의 수립 현황을 확인하고 관리할 수 있습니다. OKR 수립 현황은 "조직 OKR 현황" 메뉴에서 확인하세요.</p>
+                  <p className="text-blue-700">각 기간의 수립 현황을 확인하고 관리할 수 있습니다.</p>
                 </div>
               </div>
               {periods.filter((p) => ['setup', 'in_progress', 'closing'].includes(p.planning_status)).map((period) => (
@@ -652,21 +650,19 @@ interface PeriodCardProps {
 }
 
 function PeriodCard({ period, onOpenPlanningSetup, onStartPlanning, onClosePlanning, onFinalizePlanning, onStartClosing, onFinalizeClosing, onDelete }: PeriodCardProps) {
-  const StatusIcon = STATUS_CONFIG[period.status].icon;
   const daysLeft = daysUntil(period.planning_deadline_at);
-
   return (
     <div className="border border-slate-200 rounded-lg p-4 hover:shadow-sm transition">
       <div className="flex items-start justify-between">
         <div className="flex-1">
           <div className="flex items-center gap-3 mb-2">
             <h4 className="font-semibold text-slate-900">{period.period_name}</h4>
-            <span className={`px-2 py-1 rounded-full text-xs font-medium ${STATUS_CONFIG[period.status].bgColor} ${STATUS_CONFIG[period.status].color}`}>
-              {STATUS_CONFIG[period.status].label}
+            <span className={`px-2 py-1 rounded-full text-xs font-medium ${STATUS_CONFIG[period.status]?.bgColor} ${STATUS_CONFIG[period.status]?.color}`}>
+              {STATUS_CONFIG[period.status]?.label}
             </span>
             {period.planning_status !== 'not_started' && (
-              <span className={`px-2 py-1 rounded-full text-xs font-medium bg-slate-100 ${PLANNING_STATUS_CONFIG[period.planning_status].color}`}>
-                수립: {PLANNING_STATUS_CONFIG[period.planning_status].label}
+              <span className={`px-2 py-1 rounded-full text-xs font-medium bg-slate-100 ${PLANNING_STATUS_CONFIG[period.planning_status]?.color}`}>
+                수립: {PLANNING_STATUS_CONFIG[period.planning_status]?.label}
               </span>
             )}
           </div>
@@ -691,7 +687,6 @@ function PeriodCard({ period, onOpenPlanningSetup, onStartPlanning, onClosePlann
             )}
           </div>
         </div>
-
         <div className="flex items-center gap-2">
           {period.planning_status === 'not_started' && (
             <button onClick={() => onOpenPlanningSetup(period)} className="px-3 py-1.5 text-sm border border-blue-600 text-blue-600 rounded hover:bg-blue-50 flex items-center gap-1">
@@ -747,89 +742,51 @@ function PeriodCard({ period, onOpenPlanningSetup, onStartPlanning, onClosePlann
   );
 }
 
-interface PlanningStatusCardProps {
-  period: FiscalPeriod;
-  onClosePlanning: (period: FiscalPeriod) => void;
-  onFinalizePlanning: (period: FiscalPeriod) => void;
-}
-
-function PlanningStatusCard({ period, onClosePlanning, onFinalizePlanning }: PlanningStatusCardProps) {
+function PlanningStatusCard({ period, onClosePlanning, onFinalizePlanning }: { period: FiscalPeriod; onClosePlanning: (p: FiscalPeriod) => void; onFinalizePlanning: (p: FiscalPeriod) => void }) {
   const daysLeft = daysUntil(period.planning_deadline_at);
   return (
     <div className="border border-blue-200 bg-blue-50 rounded-lg p-4">
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-3">
           <h4 className="font-bold text-slate-900">{period.period_name}</h4>
-          <span className={`px-2 py-1 rounded-full text-xs font-medium bg-white ${PLANNING_STATUS_CONFIG[period.planning_status].color}`}>
-            {PLANNING_STATUS_CONFIG[period.planning_status].label}
+          <span className={`px-2 py-1 rounded-full text-xs font-medium bg-white ${PLANNING_STATUS_CONFIG[period.planning_status]?.color}`}>
+            {PLANNING_STATUS_CONFIG[period.planning_status]?.label}
           </span>
         </div>
         {daysLeft !== null && daysLeft >= 0 && <div className="text-sm text-orange-600 font-semibold">마감까지 D-{daysLeft}</div>}
       </div>
       <div className="grid grid-cols-2 gap-4 text-sm mb-3">
-        <div>
-          <div className="text-slate-600">수립 기간</div>
-          <div className="font-medium text-slate-900">{formatDate(period.planning_starts_at)} ~ {formatDate(period.planning_deadline_at)}</div>
-        </div>
-        <div>
-          <div className="text-slate-600">수립 시작</div>
-          <div className="font-medium text-slate-900">{formatDateTime(period.planning_started_at)}</div>
-        </div>
+        <div><div className="text-slate-600">수립 기간</div><div className="font-medium text-slate-900">{formatDate(period.planning_starts_at)} ~ {formatDate(period.planning_deadline_at)}</div></div>
+        <div><div className="text-slate-600">수립 시작</div><div className="font-medium text-slate-900">{formatDateTime(period.planning_started_at)}</div></div>
       </div>
       <div className="flex items-center gap-2 pt-3 border-t border-blue-200">
-        <button className="flex-1 px-3 py-2 bg-white border border-slate-300 text-slate-700 rounded hover:bg-slate-50 text-sm">
-          <Users className="w-4 h-4 inline mr-1" />수립 현황 보기
-        </button>
-        {period.planning_status === 'in_progress' && (
-          <button onClick={() => onClosePlanning(period)} className="px-4 py-2 bg-orange-600 text-white rounded hover:bg-orange-700 text-sm">수립 마감</button>
-        )}
-        {period.planning_status === 'closing' && (
-          <button onClick={() => onFinalizePlanning(period)} className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 text-sm">수립 확정</button>
-        )}
+        <button className="flex-1 px-3 py-2 bg-white border border-slate-300 text-slate-700 rounded hover:bg-slate-50 text-sm"><Users className="w-4 h-4 inline mr-1" />수립 현황 보기</button>
+        {period.planning_status === 'in_progress' && <button onClick={() => onClosePlanning(period)} className="px-4 py-2 bg-orange-600 text-white rounded hover:bg-orange-700 text-sm">수립 마감</button>}
+        {period.planning_status === 'closing' && <button onClick={() => onFinalizePlanning(period)} className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 text-sm">수립 확정</button>}
       </div>
     </div>
   );
 }
 
-interface ClosingStatusCardProps {
-  period: FiscalPeriod;
-  onStartClosing: (period: FiscalPeriod) => void;
-  onFinalizeClosing: (period: FiscalPeriod) => void;
-}
-
-function ClosingStatusCard({ period, onStartClosing, onFinalizeClosing }: ClosingStatusCardProps) {
+function ClosingStatusCard({ period, onStartClosing, onFinalizeClosing }: { period: FiscalPeriod; onStartClosing: (p: FiscalPeriod) => void; onFinalizeClosing: (p: FiscalPeriod) => void }) {
   return (
     <div className="border border-orange-200 bg-orange-50 rounded-lg p-4">
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-3">
           <h4 className="font-bold text-slate-900">{period.period_name}</h4>
-          <span className={`px-2 py-1 rounded-full text-xs font-medium ${STATUS_CONFIG[period.status].bgColor} ${STATUS_CONFIG[period.status].color}`}>
-            {STATUS_CONFIG[period.status].label}
+          <span className={`px-2 py-1 rounded-full text-xs font-medium ${STATUS_CONFIG[period.status]?.bgColor} ${STATUS_CONFIG[period.status]?.color}`}>
+            {STATUS_CONFIG[period.status]?.label}
           </span>
         </div>
       </div>
       <div className="grid grid-cols-2 gap-4 text-sm mb-3">
-        <div>
-          <div className="text-slate-600">기간</div>
-          <div className="font-medium text-slate-900">{formatDate(period.starts_at)} ~ {formatDate(period.ends_at)}</div>
-        </div>
-        {period.closing_started_at && (
-          <div>
-            <div className="text-slate-600">마감 시작</div>
-            <div className="font-medium text-slate-900">{formatDateTime(period.closing_started_at)}</div>
-          </div>
-        )}
+        <div><div className="text-slate-600">기간</div><div className="font-medium text-slate-900">{formatDate(period.starts_at)} ~ {formatDate(period.ends_at)}</div></div>
+        {period.closing_started_at && <div><div className="text-slate-600">마감 시작</div><div className="font-medium text-slate-900">{formatDateTime(period.closing_started_at)}</div></div>}
       </div>
       <div className="flex items-center gap-2 pt-3 border-t border-orange-200">
-        <button className="flex-1 px-3 py-2 bg-white border border-slate-300 text-slate-700 rounded hover:bg-slate-50 text-sm">
-          <TrendingUp className="w-4 h-4 inline mr-1" />성과 현황 보기
-        </button>
-        {period.status === 'active' && (
-          <button onClick={() => onStartClosing(period)} className="px-4 py-2 bg-orange-600 text-white rounded hover:bg-orange-700 text-sm">마감 시작</button>
-        )}
-        {period.status === 'closing' && (
-          <button onClick={() => onFinalizeClosing(period)} className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 text-sm">마감 완료</button>
-        )}
+        <button className="flex-1 px-3 py-2 bg-white border border-slate-300 text-slate-700 rounded hover:bg-slate-50 text-sm"><TrendingUp className="w-4 h-4 inline mr-1" />성과 현황 보기</button>
+        {period.status === 'active' && <button onClick={() => onStartClosing(period)} className="px-4 py-2 bg-orange-600 text-white rounded hover:bg-orange-700 text-sm">마감 시작</button>}
+        {period.status === 'closing' && <button onClick={() => onFinalizeClosing(period)} className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 text-sm">마감 완료</button>}
       </div>
     </div>
   );
