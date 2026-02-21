@@ -119,7 +119,7 @@ export default function UnifiedPeriodManager() {
 
   const [activeTab, setActiveTab] = useState<TabType>('periods');
   const [periods, setPeriods] = useState<FiscalPeriod[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true); // ✅ 초기값 true: profile 로딩 대기
   const [selectedPeriod, setSelectedPeriod] = useState<FiscalPeriod | null>(null);
   const [showCreateYear, setShowCreateYear] = useState(false);
   const [newYear, setNewYear] = useState(new Date().getFullYear());
@@ -136,7 +136,10 @@ export default function UnifiedPeriodManager() {
   // ─── Data Fetching ───────────────────────────────────────
 
   const fetchPeriods = useCallback(async () => {
-    if (!companyId) return;
+    if (!companyId) {
+      setLoading(false); // ✅ companyId 없으면 로딩 해제 (빈 상태 표시)
+      return;
+    }
     setLoading(true);
     try {
       const { data, error } = await supabase
@@ -314,21 +317,73 @@ export default function UnifiedPeriodManager() {
 
   // ─── 기간 삭제 ──────────────────────────────────────────
 
+  // 단일 period 삭제 헬퍼 (.select()로 실제 삭제 확인)
+  const deleteSinglePeriod = async (id: string, label: string): Promise<void> => {
+    console.log(`🗑️ 삭제 시도: ${label} (${id})`);
+    const { data, error } = await supabase
+      .from('fiscal_periods')
+      .delete()
+      .eq('id', id)
+      .select();
+
+    console.log(`🗑️ 삭제 결과:`, { label, data, error, count: data?.length });
+
+    if (error) {
+      throw new Error(`${label} 삭제 실패: ${error.message}`);
+    }
+    if (!data || data.length === 0) {
+      throw new Error(`${label} 삭제 실패: RLS 정책에 의해 삭제가 차단되었습니다. Supabase에서 fiscal_periods 테이블의 DELETE RLS 정책을 확인해주세요.`);
+    }
+  };
+
   const handleDeletePeriod = async (period: FiscalPeriod) => {
     const year = getYearFromCode(period.period_code);
     if (period.period_type === 'year') {
       if (!confirm(`${year}년도 전체를 삭제하시겠습니까?\n\n연도를 삭제하면 하위 반기/분기도 모두 삭제됩니다.\n삭제된 데이터는 복구할 수 없습니다.`)) return;
+    } else if (period.period_type === 'half') {
+      if (!confirm(`${period.period_name}을(를) 삭제하시겠습니까?\n\n하위 분기도 함께 삭제됩니다.\n삭제된 데이터는 복구할 수 없습니다.`)) return;
     } else {
-      if (!confirm(`${period.period_code}를 삭제하시겠습니까?\n\n삭제된 데이터는 복구할 수 없습니다.`)) return;
+      if (!confirm(`${period.period_name}을(를) 삭제하시겠습니까?\n\n삭제된 데이터는 복구할 수 없습니다.`)) return;
     }
     setLoading(true);
     try {
-      const { error } = await supabase.from('fiscal_periods').delete().eq('id', period.id);
-      if (error) throw error;
+      if (period.period_type === 'year') {
+        // 연도 삭제: 분기 → 반기 → 연도 순서
+        const quarters = periods.filter(
+          (p) => p.period_type === 'quarter' && p.period_code.startsWith(`${year}-Q`)
+        );
+        for (const q of quarters) {
+          await deleteSinglePeriod(q.id, `분기 ${q.period_code}`);
+        }
+        const halves = periods.filter(
+          (p) => p.period_type === 'half' && p.period_code.startsWith(`${year}-H`)
+        );
+        for (const h of halves) {
+          await deleteSinglePeriod(h.id, `반기 ${h.period_code}`);
+        }
+        await deleteSinglePeriod(period.id, `연도 ${period.period_code}`);
+      } else if (period.period_type === 'half') {
+        // 반기 삭제: 하위 분기 → 반기
+        const childQuarters = periods.filter(
+          (p) => p.period_type === 'quarter' && p.parent_period_id === period.id
+        );
+        for (const q of childQuarters) {
+          await deleteSinglePeriod(q.id, `분기 ${q.period_code}`);
+        }
+        await deleteSinglePeriod(period.id, `반기 ${period.period_code}`);
+      } else {
+        await deleteSinglePeriod(period.id, `분기 ${period.period_code}`);
+      }
       alert('삭제되었습니다.');
       fetchPeriods();
-    } catch (err: any) { alert(`삭제 실패: ${err.message}`); }
-    finally { setLoading(false); }
+    } catch (err: any) {
+      console.error('❌ 삭제 에러:', err);
+      alert(`삭제 실패: ${err.message}`);
+      // 부분 삭제가 됐을 수 있으므로 새로고침
+      fetchPeriods();
+    } finally {
+      setLoading(false);
+    }
   };
 
   // ─── UI 헬퍼 ────────────────────────────────────────────
@@ -776,4 +831,4 @@ function ClosingStatusCard({ period, onStartClosing, onFinalizeClosing }: Closin
       </div>
     </div>
   );
-} 
+}
