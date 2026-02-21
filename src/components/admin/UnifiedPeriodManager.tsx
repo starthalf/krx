@@ -1,4 +1,4 @@
-// src/components/admin/UnifiedPeriodManager.tsx 
+// src/components/admin/UnifiedPeriodManager.tsx
 // 기간(Period)과 수립(Planning) 관리를 단일 인터페이스로 통합
 // CEO가 한 곳에서 모든 기간/수립 작업 수행
 
@@ -137,7 +137,7 @@ const PERIOD_TYPE_LABELS: Record<string, string> = {
   year: '연도',
 };
 
-// ─── Main Component ────────────────────────────────────── 
+// ─── Main Component ──────────────────────────────────────
 
 export default function UnifiedPeriodManager() {
   const { user } = useAuth();
@@ -191,7 +191,7 @@ export default function UnifiedPeriodManager() {
   // ─── 연도 생성 (자동 계층 생성) ──────────────────────────
 
   const handleCreateYear = async () => {
-    if (!company?.id || !user?.id) return; 
+    if (!company?.id || !user?.id) return;
 
     setLoading(true);
     try {
