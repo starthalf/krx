@@ -190,32 +190,45 @@ export default function UnifiedPeriodManager() {
 
   // ─── 연도 생성 (자동 계층 생성) ──────────────────────────
 
-  const handleCreateYear = async () => {
-    if (!company?.id || !user?.id) return;
+const handleCreateYear = async () => {
+  console.log('=== handleCreateYear ===', { 
+    companyId: company?.id, 
+    userId: user?.id, 
+    newYear,
+    company: company
+  });
+  
+  if (!company?.id || !user?.id) {
+    console.log('❌ early return - company:', company?.id, 'user:', user?.id);
+    alert('회사 정보를 불러올 수 없습니다. 페이지를 새로고침 해주세요.');
+    return;
+  }
 
-    setLoading(true);
-    try {
-      const { data, error } = await supabase.rpc('create_fiscal_year_with_hierarchy', {
-        p_company_id: company.id,
-        p_year: newYear,
-      });
-
-      if (error) throw error;
-
-      alert(`${newYear}년도 및 하위 기간이 생성되었습니다.`);
-      setShowCreateYear(false);
-      fetchPeriods();
-      setExpandedYears((prev) => new Set(prev).add(newYear));
-    } catch (err: any) {
-      if (err.message?.includes('duplicate')) {
-        alert(`${newYear}년도가 이미 존재합니다.`);
-      } else {
-        alert(`연도 생성 실패: ${err.message}`);
-      }
-    } finally {
-      setLoading(false);
+  setLoading(true);
+  try {
+    console.log('📡 RPC 호출 시작');
+    const { data, error } = await supabase.rpc('create_fiscal_year_with_hierarchy', {
+      p_company_id: company.id,
+      p_year: newYear,
+    });
+    console.log('📡 RPC 결과:', { data, error });
+    
+    if (error) throw error;
+    alert(`${newYear}년도 및 하위 기간이 생성되었습니다.`);
+    setShowCreateYear(false);
+    fetchPeriods();
+    setExpandedYears((prev) => new Set(prev).add(newYear));
+  } catch (err: any) {
+    console.error('❌ 에러:', err);
+    if (err.message?.includes('duplicate')) {
+      alert(`${newYear}년도가 이미 존재합니다.`);
+    } else {
+      alert(`연도 생성 실패: ${err.message}`);
     }
-  };
+  } finally {
+    setLoading(false);
+  }
+};
 
   // ─── 수립 설정 (Planning Setup) ──────────────────────────
 
