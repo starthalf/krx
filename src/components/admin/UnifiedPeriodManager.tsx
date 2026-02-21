@@ -342,9 +342,9 @@ export default function UnifiedPeriodManager() {
     setLoading(true);
     try {
       if (period.period_type === 'year') {
-        const quarters = periods.filter((p) => p.period_type === 'quarter' && p.period_code.startsWith(`${year}-Q`));
+        const quarters = periods.filter((p) => p.period_type === 'quarter' && getYearFromCode(p.period_code) === year);
         for (const q of quarters) await deleteSinglePeriod(q.id, q.period_code);
-        const halves = periods.filter((p) => p.period_type === 'half' && p.period_code.startsWith(`${year}-H`));
+        const halves = periods.filter((p) => p.period_type === 'half' && getYearFromCode(p.period_code) === year);
         for (const h of halves) await deleteSinglePeriod(h.id, h.period_code);
         await deleteSinglePeriod(period.id, period.period_code);
       } else if (period.period_type === 'half') {
@@ -376,9 +376,10 @@ export default function UnifiedPeriodManager() {
     const years = [...new Set(periods.map((p) => getYearFromCode(p.period_code)))].sort((a, b) => b - a);
     return years.map((year) => ({
       year,
-      yearPeriod: periods.find((p) => p.period_code === `${year}-Y`),
-      halves: periods.filter((p) => p.period_code.startsWith(`${year}-H`)).sort((a, b) => a.period_code.localeCompare(b.period_code)),
-      quarters: periods.filter((p) => p.period_code.startsWith(`${year}-Q`)).sort((a, b) => a.period_code.localeCompare(b.period_code)),
+      // period_code가 '2027' 또는 '2027-Y' 둘 다 대응
+      yearPeriod: periods.find((p) => p.period_type === 'year' && getYearFromCode(p.period_code) === year),
+      halves: periods.filter((p) => p.period_type === 'half' && getYearFromCode(p.period_code) === year).sort((a, b) => a.period_code.localeCompare(b.period_code)),
+      quarters: periods.filter((p) => p.period_type === 'quarter' && getYearFromCode(p.period_code) === year).sort((a, b) => a.period_code.localeCompare(b.period_code)),
     })).filter(({ yearPeriod, halves, quarters }) => yearPeriod || halves.length > 0 || quarters.length > 0);
   };
 
@@ -464,7 +465,7 @@ export default function UnifiedPeriodManager() {
                           else {
                             // yearPeriod 없으면 하위 전체 삭제
                             if (!confirm(`${year}년도 전체를 삭제하시겠습니까?\n\n삭제된 데이터는 복구할 수 없습니다.`)) return;
-                            const allForYear = periods.filter(p => p.period_code.startsWith(`${year}-`));
+                            const allForYear = periods.filter(p => getYearFromCode(p.period_code) === year);
                             (async () => {
                               setLoading(true);
                               try {
