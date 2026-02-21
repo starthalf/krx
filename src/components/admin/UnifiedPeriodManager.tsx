@@ -791,4 +791,4 @@ function ClosingStatusCard({ period, onStartClosing, onFinalizeClosing }: { peri
       </div>
     </div>
   );
-}
+} 
