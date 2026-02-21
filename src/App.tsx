@@ -21,9 +21,7 @@ import Notifications from './pages/Notifications';
 import ApprovalInbox from './pages/ApprovalInbox';
 import OKRMap from './pages/OKRMap';
 import CEOOKRSetup from './pages/CEOOKRSetup';
-// [NEW] 기간 관리 페이지
 import PeriodCloseWizard from './pages/PeriodCloseWizard';
-import PeriodHistory from './pages/PeriodHistory';
 
 function App() {
   return (
@@ -71,7 +69,7 @@ function App() {
             }
           />
           
-          {/* [NEW] 기간 마감 위자드 (전체 화면) */}
+          {/* ✅ 기간 마감 위저드 (전체 화면) - periodId 사용 */}
           <Route
             path="/period-close/:periodId"
             element={
@@ -81,6 +79,27 @@ function App() {
                 </WithOnboardingCheck>
               </ProtectedRoute>
             }
+          />
+          
+          {/* ✅ [LEGACY REDIRECTS] 기존 경로들을 통합 Admin 페이지로 리다이렉트 */}
+          {/* 기간 히스토리 → Admin periods 탭 */}
+          <Route
+            path="/period-history"
+            element={<Navigate to="/admin?tab=periods" replace />}
+          />
+          <Route
+            path="/period-history/:periodId"
+            element={<Navigate to="/admin?tab=periods" replace />}
+          />
+          
+          {/* ✅ [NEW] 사이클 관련 레거시 경로 → Admin periods 탭으로 통합 */}
+          <Route
+            path="/cycles"
+            element={<Navigate to="/admin?tab=periods" replace />}
+          />
+          <Route
+            path="/cycle-management"
+            element={<Navigate to="/admin?tab=periods" replace />}
           />
           
           {/* 인증 필요한 페이지들 */}
@@ -106,24 +125,24 @@ function App() {
             <Route path="okr/division" element={<OKRStatus />} />
             <Route path="okr/team" element={<OKRStatus />} />
             
-            {/* [NEW] OKR Cascading Map */}
+            {/* OKR Cascading Map */}
             <Route path="okr-map" element={<OKRMap />} />
             
-            {/* [NEW] OKR 수립 현황 - CEO/본부장용 독촉 페이지 */}
+            {/* ✅ OKR 수립 현황 - CEO/본부장용 독촉 페이지 */}
             <Route path="okr-setup" element={<OKRSetupStatus />} />
             
             {/* 체크인 (실적 입력 및 KR 상세 관리) */}
             <Route path="checkin" element={<Checkin />} />
             
-            {/* 목표 수립 위저드 */}
+            {/* ✅ 목표 수립 위저드 - CEO 전사 OKR 수립 */}
             <Route path="ceo-okr-setup" element={<CEOOKRSetup />} />
             <Route path="wizard" element={<Wizard />} />
             <Route path="wizard/:orgId" element={<Wizard />} />
             
-            {/* [NEW] 승인 대기함 */}
+            {/* 승인 대기함 */}
             <Route path="approval-inbox" element={<ApprovalInbox />} />
             
-            {/* [NEW] 알림 */}
+            {/* 알림 */}
             <Route path="notifications" element={<Notifications />} />
             
             {/* 조직 관리 */}
@@ -134,10 +153,6 @@ function App() {
             
             {/* 내 설정 */}
             <Route path="my-settings" element={<MySettings />} />
-            
-            {/* [NEW] 기간 히스토리 */}
-            <Route path="period-history" element={<PeriodHistory />} />
-            <Route path="period-history/:periodId" element={<PeriodHistory />} />
           </Route>
           
           {/* 없는 경로 → 대시보드로 리다이렉트 */}

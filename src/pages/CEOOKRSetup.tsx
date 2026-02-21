@@ -1,5 +1,5 @@
 // src/pages/CEOOKRSetup.tsx
-// CEO 전용 전사 OKR 수립 + 전체 조직 초안 생성 + 사이클 시작 통합 페이지
+// CEO 전용 전사 OKR 수립 + 전체 조직 초안 생성 + 사이클 시작 통합 페이지 
 // Phase 1~3 통합: 컨텍스트 입력 → 전사 OKR 확정 → 전 조직 초안 → 사이클 시작
 
 import { useState, useEffect, useCallback } from 'react';
