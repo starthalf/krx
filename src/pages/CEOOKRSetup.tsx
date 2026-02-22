@@ -204,9 +204,23 @@ export default function CEOOKRSetup() {
       if (error) throw error;
       setAvailablePeriods(data || []);
 
-      // 자동 선택: planning > active > upcoming 순
+      // 자동 선택: 현재 날짜를 포함하는 기간 > 가장 가까운 미래 기간 > planning/active 우선
       if (!selectedPeriodId && data && data.length > 0) {
-        const auto = data.find(p => p.status === 'planning') || data.find(p => p.status === 'active') || data[0];
+        const now = new Date();
+        // 1) 이미 수립 진행 중인 기간
+        const inProgress = data.find(p => p.status === 'planning');
+        // 2) 현재 날짜를 포함하는 기간
+        const current = data.find(p => new Date(p.starts_at) <= now && now <= new Date(p.ends_at));
+        // 3) 시작일이 가장 가까운 미래 기간
+        const future = data
+          .filter(p => new Date(p.starts_at) > now)
+          .sort((a, b) => new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime())[0];
+        // 4) 가장 최근 과거 기간
+        const past = data
+          .filter(p => new Date(p.ends_at) < now)
+          .sort((a, b) => new Date(b.ends_at).getTime() - new Date(a.ends_at).getTime())[0];
+
+        const auto = inProgress || current || future || past || data[0];
         if (auto) {
           setSelectedPeriodId(auto.id);
           setSelectedPeriodCode(auto.period_code);
