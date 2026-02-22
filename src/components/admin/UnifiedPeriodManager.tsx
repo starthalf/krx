@@ -298,23 +298,24 @@ export default function UnifiedPeriodManager() {
               ) : (
                 hierarchy.map(({ year, yearPeriod, halves, quarters }) => (
                   <div key={year} className="border border-slate-200 rounded-lg overflow-hidden">
-                    {yearPeriod && (
-                      <div className="bg-slate-50 p-4 flex items-center justify-between border-b border-slate-200">
-                        <button onClick={() => toggleYear(year)} className="flex items-center gap-3 flex-1">
-                          {expandedYears.has(year) ? <ChevronDown className="w-5 h-5 text-slate-500" /> : <ChevronRight className="w-5 h-5 text-slate-500" />}
-                          <div className="flex items-center gap-3">
-                            <div className="text-xl font-bold text-slate-900">{yearPeriod.period_name}</div>
+                    {/* 연도 헤더 - yearPeriod 레코드 없어도 항상 표시 */}
+                    <div className="bg-slate-50 p-4 flex items-center justify-between border-b border-slate-200">
+                      <button onClick={() => toggleYear(year)} className="flex items-center gap-3 flex-1">
+                        {expandedYears.has(year) ? <ChevronDown className="w-5 h-5 text-slate-500" /> : <ChevronRight className="w-5 h-5 text-slate-500" />}
+                        <div className="flex items-center gap-3">
+                          <div className="text-xl font-bold text-slate-900">{yearPeriod?.period_name || `${year}년`}</div>
+                          {yearPeriod && (
                             <span className={`px-3 py-1 rounded-full text-xs font-medium ${STATUS_CFG[yearPeriod.status].bg} ${STATUS_CFG[yearPeriod.status].color}`}>{STATUS_CFG[yearPeriod.status].label}</span>
-                          </div>
-                        </button>
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm text-slate-600">{formatDate(yearPeriod.starts_at)} ~ {formatDate(yearPeriod.ends_at)}</span>
-                          {yearPeriod.status === 'upcoming' && (
-                            <button onClick={() => handleDeletePeriod(yearPeriod)} className="p-2 text-red-600 hover:bg-red-50 rounded" title="삭제"><Trash2 className="w-4 h-4" /></button>
                           )}
                         </div>
+                      </button>
+                      <div className="flex items-center gap-2">
+                        {yearPeriod && <span className="text-sm text-slate-600">{formatDate(yearPeriod.starts_at)} ~ {formatDate(yearPeriod.ends_at)}</span>}
+                        {yearPeriod?.status === 'upcoming' && (
+                          <button onClick={() => handleDeletePeriod(yearPeriod)} className="p-2 text-red-600 hover:bg-red-50 rounded" title="삭제"><Trash2 className="w-4 h-4" /></button>
+                        )}
                       </div>
-                    )}
+                    </div>
                     {expandedYears.has(year) && (
                       <div className="p-4 space-y-3">
                         {halves.map(half => {
