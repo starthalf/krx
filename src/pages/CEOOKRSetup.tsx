@@ -8,14 +8,14 @@ import {
   Building2, Bot, Target, ChevronRight, ChevronLeft, Check, CheckCircle2,
   RefreshCw, Pencil, Trash2, Plus, X, Loader2, ArrowLeft, Send,
   GitBranch, CalendarClock, Megaphone, Zap, Eye, AlertCircle,
-  ChevronDown, ChevronUp, Sparkles, Rocket
+  ChevronDown, ChevronUp, Sparkles, Rocket, Calendar, Settings
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useStore } from '../store/useStore';
 import { useAuth } from '../contexts/AuthContext';
 import { getBIIColor } from '../utils/helpers';
 import type { BIIType, Company } from '../types';
-import { fetchActivePeriod } from '../lib/period-api';
+// import { fetchActivePeriod } from '../lib/period-api'; // 이제 직접 supabase 쿼리
 
 // ─── Types ───────────────────────────────────────────────
 
@@ -68,10 +68,11 @@ interface OrgDraftStatus {
 // ─── Steps ───────────────────────────────────────────────
 
 const STEPS = [
-  { id: 0, name: '경영 컨텍스트', icon: '📋', description: '회사 현황과 전략 방향 입력' },
-  { id: 1, name: '전사 OKR 수립', icon: '🎯', description: 'AI 생성 → 수정 → 확정' },
-  { id: 2, name: '전체 조직 초안', icon: '🏗️', description: '모든 조직 OKR 초안 일괄 생성' },
-  { id: 3, name: '사이클 시작', icon: '🚀', description: '마감일 설정 및 알림 발송' },
+  { id: 0, name: '기간 설정', icon: '📅', description: '수립 대상 기간 선택' },
+  { id: 1, name: '경영 컨텍스트', icon: '📋', description: '회사 현황과 전략 방향 입력' },
+  { id: 2, name: '전사 OKR 수립', icon: '🎯', description: 'AI 생성 → 수정 → 확정' },
+  { id: 3, name: '전체 조직 초안', icon: '🏗️', description: '모든 조직 OKR 초안 일괄 생성' },
+  { id: 4, name: '사이클 시작', icon: '🚀', description: '마감일 설정 및 알림 발송' },
 ];
 
 // ─── Helpers ─────────────────────────────────────────────
@@ -100,6 +101,11 @@ export default function CEOOKRSetup() {
   const [selectedPeriodId, setSelectedPeriodId] = useState<string | null>(null);
   const [selectedPeriodCode, setSelectedPeriodCode] = useState<string>('');
   const [periodLoading, setPeriodLoading] = useState(true);
+  const [availablePeriods, setAvailablePeriods] = useState<any[]>([]);
+  const [periodConfirmed, setPeriodConfirmed] = useState(false);
+  const [showCreateYear, setShowCreateYear] = useState(false);
+  const [newYear, setNewYear] = useState(new Date().getFullYear());
+  const [isCreatingYear, setIsCreatingYear] = useState(false);
 
   // 단계 관리
   const [currentStep, setCurrentStep] = useState(0);
@@ -175,46 +181,93 @@ export default function CEOOKRSetup() {
     loadCompany();
   }, [user?.id, company]);
 
-  // ==================== 활성 기간 로드 (NEW) ====================
-  useEffect(() => {
-    const loadActivePeriod = async () => {
-      if (!company?.id) {
-        setPeriodLoading(false);
-        return;
-      }
+  // ==================== 기간 로드 ====================
+  const loadAvailablePeriods = useCallback(async () => {
+    if (!company?.id) { setPeriodLoading(false); return; }
+    setPeriodLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('fiscal_periods')
+        .select('id, period_code, period_name, period_type, starts_at, ends_at, status, planning_status, company_okr_finalized, all_orgs_draft_generated')
+        .eq('company_id', company.id)
+        .in('period_type', ['half', 'quarter'])
+        .in('status', ['upcoming', 'planning', 'active'])
+        .order('period_code', { ascending: false });
+      if (error) throw error;
+      setAvailablePeriods(data || []);
 
-      setPeriodLoading(true);
-      try {
-        // 반기 기준 활성 기간 가져오기 (CEO는 보통 반기/연 단위)
-        const activePeriod = await fetchActivePeriod(company.id, 'half');
-        if (activePeriod) {
-          setSelectedPeriodId(activePeriod.id);
-          setSelectedPeriodCode(activePeriod.periodCode);
-        } else {
-          // 반기가 없으면 분기 확인
-          const activeQuarter = await fetchActivePeriod(company.id, 'quarter');
-          if (activeQuarter) {
-            setSelectedPeriodId(activeQuarter.id);
-            setSelectedPeriodCode(activeQuarter.periodCode);
-          }
+      // 자동 선택: active > planning > upcoming 순으로 첫 번째
+      if (!selectedPeriodId && data && data.length > 0) {
+        const auto = data.find(p => p.status === 'active') || data.find(p => p.status === 'planning') || data[0];
+        if (auto) {
+          setSelectedPeriodId(auto.id);
+          setSelectedPeriodCode(auto.period_code);
         }
-      } catch (err) {
-        console.error('활성 기간 로드 실패:', err);
-      } finally {
-        setPeriodLoading(false);
       }
+    } catch (err) {
+      console.error('기간 로드 실패:', err);
+    } finally {
+      setPeriodLoading(false);
+    }
+  }, [company?.id, selectedPeriodId]);
+
+  useEffect(() => { loadAvailablePeriods(); }, [loadAvailablePeriods]);
+
+  // ==================== 기간 설정 핸들러 ====================
+
+  const handleSelectPeriod = (period: any) => {
+    setSelectedPeriodId(period.id);
+    setSelectedPeriodCode(period.period_code);
+  };
+
+  const handleConfirmPeriod = async () => {
+    if (!selectedPeriodId) return;
+    // upcoming 상태이면 planning으로 전환
+    const selected = availablePeriods.find(p => p.id === selectedPeriodId);
+    if (selected?.status === 'upcoming') {
+      await supabase.from('fiscal_periods')
+        .update({ status: 'planning', planning_status: 'setup' })
+        .eq('id', selectedPeriodId);
+    }
+    setPeriodConfirmed(true);
+    setCurrentStep(1);
+  };
+
+  const handleCreateYear = async () => {
+    if (!company?.id) return;
+    setIsCreatingYear(true);
+    try {
+      const { error } = await supabase.rpc('create_fiscal_year_with_hierarchy', {
+        p_company_id: company.id,
+        p_year: newYear,
+      });
+      if (error) throw error;
+      alert(`${newYear}년도 및 하위 기간이 생성되었습니다.`);
+      setShowCreateYear(false);
+      await loadAvailablePeriods();
+    } catch (err: any) {
+      alert(err.message?.includes('duplicate') ? `${newYear}년도가 이미 존재합니다.` : `생성 실패: ${err.message}`);
+    } finally {
+      setIsCreatingYear(false);
+    }
+  };
+
+  const periodStatusLabel = (status: string) => {
+    const m: Record<string, { label: string; color: string }> = {
+      upcoming: { label: '예정', color: 'bg-slate-100 text-slate-600' },
+      planning: { label: '수립중', color: 'bg-blue-100 text-blue-700' },
+      active: { label: '실행중', color: 'bg-green-100 text-green-700' },
     };
+    return m[status] || { label: status, color: 'bg-gray-100 text-gray-600' };
+  };
 
-    loadActivePeriod();
-  }, [company?.id]);
-
-  // 컨텍스트 + 기존 진행 상태 복원 (기간 로드 완료 후)
+  // 컨텍스트 + 기존 진행 상태 복원 (기간 확정 후)
   useEffect(() => {
-    if (company?.id && selectedPeriodCode) {
+    if (company?.id && selectedPeriodCode && periodConfirmed) {
       loadExistingContext();
       loadExistingProgress();
     }
-  }, [company?.id, selectedPeriodCode]);
+  }, [company?.id, selectedPeriodCode, periodConfirmed]);
 
   // 기존 진행 상태 복원 (전사 OKR 확정 여부, 조직 초안 생성 여부)
   const loadExistingProgress = async () => {
@@ -266,9 +319,9 @@ export default function CEOOKRSetup() {
         const isFinalized = companyObjs.some((o: any) => o.approval_status === 'finalized');
         if (isFinalized) {
           setCompanyOKRFinalized(true);
-          setCurrentStep(1); // Step 1로 이동 (확정 완료 상태)
+          setCurrentStep(2); // Step 2로 이동 (확정 완료 상태)
         } else {
-          setCurrentStep(1); // OKR이 있지만 아직 확정 전
+          setCurrentStep(2); // OKR이 있지만 아직 확정 전
         }
       }
 
@@ -305,7 +358,7 @@ export default function CEOOKRSetup() {
           if (allDone && statuses.length === childOrgs.length) {
             setAllDraftsComplete(true);
             if (companyObjs && companyObjs.some((o: any) => o.approval_status === 'finalized')) {
-              setCurrentStep(2); // 전사 확정 + 조직 초안 완료 → Step 2
+              setCurrentStep(3); // 전사 확정 + 조직 초안 완료 → Step 3
             }
           }
         }
@@ -324,7 +377,7 @@ export default function CEOOKRSetup() {
         const cycleStatus = cycles[0].status;
         if (cycleStatus === 'in_progress') {
           setCycleStarted(true);
-          setCurrentStep(3);
+          setCurrentStep(4);
         }
       }
 
@@ -987,37 +1040,9 @@ export default function CEOOKRSetup() {
   const canProceedStep1 = objectives.length > 0 && selectedCount >= 1;
   const canProceedStep2 = companyOKRFinalized;
 
-  // ─── 로딩 상태 ──────────────────────────────────────────
-  if (periodLoading) {
-    return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-        <div className="text-center">
-          <Loader2 className="w-10 h-10 text-blue-600 animate-spin mx-auto mb-4" />
-          <p className="text-slate-600">기간 정보를 불러오는 중...</p>
-        </div>
-      </div>
-    );
-  }
+  // ─── 로딩 상태는 Step 0 내부에서 처리 ──────────────────
 
-  if (!selectedPeriodCode) {
-    return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-        <div className="text-center max-w-md mx-auto p-8 bg-white rounded-xl border border-slate-200">
-          <AlertCircle className="w-12 h-12 text-amber-500 mx-auto mb-4" />
-          <h3 className="text-lg font-semibold text-slate-900 mb-2">활성 기간이 없습니다</h3>
-          <p className="text-slate-600 text-sm mb-4">
-            관리자 설정에서 먼저 기간을 생성하고 활성화해주세요.
-          </p>
-          <button
-            onClick={() => navigate('/admin?tab=periods')}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700"
-          >
-            기간 관리로 이동
-          </button>
-        </div>
-      </div>
-    );
-  }
+  // ✅ selectedPeriodCode가 없어도 Step 0에서 기간을 선택할 수 있으므로 블로킹하지 않음
 
   // ─── Render ────────────────────────────────────────────
 
@@ -1124,7 +1149,7 @@ export default function CEOOKRSetup() {
             {/* 기간 표시 배지 */}
             <div className="flex items-center gap-2">
               <span className="text-sm text-slate-500 bg-slate-100 px-3 py-1.5 rounded-lg font-medium">
-                📅 {selectedPeriodCode}
+                📅 {selectedPeriodCode || '기간 미선택'}
               </span>
             </div>
           </div>
@@ -1137,12 +1162,12 @@ export default function CEOOKRSetup() {
           <div className="flex items-center justify-between">
             {STEPS.map((step, idx) => {
               const isActive = idx === currentStep;
-              const isDone = idx < currentStep || (idx === 1 && companyOKRFinalized) || (idx === 2 && allDraftsComplete) || (idx === 3 && cycleStarted);
+              const isDone = (idx === 0 && periodConfirmed) || (idx === 1 && periodConfirmed && currentStep > 1) || (idx === 2 && companyOKRFinalized) || (idx === 3 && allDraftsComplete) || (idx === 4 && cycleStarted);
               return (
                 <div key={step.id} className="flex items-center flex-1">
                   <div
                     className={`flex items-center gap-3 cursor-pointer ${isActive ? 'opacity-100' : isDone ? 'opacity-80' : 'opacity-40'}`}
-                    onClick={() => setCurrentStep(idx)}
+                    onClick={() => { if (idx === 0 || periodConfirmed) setCurrentStep(idx); }}
                   >
                     <div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg
                       ${isDone ? 'bg-green-100 text-green-700' : isActive ? 'bg-blue-100 text-blue-700 ring-2 ring-blue-300' : 'bg-slate-100'}`}
@@ -1169,8 +1194,115 @@ export default function CEOOKRSetup() {
       {/* 메인 콘텐츠 */}
       <div className="max-w-6xl mx-auto px-6 py-8">
 
-        {/* ════════ Step 0: 경영 컨텍스트 입력 ════════ */}
+        {/* ════════ Step 0: 기간 설정 ════════ */}
         {currentStep === 0 && (
+          <div className="space-y-6">
+            <div className="bg-white rounded-xl border border-slate-200 p-6">
+              <div className="flex items-center gap-3 mb-6">
+                <div className="p-2 bg-blue-50 rounded-lg">
+                  <Calendar className="w-5 h-5 text-blue-600" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-slate-900">수립 대상 기간 선택</h2>
+                  <p className="text-sm text-slate-500">OKR을 수립할 기간을 선택하세요</p>
+                </div>
+              </div>
+
+              {periodLoading ? (
+                <div className="text-center py-8">
+                  <Loader2 className="w-8 h-8 text-blue-600 animate-spin mx-auto mb-2" />
+                  <p className="text-slate-500 text-sm">기간 정보를 불러오는 중...</p>
+                </div>
+              ) : availablePeriods.length === 0 ? (
+                <div className="text-center py-8">
+                  <AlertCircle className="w-12 h-12 text-amber-500 mx-auto mb-4" />
+                  <h3 className="text-lg font-semibold text-slate-900 mb-2">사용 가능한 기간이 없습니다</h3>
+                  <p className="text-slate-600 text-sm mb-4">아래에서 연도를 생성하면 반기/분기가 자동으로 만들어집니다.</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {availablePeriods.map(p => {
+                    const isSelected = selectedPeriodId === p.id;
+                    const sl = periodStatusLabel(p.status);
+                    return (
+                      <button
+                        key={p.id}
+                        onClick={() => handleSelectPeriod(p)}
+                        className={`w-full text-left p-4 rounded-lg border-2 transition-all ${
+                          isSelected ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-200' : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${isSelected ? 'border-blue-500 bg-blue-500' : 'border-slate-300'}`}>
+                              {isSelected && <Check className="w-3 h-3 text-white" />}
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="font-semibold text-slate-900">{p.period_name}</span>
+                                <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${sl.color}`}>{sl.label}</span>
+                                <span className="text-xs text-slate-400">{p.period_type === 'half' ? '반기' : '분기'}</span>
+                              </div>
+                              <div className="text-xs text-slate-500 mt-0.5">
+                                {new Date(p.starts_at).toLocaleDateString('ko-KR')} ~ {new Date(p.ends_at).toLocaleDateString('ko-KR')}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {p.company_okr_finalized && <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">전사 OKR 확정</span>}
+                            {p.all_orgs_draft_generated && <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full">초안 완료</span>}
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* 연도 생성 */}
+              <div className="mt-6 pt-4 border-t border-slate-100">
+                {!showCreateYear ? (
+                  <button onClick={() => setShowCreateYear(true)} className="text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1">
+                    <Plus className="w-4 h-4" /> 새 연도 생성
+                  </button>
+                ) : (
+                  <div className="flex items-center gap-3 bg-slate-50 p-3 rounded-lg">
+                    <select value={newYear} onChange={e => setNewYear(parseInt(e.target.value))} className="px-3 py-2 border border-slate-300 rounded-lg text-sm">
+                      {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() + i - 1).map(y => (
+                        <option key={y} value={y}>{y}년</option>
+                      ))}
+                    </select>
+                    <button onClick={handleCreateYear} disabled={isCreatingYear} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50">
+                      {isCreatingYear ? '생성 중...' : '생성'}
+                    </button>
+                    <button onClick={() => setShowCreateYear(false)} className="px-3 py-2 text-slate-500 hover:text-slate-700 text-sm">취소</button>
+                    <span className="text-xs text-slate-400">연도 생성 시 반기(H1,H2) + 분기(Q1~Q4) 자동 생성</span>
+                  </div>
+                )}
+                <div className="mt-3">
+                  <button onClick={() => navigate('/admin?tab=periods')} className="text-xs text-slate-400 hover:text-slate-600 flex items-center gap-1">
+                    <Settings className="w-3 h-3" /> 기간 상세 설정 (마감일, 알림 등)
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* 다음 단계 */}
+            <div className="flex justify-end">
+              <button
+                onClick={handleConfirmPeriod}
+                disabled={!selectedPeriodId}
+                className="px-8 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center gap-2"
+              >
+                기간 확정 후 다음
+                <ChevronRight className="w-5 h-5" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ════════ Step 1: 경영 컨텍스트 입력 ════════ */}
+        {currentStep === 1 && (
           <div className="space-y-6">
             <div className="bg-white rounded-xl border border-slate-200 p-6">
               <div className="flex items-center gap-3 mb-6">
@@ -1223,7 +1355,7 @@ export default function CEOOKRSetup() {
             {/* 다음 단계 */}
             <div className="flex justify-end">
               <button
-                onClick={() => { handleSaveContext(); setCurrentStep(1); }}
+                onClick={() => { handleSaveContext(); setCurrentStep(2); }}
                 disabled={!canProceedStep0}
                 className="px-8 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center gap-2"
               >
@@ -1234,8 +1366,8 @@ export default function CEOOKRSetup() {
           </div>
         )}
 
-        {/* ════════ Step 1: 전사 OKR 수립 ════════ */}
-        {currentStep === 1 && (
+        {/* ════════ Step 2: 전사 OKR 수립 ════════ */}
+        {currentStep === 2 && (
           <div className="space-y-6">
             {/* 사이클 진행 중 경고 */}
             {cycleStarted && (
@@ -1513,7 +1645,7 @@ export default function CEOOKRSetup() {
                     )}
                   </div>
                   <div className="flex gap-3">
-                    <button onClick={() => setCurrentStep(0)} className="px-6 py-2.5 border border-slate-300 text-slate-700 rounded-lg font-medium hover:bg-slate-50 flex items-center gap-2">
+                    <button onClick={() => setCurrentStep(1)} className="px-6 py-2.5 border border-slate-300 text-slate-700 rounded-lg font-medium hover:bg-slate-50 flex items-center gap-2">
                       <ChevronLeft className="w-4 h-4" /> 이전
                     </button>
                     {!companyOKRFinalized ? (
@@ -1526,7 +1658,7 @@ export default function CEOOKRSetup() {
                       </button>
                     ) : (
                       <button
-                        onClick={() => setCurrentStep(2)}
+                        onClick={() => setCurrentStep(3)}
                         className="px-8 py-2.5 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 flex items-center gap-2"
                       >
                         다음: 전체 조직 초안 생성 <ChevronRight className="w-5 h-5" />
@@ -1549,8 +1681,8 @@ export default function CEOOKRSetup() {
           </div>
         )}
 
-        {/* ════════ Step 2: 전체 조직 초안 생성 ════════ */}
-        {currentStep === 2 && (
+        {/* ════════ Step 3: 전체 조직 초안 생성 ════════ */}
+        {currentStep === 3 && (
           <div className="space-y-6">
             <div className="bg-white rounded-xl border border-slate-200 p-6">
               <div className="flex items-center gap-3 mb-6">
@@ -1671,7 +1803,7 @@ export default function CEOOKRSetup() {
                       <Eye className="w-4 h-4" /> OKR Map에서 연결성 확인
                     </button>
                     <button
-                      onClick={() => setCurrentStep(3)}
+                      onClick={() => setCurrentStep(4)}
                       className="px-8 py-2.5 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 flex items-center gap-2"
                     >
                       다음: 사이클 시작 <ChevronRight className="w-5 h-5" />
@@ -1683,15 +1815,15 @@ export default function CEOOKRSetup() {
 
             {/* 네비게이션 */}
             <div className="flex justify-between">
-              <button onClick={() => setCurrentStep(1)} className="px-6 py-2.5 border border-slate-300 text-slate-700 rounded-lg font-medium hover:bg-slate-50 flex items-center gap-2">
+              <button onClick={() => setCurrentStep(2)} className="px-6 py-2.5 border border-slate-300 text-slate-700 rounded-lg font-medium hover:bg-slate-50 flex items-center gap-2">
                 <ChevronLeft className="w-4 h-4" /> 이전
               </button>
             </div>
           </div>
         )}
 
-        {/* ════════ Step 3: 사이클 시작 ════════ */}
-        {currentStep === 3 && (
+        {/* ════════ Step 4: 사이클 시작 ════════ */}
+        {currentStep === 4 && (
           <div className="space-y-6">
             <div className="bg-white rounded-xl border border-slate-200 p-6 max-w-2xl mx-auto">
               <div className="flex items-center gap-3 mb-6">
@@ -1802,4 +1934,4 @@ export default function CEOOKRSetup() {
       </div>
     </div>
   );
-} 
+}
