@@ -186,7 +186,7 @@ export default function AdminSettings() {
                 {activeTab === 'structure' && '조직을 추가, 수정, 삭제하거나 AI로 자동 생성할 수 있습니다.'}
                 {activeTab === 'levels' && '회사의 조직 계층 구조(전사-본부-팀 등)를 정의합니다.'}
                 {activeTab === 'permissions' && '시스템의 모든 권한 목록을 확인할 수 있습니다.'}
-                {activeTab === 'periods' && '기간을 생성하고 OKR 수립 사이클을 관리합니다. 기간 활성화 → 수립 시작 → 진행 추적 → 마감 순서로 운영합니다.'}
+                {activeTab === 'periods' && '기간을 생성하고 OKR 수립 사이클을 관리합니다. 기간 활성화 → 수립 시작 → 진행 추적 → 마감 순서로 운영합니다. 💡 전사 OKR 수립 페이지에서도 기간을 직접 생성/선택할 수 있습니다.'}
                 {activeTab === 'history' && '마감된 기간의 성과 스냅샷을 조회합니다. 전사 요약, 조직별 달성률, 등급 분포 등을 확인할 수 있습니다.'}
                 {activeTab === 'companies' && '등록된 회사 목록을 관리하고 새 회사를 추가할 수 있습니다.'}
                 {activeTab === 'invite' && '이메일로 새로운 팀원을 초대하거나 팀 초대 링크를 생성할 수 있습니다.'}
