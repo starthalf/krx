@@ -1210,46 +1210,55 @@ export default function CEOOKRSetup() {
                 </div>
                 <div>
                   <h2 className="text-lg font-bold text-slate-900">수립 대상 기간 선택</h2>
-                  <p className="text-sm text-slate-500">OKR 수립 단위를 선택한 후, 해당 기간을 선택하세요</p>
+                  <p className="text-sm text-slate-500">OKR 수립 주기를 선택하고, 대상 기간을 지정하세요</p>
                 </div>
               </div>
 
-              {/* 수립 단위 선택 */}
+              {/* ── 1. 수립 주기 선택 (셀렉트) ── */}
               <div className="mb-6">
-                <label className="block text-sm font-medium text-slate-700 mb-2">수립 단위</label>
-                <div className="inline-flex bg-slate-100 rounded-lg p-1 gap-1">
-                  {([
-                    { value: 'year' as const, label: '연도', icon: '📅', desc: '1년 단위 OKR' },
-                    { value: 'half' as const, label: '반기', icon: '📆', desc: '6개월 단위' },
-                    { value: 'quarter' as const, label: '분기', icon: '🗓️', desc: '3개월 단위' },
-                  ]).map(unit => (
-                    <button
-                      key={unit.value}
-                      onClick={() => {
-                        setPeriodUnitFilter(unit.value);
-                        // 단위 변경 시 선택 초기화
-                        setSelectedPeriodId(null);
-                        setSelectedPeriodCode('');
-                      }}
-                      className={`px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-1.5 ${
-                        periodUnitFilter === unit.value
-                          ? 'bg-white text-blue-700 shadow-sm'
-                          : 'text-slate-600 hover:text-slate-900'
-                      }`}
-                    >
-                      <span>{unit.icon}</span>
-                      <span>{unit.label}</span>
-                    </button>
-                  ))}
-                </div>
-                <p className="text-xs text-slate-400 mt-1.5">
-                  {periodUnitFilter === 'year' && '연간 전략 목표를 수립합니다. 장기적인 방향성 설정에 적합합니다.'}
-                  {periodUnitFilter === 'half' && '반기별 핵심 목표를 수립합니다. 전략과 실행의 균형에 적합합니다.'}
-                  {periodUnitFilter === 'quarter' && '분기별 실행 목표를 수립합니다. 빠른 피드백과 민첩한 운영에 적합합니다.'}
-                </p>
+                <label className="block text-sm font-medium text-slate-700 mb-2">수립 주기</label>
+                <select
+                  value={periodUnitFilter}
+                  onChange={e => {
+                    setPeriodUnitFilter(e.target.value as 'year' | 'half' | 'quarter');
+                    setSelectedPeriodId(null);
+                    setSelectedPeriodCode('');
+                  }}
+                  className="w-full max-w-sm px-4 py-2.5 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                >
+                  <option value="year">📅 연도 (1년 단위) — 추천</option>
+                  <option value="half">📆 반기 (6개월 단위)</option>
+                  <option value="quarter">🗓️ 분기 (3개월 단위)</option>
+                </select>
+
+                {/* 주기별 안내 메시지 */}
+                {periodUnitFilter === 'year' && (
+                  <div className="mt-3 p-3 bg-green-50 border border-green-200 rounded-lg flex items-start gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-green-600 mt-0.5 flex-shrink-0" />
+                    <div className="text-sm text-green-800">
+                      <span className="font-medium">연도 단위를 추천합니다.</span> 연간 전략 방향을 한 번 수립하고, 체크인으로 진행 상황을 추적합니다. 수립 부담이 적고 장기적 방향성 유지에 유리합니다.
+                    </div>
+                  </div>
+                )}
+                {periodUnitFilter === 'half' && (
+                  <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
+                    <div className="text-sm text-amber-800">
+                      <span className="font-medium">반기별 수립은 연 2회 OKR을 새로 수립해야 합니다.</span> 전략과 실행의 균형에 적합하지만, 수립 주기가 짧아 관리 부담이 증가합니다.
+                    </div>
+                  </div>
+                )}
+                {periodUnitFilter === 'quarter' && (
+                  <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 text-red-500 mt-0.5 flex-shrink-0" />
+                    <div className="text-sm text-red-800">
+                      <span className="font-medium">분기별 수립은 연 4회 OKR을 새로 수립해야 합니다.</span> 빠른 피드백이 가능하지만 수립·합의·확정을 매 분기 반복해야 하므로 조직 부담이 큽니다. 충분한 운영 역량이 확보된 조직에 권장합니다.
+                    </div>
+                  </div>
+                )}
               </div>
 
-              {/* 기간 목록 */}
+              {/* ── 2. 기간 목록 + 생성 ── */}
               {periodLoading ? (
                 <div className="text-center py-8">
                   <Loader2 className="w-8 h-8 text-blue-600 animate-spin mx-auto mb-2" />
@@ -1257,81 +1266,91 @@ export default function CEOOKRSetup() {
                 </div>
               ) : (() => {
                 const filtered = availablePeriods.filter(p => p.period_type === periodUnitFilter);
-                return filtered.length === 0 ? (
-                  <div className="text-center py-8">
-                    <AlertCircle className="w-12 h-12 text-amber-500 mx-auto mb-4" />
-                    <h3 className="text-lg font-semibold text-slate-900 mb-2">
-                      {periodUnitFilter === 'year' ? '연도' : periodUnitFilter === 'half' ? '반기' : '분기'} 기간이 없습니다
-                    </h3>
-                    <p className="text-slate-600 text-sm mb-4">아래에서 연도를 생성하면 반기/분기가 자동으로 만들어집니다.</p>
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {filtered.map(p => {
-                      const isSelected = selectedPeriodId === p.id;
-                      const sl = periodStatusLabel(p.status);
-                      const typeLabel = p.period_type === 'year' ? '연도' : p.period_type === 'half' ? '반기' : '분기';
+                return (
+                  <div>
+                    {/* 기간 선택 드롭다운 */}
+                    <label className="block text-sm font-medium text-slate-700 mb-2">대상 기간</label>
+                    {filtered.length > 0 ? (
+                      <select
+                        value={selectedPeriodId || ''}
+                        onChange={e => {
+                          const p = filtered.find(fp => fp.id === e.target.value);
+                          if (p) handleSelectPeriod(p);
+                        }}
+                        className="w-full max-w-sm px-4 py-2.5 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                      >
+                        <option value="">기간을 선택하세요</option>
+                        {filtered.map(p => {
+                          const sl = periodStatusLabel(p.status);
+                          const dateRange = `${new Date(p.starts_at).toLocaleDateString('ko-KR')} ~ ${new Date(p.ends_at).toLocaleDateString('ko-KR')}`;
+                          return (
+                            <option key={p.id} value={p.id}>
+                              {p.period_name} ({sl.label}) · {dateRange}
+                            </option>
+                          );
+                        })}
+                      </select>
+                    ) : (
+                      <div className="p-4 bg-slate-50 border border-slate-200 rounded-lg text-center">
+                        <p className="text-sm text-slate-600">
+                          {periodUnitFilter === 'year' ? '연도' : periodUnitFilter === 'half' ? '반기' : '분기'} 기간이 없습니다.
+                        </p>
+                        <p className="text-xs text-slate-400 mt-1">아래에서 연도를 생성하면 자동으로 만들어집니다.</p>
+                      </div>
+                    )}
+
+                    {/* 선택된 기간 상세 카드 */}
+                    {selectedPeriodId && (() => {
+                      const sp = filtered.find(p => p.id === selectedPeriodId);
+                      if (!sp) return null;
+                      const sl = periodStatusLabel(sp.status);
                       return (
-                        <button
-                          key={p.id}
-                          onClick={() => handleSelectPeriod(p)}
-                          className={`w-full text-left p-4 rounded-lg border-2 transition-all ${
-                            isSelected ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-200' : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                              <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${isSelected ? 'border-blue-500 bg-blue-500' : 'border-slate-300'}`}>
-                                {isSelected && <Check className="w-3 h-3 text-white" />}
-                              </div>
-                              <div>
-                                <div className="flex items-center gap-2">
-                                  <span className="font-semibold text-slate-900">{p.period_name}</span>
-                                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${sl.color}`}>{sl.label}</span>
-                                </div>
-                                <div className="text-xs text-slate-500 mt-0.5">
-                                  {new Date(p.starts_at).toLocaleDateString('ko-KR')} ~ {new Date(p.ends_at).toLocaleDateString('ko-KR')}
-                                </div>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              {p.company_okr_finalized && <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">전사 OKR 확정</span>}
-                              {p.all_orgs_draft_generated && <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full">초안 완료</span>}
-                            </div>
+                        <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                          <div className="flex items-center gap-3 mb-2">
+                            <span className="font-semibold text-slate-900">{sp.period_name}</span>
+                            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${sl.color}`}>{sl.label}</span>
                           </div>
-                        </button>
+                          <div className="text-sm text-slate-600">
+                            {new Date(sp.starts_at).toLocaleDateString('ko-KR')} ~ {new Date(sp.ends_at).toLocaleDateString('ko-KR')}
+                          </div>
+                          <div className="flex items-center gap-2 mt-2">
+                            {sp.company_okr_finalized && <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">전사 OKR 확정됨</span>}
+                            {sp.all_orgs_draft_generated && <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full">조직 초안 완료</span>}
+                            {!sp.company_okr_finalized && !sp.all_orgs_draft_generated && <span className="text-xs text-slate-400">아직 수립이 시작되지 않았습니다</span>}
+                          </div>
+                        </div>
                       );
-                    })}
+                    })()}
+
+                    {/* 연도 생성 (모든 단위에서 공통 — 연도 생성 시 반기/분기 자동 생성) */}
+                    <div className="mt-6 pt-4 border-t border-slate-100">
+                      {!showCreateYear ? (
+                        <button onClick={() => setShowCreateYear(true)} className="text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1">
+                          <Plus className="w-4 h-4" /> 새 연도 생성 (반기·분기 자동 포함)
+                        </button>
+                      ) : (
+                        <div className="flex items-center gap-3 bg-slate-50 p-3 rounded-lg flex-wrap">
+                          <select value={newYear} onChange={e => setNewYear(parseInt(e.target.value))} className="px-3 py-2 border border-slate-300 rounded-lg text-sm">
+                            {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() + i - 1).map(y => (
+                              <option key={y} value={y}>{y}년</option>
+                            ))}
+                          </select>
+                          <button onClick={handleCreateYear} disabled={isCreatingYear} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50">
+                            {isCreatingYear ? '생성 중...' : '생성'}
+                          </button>
+                          <button onClick={() => setShowCreateYear(false)} className="px-3 py-2 text-slate-500 hover:text-slate-700 text-sm">취소</button>
+                          <span className="text-xs text-slate-400">연도 + 반기(H1,H2) + 분기(Q1~Q4) 일괄 생성</span>
+                        </div>
+                      )}
+                      <div className="mt-3">
+                        <button onClick={() => navigate('/admin?tab=periods')} className="text-xs text-slate-400 hover:text-slate-600 flex items-center gap-1">
+                          <Settings className="w-3 h-3" /> 기간 상세 설정 (관리자 설정)
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 );
               })()}
-
-              {/* 연도 생성 */}
-              <div className="mt-6 pt-4 border-t border-slate-100">
-                {!showCreateYear ? (
-                  <button onClick={() => setShowCreateYear(true)} className="text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1">
-                    <Plus className="w-4 h-4" /> 새 연도 생성
-                  </button>
-                ) : (
-                  <div className="flex items-center gap-3 bg-slate-50 p-3 rounded-lg">
-                    <select value={newYear} onChange={e => setNewYear(parseInt(e.target.value))} className="px-3 py-2 border border-slate-300 rounded-lg text-sm">
-                      {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() + i - 1).map(y => (
-                        <option key={y} value={y}>{y}년</option>
-                      ))}
-                    </select>
-                    <button onClick={handleCreateYear} disabled={isCreatingYear} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50">
-                      {isCreatingYear ? '생성 중...' : '생성'}
-                    </button>
-                    <button onClick={() => setShowCreateYear(false)} className="px-3 py-2 text-slate-500 hover:text-slate-700 text-sm">취소</button>
-                    <span className="text-xs text-slate-400">연도 생성 시 반기(H1,H2) + 분기(Q1~Q4) 자동 생성</span>
-                  </div>
-                )}
-                <div className="mt-3">
-                  <button onClick={() => navigate('/admin?tab=periods')} className="text-xs text-slate-400 hover:text-slate-600 flex items-center gap-1">
-                    <Settings className="w-3 h-3" /> 기간 상세 설정 (마감일, 알림 등)
-                  </button>
-                </div>
-              </div>
             </div>
 
             {/* 다음 단계 */}
