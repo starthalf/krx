@@ -13,6 +13,27 @@ import {
 import { getMyRoleLevel, checkCanManageOrg } from '../lib/permissions';
 import PeriodStatusWidget from '../components/PeriodStatusWidget';
 
+// ── 조직 level → 직책명 매핑 ────────────────────────────
+function getLeaderTitle(orgLevel: string | undefined): string {
+  if (!orgLevel) return '담당자';
+  const l = orgLevel.trim();
+  // 정확 매칭 우선
+  const map: Record<string, string> = {
+    '부문': '부문장', '본부': '본부장', '사업부': '사업부장',
+    '사업본부': '사업본부장', '센터': '센터장', '실': '실장',
+    '팀': '팀장', '파트': '파트장', '그룹': '그룹장',
+    '부': '부장', '과': '과장', '공장': '공장장',
+    '연구소': '연구소장', '연구실': '연구실장',
+  };
+  if (map[l]) return map[l];
+  // 끝글자 패턴 매칭: ~부 → ~부장, ~실 → ~실장 등
+  if (l.endsWith('부')) return l + '장';
+  if (l.endsWith('실')) return l + '장';
+  if (l.endsWith('소')) return l + '장';
+  if (l.endsWith('원')) return l + '장';
+  return l + '장'; // 폴백: level명 + 장
+}
+
 export default function Dashboard() {
   const { 
     organizations, 
@@ -95,6 +116,16 @@ export default function Dashboard() {
   const allKRs = krs || []; 
   const currentObjectives = objectives || [];
 
+  // ── 직책명 결정: 관리 조직의 level에서 파생 ──────────
+  const myPrimaryOrg = managableOrgs.length > 0
+    ? organizations.find(o => o.id === managableOrgs[0])
+    : undefined;
+  const leaderTitle = roleLevel >= 90
+    ? '관리자'
+    : myPrimaryOrg
+      ? getLeaderTitle((myPrimaryOrg as any).level)
+      : roleLevel >= 50 ? '조직장' : '팀원';
+
   const totalProgress = allKRs.length > 0
     ? Math.round(allKRs.reduce((sum, kr) => sum + (kr.progressPct || 0), 0) / allKRs.length)
     : 0;
@@ -165,6 +196,15 @@ export default function Dashboard() {
     );
   }
 
+  // ── 직책 배지 색상 ──────────────────────────────────
+  const titleBadge = roleLevel >= 90
+    ? { bg: 'bg-purple-100', color: 'text-purple-700', icon: <Shield className="w-3 h-3" /> }
+    : roleLevel >= 70
+      ? { bg: 'bg-blue-100', color: 'text-blue-700', icon: null }
+      : roleLevel >= 50
+        ? { bg: 'bg-green-100', color: 'text-green-700', icon: null }
+        : { bg: 'bg-slate-100', color: 'text-slate-600', icon: null };
+
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
       {/* 헤더 */}
@@ -173,22 +213,10 @@ export default function Dashboard() {
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-bold text-slate-900">대시보드</h1>
             
-            {roleLevel >= 90 && (
-              <span className="px-3 py-1 bg-purple-100 text-purple-700 text-xs font-semibold rounded-full flex items-center gap-1">
-                <Shield className="w-3 h-3" />
-                관리자
-              </span>
-            )}
-            {roleLevel >= 70 && roleLevel < 90 && (
-              <span className="px-3 py-1 bg-blue-100 text-blue-700 text-xs font-semibold rounded-full">
-                본부장
-              </span>
-            )}
-            {roleLevel >= 50 && roleLevel < 70 && (
-              <span className="px-3 py-1 bg-green-100 text-green-700 text-xs font-semibold rounded-full">
-                팀장
-              </span>
-            )}
+            <span className={`px-3 py-1 ${titleBadge.bg} ${titleBadge.color} text-xs font-semibold rounded-full flex items-center gap-1`}>
+              {titleBadge.icon}
+              {leaderTitle}
+            </span>
           </div>
           <p className="text-slate-500 mt-1">{currentOrg?.name || '조직을 선택하세요'}</p>
         </div>
@@ -440,7 +468,7 @@ export default function Dashboard() {
               <Activity className="w-12 h-12 text-slate-400 mx-auto mb-3" />
               <h3 className="text-sm font-semibold text-slate-700 mb-2">팀원 모드</h3>
               <p className="text-xs text-slate-500">
-                AI 인사이트는 팀장 이상에게만 제공됩니다.
+                AI 인사이트는 조직장 이상에게만 제공됩니다.
               </p>
             </div>
           </div>
