@@ -428,7 +428,7 @@ export default function UnifiedPeriodManager() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg max-w-md w-full p-6 space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="text-lg font-bold text-slate-900">연도 생성</h3>
+              <h3 className="text-lg font-bold text-slate-900">기간 생성</h3>
               <button onClick={() => setShowCreateYear(false)} className="p-1 hover:bg-slate-100 rounded"><X className="w-5 h-5" /></button>
             </div>
             <div>
