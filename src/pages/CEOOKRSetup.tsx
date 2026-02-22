@@ -106,6 +106,7 @@ export default function CEOOKRSetup() {
   const [showCreateYear, setShowCreateYear] = useState(false);
   const [newYear, setNewYear] = useState(new Date().getFullYear());
   const [isCreatingYear, setIsCreatingYear] = useState(false);
+  const [periodUnitFilter, setPeriodUnitFilter] = useState<'year' | 'half' | 'quarter'>('quarter');
 
   // 단계 관리
   const [currentStep, setCurrentStep] = useState(0);
@@ -190,18 +191,23 @@ export default function CEOOKRSetup() {
         .from('fiscal_periods')
         .select('id, period_code, period_name, period_type, starts_at, ends_at, status, planning_status, company_okr_finalized, all_orgs_draft_generated')
         .eq('company_id', company.id)
-        .in('period_type', ['half', 'quarter'])
+        .in('period_type', ['year', 'half', 'quarter'])
         .in('status', ['upcoming', 'planning', 'active'])
         .order('period_code', { ascending: false });
       if (error) throw error;
       setAvailablePeriods(data || []);
 
-      // 자동 선택: active > planning > upcoming 순으로 첫 번째
+      // 자동 선택: active > planning > upcoming 순, 분기 우선
       if (!selectedPeriodId && data && data.length > 0) {
-        const auto = data.find(p => p.status === 'active') || data.find(p => p.status === 'planning') || data[0];
+        const quarters = data.filter(p => p.period_type === 'quarter');
+        const halves = data.filter(p => p.period_type === 'half');
+        const years = data.filter(p => p.period_type === 'year');
+        const pool = quarters.length > 0 ? quarters : halves.length > 0 ? halves : years;
+        const auto = pool.find(p => p.status === 'active') || pool.find(p => p.status === 'planning') || pool[0];
         if (auto) {
           setSelectedPeriodId(auto.id);
           setSelectedPeriodCode(auto.period_code);
+          setPeriodUnitFilter(auto.period_type);
         }
       }
     } catch (err) {
@@ -1204,60 +1210,101 @@ export default function CEOOKRSetup() {
                 </div>
                 <div>
                   <h2 className="text-lg font-bold text-slate-900">수립 대상 기간 선택</h2>
-                  <p className="text-sm text-slate-500">OKR을 수립할 기간을 선택하세요</p>
+                  <p className="text-sm text-slate-500">OKR 수립 단위를 선택한 후, 해당 기간을 선택하세요</p>
                 </div>
               </div>
 
+              {/* 수립 단위 선택 */}
+              <div className="mb-6">
+                <label className="block text-sm font-medium text-slate-700 mb-2">수립 단위</label>
+                <div className="inline-flex bg-slate-100 rounded-lg p-1 gap-1">
+                  {([
+                    { value: 'year' as const, label: '연도', icon: '📅', desc: '1년 단위 OKR' },
+                    { value: 'half' as const, label: '반기', icon: '📆', desc: '6개월 단위' },
+                    { value: 'quarter' as const, label: '분기', icon: '🗓️', desc: '3개월 단위' },
+                  ]).map(unit => (
+                    <button
+                      key={unit.value}
+                      onClick={() => {
+                        setPeriodUnitFilter(unit.value);
+                        // 단위 변경 시 선택 초기화
+                        setSelectedPeriodId(null);
+                        setSelectedPeriodCode('');
+                      }}
+                      className={`px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-1.5 ${
+                        periodUnitFilter === unit.value
+                          ? 'bg-white text-blue-700 shadow-sm'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      <span>{unit.icon}</span>
+                      <span>{unit.label}</span>
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs text-slate-400 mt-1.5">
+                  {periodUnitFilter === 'year' && '연간 전략 목표를 수립합니다. 장기적인 방향성 설정에 적합합니다.'}
+                  {periodUnitFilter === 'half' && '반기별 핵심 목표를 수립합니다. 전략과 실행의 균형에 적합합니다.'}
+                  {periodUnitFilter === 'quarter' && '분기별 실행 목표를 수립합니다. 빠른 피드백과 민첩한 운영에 적합합니다.'}
+                </p>
+              </div>
+
+              {/* 기간 목록 */}
               {periodLoading ? (
                 <div className="text-center py-8">
                   <Loader2 className="w-8 h-8 text-blue-600 animate-spin mx-auto mb-2" />
                   <p className="text-slate-500 text-sm">기간 정보를 불러오는 중...</p>
                 </div>
-              ) : availablePeriods.length === 0 ? (
-                <div className="text-center py-8">
-                  <AlertCircle className="w-12 h-12 text-amber-500 mx-auto mb-4" />
-                  <h3 className="text-lg font-semibold text-slate-900 mb-2">사용 가능한 기간이 없습니다</h3>
-                  <p className="text-slate-600 text-sm mb-4">아래에서 연도를 생성하면 반기/분기가 자동으로 만들어집니다.</p>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {availablePeriods.map(p => {
-                    const isSelected = selectedPeriodId === p.id;
-                    const sl = periodStatusLabel(p.status);
-                    return (
-                      <button
-                        key={p.id}
-                        onClick={() => handleSelectPeriod(p)}
-                        className={`w-full text-left p-4 rounded-lg border-2 transition-all ${
-                          isSelected ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-200' : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                            <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${isSelected ? 'border-blue-500 bg-blue-500' : 'border-slate-300'}`}>
-                              {isSelected && <Check className="w-3 h-3 text-white" />}
+              ) : (() => {
+                const filtered = availablePeriods.filter(p => p.period_type === periodUnitFilter);
+                return filtered.length === 0 ? (
+                  <div className="text-center py-8">
+                    <AlertCircle className="w-12 h-12 text-amber-500 mx-auto mb-4" />
+                    <h3 className="text-lg font-semibold text-slate-900 mb-2">
+                      {periodUnitFilter === 'year' ? '연도' : periodUnitFilter === 'half' ? '반기' : '분기'} 기간이 없습니다
+                    </h3>
+                    <p className="text-slate-600 text-sm mb-4">아래에서 연도를 생성하면 반기/분기가 자동으로 만들어집니다.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {filtered.map(p => {
+                      const isSelected = selectedPeriodId === p.id;
+                      const sl = periodStatusLabel(p.status);
+                      const typeLabel = p.period_type === 'year' ? '연도' : p.period_type === 'half' ? '반기' : '분기';
+                      return (
+                        <button
+                          key={p.id}
+                          onClick={() => handleSelectPeriod(p)}
+                          className={`w-full text-left p-4 rounded-lg border-2 transition-all ${
+                            isSelected ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-200' : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${isSelected ? 'border-blue-500 bg-blue-500' : 'border-slate-300'}`}>
+                                {isSelected && <Check className="w-3 h-3 text-white" />}
+                              </div>
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <span className="font-semibold text-slate-900">{p.period_name}</span>
+                                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${sl.color}`}>{sl.label}</span>
+                                </div>
+                                <div className="text-xs text-slate-500 mt-0.5">
+                                  {new Date(p.starts_at).toLocaleDateString('ko-KR')} ~ {new Date(p.ends_at).toLocaleDateString('ko-KR')}
+                                </div>
+                              </div>
                             </div>
-                            <div>
-                              <div className="flex items-center gap-2">
-                                <span className="font-semibold text-slate-900">{p.period_name}</span>
-                                <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${sl.color}`}>{sl.label}</span>
-                                <span className="text-xs text-slate-400">{p.period_type === 'half' ? '반기' : '분기'}</span>
-                              </div>
-                              <div className="text-xs text-slate-500 mt-0.5">
-                                {new Date(p.starts_at).toLocaleDateString('ko-KR')} ~ {new Date(p.ends_at).toLocaleDateString('ko-KR')}
-                              </div>
+                            <div className="flex items-center gap-2">
+                              {p.company_okr_finalized && <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">전사 OKR 확정</span>}
+                              {p.all_orgs_draft_generated && <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full">초안 완료</span>}
                             </div>
                           </div>
-                          <div className="flex items-center gap-2">
-                            {p.company_okr_finalized && <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">전사 OKR 확정</span>}
-                            {p.all_orgs_draft_generated && <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full">초안 완료</span>}
-                          </div>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
 
               {/* 연도 생성 */}
               <div className="mt-6 pt-4 border-t border-slate-100">
@@ -1934,4 +1981,4 @@ export default function CEOOKRSetup() {
       </div>
     </div>
   );
-} 
+}
