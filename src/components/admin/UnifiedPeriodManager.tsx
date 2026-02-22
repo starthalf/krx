@@ -247,7 +247,7 @@ export default function UnifiedPeriodManager() {
         </div>
         <div className="flex items-center gap-2">
           <button onClick={() => setShowCreateYear(true)} className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition flex items-center gap-2">
-            <Plus className="w-4 h-4" />연도 생성
+            <Plus className="w-4 h-4" />기간 생성
           </button>
         </div>
       </div>
