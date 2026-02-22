@@ -246,9 +246,6 @@ export default function UnifiedPeriodManager() {
           <p className="text-sm text-slate-600 mt-1">기간 생성/삭제, 수립 현황 모니터링, 마감 관리</p>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={goSetup} className="px-4 py-2 bg-gradient-to-r from-blue-600 to-violet-600 text-white rounded-lg hover:from-blue-700 hover:to-violet-700 transition flex items-center gap-2">
-            <Rocket className="w-4 h-4" />전사 OKR 수립
-          </button>
           <button onClick={() => setShowCreateYear(true)} className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition flex items-center gap-2">
             <Plus className="w-4 h-4" />연도 생성
           </button>
@@ -301,7 +298,6 @@ export default function UnifiedPeriodManager() {
                   <span className="text-sm text-slate-700">OKR 수립 주기: <strong className="text-slate-900">{cycleUnit === 'year' ? '연도' : cycleUnit === 'half' ? '반기' : '분기'} 단위</strong></span>
                   <span className="text-xs text-slate-400">— 해당 단위의 기간만 OKR 수립 대상입니다</span>
                 </div>
-                <button onClick={() => navigate('/admin?tab=okr-policy')} className="text-xs text-blue-600 hover:text-blue-700">정책 변경 →</button>
               </div>
 
               {hierarchy.length === 0 ? (
