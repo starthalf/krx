@@ -218,9 +218,9 @@ export default function UnifiedPeriodManager() {
     const years = [...new Set(periods.map(p => getYearFromCode(p.period_code)))].sort((a, b) => b - a);
     return years.map(year => ({
       year,
-      yearPeriod: periods.find(p => p.period_code === `${year}-Y`),
-      halves: periods.filter(p => p.period_code.startsWith(`${year}-H`)).sort((a, b) => a.period_code.localeCompare(b.period_code)),
-      quarters: periods.filter(p => p.period_code.startsWith(`${year}-Q`)).sort((a, b) => a.period_code.localeCompare(b.period_code)),
+      yearPeriod: periods.find(p => p.period_type === 'year' && getYearFromCode(p.period_code) === year),
+      halves: periods.filter(p => p.period_type === 'half' && getYearFromCode(p.period_code) === year).sort((a, b) => a.period_code.localeCompare(b.period_code)),
+      quarters: periods.filter(p => p.period_type === 'quarter' && getYearFromCode(p.period_code) === year).sort((a, b) => a.period_code.localeCompare(b.period_code)),
     }));
   })();
 
