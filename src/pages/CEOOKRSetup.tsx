@@ -1283,7 +1283,8 @@ export default function CEOOKRSetup() {
                         <div className="flex items-center gap-2 mt-2">
                           {sp.company_okr_finalized && <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">전사 OKR 확정됨</span>}
                           {sp.all_orgs_draft_generated && <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full">조직 초안 완료</span>}
-                          {!sp.company_okr_finalized && !sp.all_orgs_draft_generated && <span className="text-xs text-slate-400">아직 수립이 시작되지 않았습니다</span>}
+                          {!sp.company_okr_finalized && !sp.all_orgs_draft_generated && sp.status === 'planning' && <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">수립 진행 중</span>}
+                          {!sp.company_okr_finalized && !sp.all_orgs_draft_generated && sp.status !== 'planning' && <span className="text-xs text-slate-400">아직 수립이 시작되지 않았습니다</span>}
                         </div>
                       </div>
                     );
