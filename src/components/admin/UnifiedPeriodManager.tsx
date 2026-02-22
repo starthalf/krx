@@ -130,14 +130,20 @@ export default function UnifiedPeriodManager() {
     if (!companyId || !user?.id) return;
     setLoading(true);
     try {
-      const { error } = await supabase.rpc('create_fiscal_year_with_hierarchy', { p_company_id: companyId, p_year: newYear });
+      const { data, error } = await supabase.rpc('create_fiscal_year_with_hierarchy', { p_company_id: companyId, p_year: newYear });
       if (error) throw error;
-      alert(`${newYear}년도 및 하위 기간이 생성되었습니다.`);
+      const created = data?.created || 0;
+      const skipped = data?.skipped || 0;
+      if (created > 0) {
+        alert(`${newYear}년: ${created}개 기간 생성 완료` + (skipped > 0 ? ` (${skipped}개는 이미 존재)` : ''));
+      } else {
+        alert(`${newYear}년: 모든 기간이 이미 존재합니다.`);
+      }
       setShowCreateYear(false);
       fetchPeriods();
       setExpandedYears(prev => new Set(prev).add(newYear));
     } catch (err: any) {
-      alert(err.message?.includes('duplicate') ? `${newYear}년도가 이미 존재합니다.` : `연도 생성 실패: ${err.message}`);
+      alert(`기간 생성 실패: ${err.message}`);
     } finally { setLoading(false); }
   };
 
@@ -304,7 +310,7 @@ export default function UnifiedPeriodManager() {
                 <div className="text-center py-12 text-slate-500">
                   <Calendar className="w-12 h-12 mx-auto mb-4 opacity-50" />
                   <p>생성된 기간이 없습니다.</p>
-                  <p className="text-sm mt-2">상단의 "연도 생성" 버튼을 클릭하여 시작하세요.</p>
+                  <p className="text-sm mt-2">상단의 "기간 생성" 버튼을 클릭하여 시작하세요.</p>
                 </div>
               ) : (
                 hierarchy.map(({ year, yearPeriod, halves, quarters }) => {
@@ -593,7 +599,7 @@ function PlanningStatusCard({ period: p, onClosePlanning, onFinalizePlanning, on
 // ─── Closing Status Card ─────────────────────────────────
 
 interface ClosingCardProps {
-  period: FiscalPeriod; 
+  period: FiscalPeriod;
   onStartClosing: (p: FiscalPeriod) => void;
   onFinalizeClosing: (p: FiscalPeriod) => void;
 }
