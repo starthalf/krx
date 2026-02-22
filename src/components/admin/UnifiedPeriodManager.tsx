@@ -103,6 +103,7 @@ export default function UnifiedPeriodManager() {
   const [showCreateYear, setShowCreateYear] = useState(false);
   const [newYear, setNewYear] = useState(new Date().getFullYear());
   const [expandedYears, setExpandedYears] = useState<Set<number>>(new Set());
+  const [cycleUnit, setCycleUnit] = useState<'year' | 'half' | 'quarter'>('year');
 
   // ─── Fetch ─────────────────────────────────────────────
 
@@ -110,6 +111,10 @@ export default function UnifiedPeriodManager() {
     if (!companyId) return;
     setLoading(true);
     try {
+      // 정책 로드
+      const { data: companyData } = await supabase.from('companies').select('okr_cycle_unit').eq('id', companyId).single();
+      if (companyData?.okr_cycle_unit) setCycleUnit(companyData.okr_cycle_unit);
+
       const { data, error } = await supabase.from('fiscal_periods').select('*').eq('company_id', companyId).order('period_code', { ascending: false });
       if (error) throw error;
       setPeriods(data || []);
@@ -289,6 +294,16 @@ export default function UnifiedPeriodManager() {
           {/* ═══ 기간 목록 ═══ */}
           {activeTab === 'periods' && (
             <div className="space-y-4">
+              {/* 현재 정책 표시 */}
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Calendar className="w-4 h-4 text-slate-500" />
+                  <span className="text-sm text-slate-700">OKR 수립 주기: <strong className="text-slate-900">{cycleUnit === 'year' ? '연도' : cycleUnit === 'half' ? '반기' : '분기'} 단위</strong></span>
+                  <span className="text-xs text-slate-400">— 해당 단위의 기간만 OKR 수립 대상입니다</span>
+                </div>
+                <button onClick={() => navigate('/admin?tab=okr-policy')} className="text-xs text-blue-600 hover:text-blue-700">정책 변경 →</button>
+              </div>
+
               {hierarchy.length === 0 ? (
                 <div className="text-center py-12 text-slate-500">
                   <Calendar className="w-12 h-12 mx-auto mb-4 opacity-50" />
@@ -296,43 +311,68 @@ export default function UnifiedPeriodManager() {
                   <p className="text-sm mt-2">상단의 "연도 생성" 버튼을 클릭하여 시작하세요.</p>
                 </div>
               ) : (
-                hierarchy.map(({ year, yearPeriod, halves, quarters }) => (
-                  <div key={year} className="border border-slate-200 rounded-lg overflow-hidden">
-                    {/* 연도 헤더 - yearPeriod 레코드 없어도 항상 표시 */}
-                    <div className="bg-slate-50 p-4 flex items-center justify-between border-b border-slate-200">
-                      <button onClick={() => toggleYear(year)} className="flex items-center gap-3 flex-1">
-                        {expandedYears.has(year) ? <ChevronDown className="w-5 h-5 text-slate-500" /> : <ChevronRight className="w-5 h-5 text-slate-500" />}
-                        <div className="flex items-center gap-3">
-                          <div className="text-xl font-bold text-slate-900">{yearPeriod?.period_name || `${year}년`}</div>
-                          {yearPeriod && (
-                            <span className={`px-3 py-1 rounded-full text-xs font-medium ${STATUS_CFG[yearPeriod.status].bg} ${STATUS_CFG[yearPeriod.status].color}`}>{STATUS_CFG[yearPeriod.status].label}</span>
+                hierarchy.map(({ year, yearPeriod, halves, quarters }) => {
+                  // 정책에 맞는 기간만 선별
+                  const policyPeriods: FiscalPeriod[] =
+                    cycleUnit === 'year' ? (yearPeriod ? [yearPeriod] : []) :
+                    cycleUnit === 'half' ? halves :
+                    quarters;
+
+                  return (
+                    <div key={year} className="border border-slate-200 rounded-lg overflow-hidden">
+                      {/* 연도 헤더 */}
+                      <div className="bg-slate-50 p-4 flex items-center justify-between border-b border-slate-200">
+                        <button onClick={() => toggleYear(year)} className="flex items-center gap-3 flex-1">
+                          {expandedYears.has(year) ? <ChevronDown className="w-5 h-5 text-slate-500" /> : <ChevronRight className="w-5 h-5 text-slate-500" />}
+                          <div className="flex items-center gap-3">
+                            <div className="text-xl font-bold text-slate-900">{yearPeriod?.period_name || `${year}년`}</div>
+                            {yearPeriod && (
+                              <span className={`px-3 py-1 rounded-full text-xs font-medium ${STATUS_CFG[yearPeriod.status].bg} ${STATUS_CFG[yearPeriod.status].color}`}>{STATUS_CFG[yearPeriod.status].label}</span>
+                            )}
+                            <span className="text-xs text-slate-400">
+                              {cycleUnit === 'year' ? '연도' : cycleUnit === 'half' ? `반기 ${halves.length}개` : `분기 ${quarters.length}개`}
+                            </span>
+                          </div>
+                        </button>
+                        <div className="flex items-center gap-2">
+                          {yearPeriod && <span className="text-sm text-slate-600">{formatDate(yearPeriod.starts_at)} ~ {formatDate(yearPeriod.ends_at)}</span>}
+                          {yearPeriod?.status === 'upcoming' && (
+                            <button onClick={() => handleDeletePeriod(yearPeriod)} className="p-2 text-red-600 hover:bg-red-50 rounded" title="삭제"><Trash2 className="w-4 h-4" /></button>
                           )}
                         </div>
-                      </button>
-                      <div className="flex items-center gap-2">
-                        {yearPeriod && <span className="text-sm text-slate-600">{formatDate(yearPeriod.starts_at)} ~ {formatDate(yearPeriod.ends_at)}</span>}
-                        {yearPeriod?.status === 'upcoming' && (
-                          <button onClick={() => handleDeletePeriod(yearPeriod)} className="p-2 text-red-600 hover:bg-red-50 rounded" title="삭제"><Trash2 className="w-4 h-4" /></button>
-                        )}
                       </div>
+                      {expandedYears.has(year) && (
+                        <div className="p-4 space-y-3">
+                          {cycleUnit === 'year' && yearPeriod ? (
+                            // 연도 단위: 연도 카드 직접 표시
+                            <PeriodCard period={yearPeriod} onClosePlanning={handleClosePlanning} onFinalizePlanning={handleFinalizePlanning} onStartClosing={handleStartClosing} onFinalizeClosing={handleFinalizeClosing} onDelete={handleDeletePeriod} onGoSetup={goSetup} />
+                          ) : cycleUnit === 'half' ? (
+                            // 반기 단위: 반기 카드만 표시 (분기 숨김)
+                            halves.map(half => (
+                              <PeriodCard key={half.id} period={half} onClosePlanning={handleClosePlanning} onFinalizePlanning={handleFinalizePlanning} onStartClosing={handleStartClosing} onFinalizeClosing={handleFinalizeClosing} onDelete={handleDeletePeriod} onGoSetup={goSetup} />
+                            ))
+                          ) : (
+                            // 분기 단위: 반기 > 분기 계층 표시
+                            halves.map(half => {
+                              const hq = quarters.filter(q => q.parent_period_id === half.id);
+                              return (
+                                <div key={half.id} className="space-y-2">
+                                  <div className="text-sm font-medium text-slate-500 pl-2">{half.period_name}</div>
+                                  <div className="ml-4 space-y-2">
+                                    {hq.map(q => <PeriodCard key={q.id} period={q} onClosePlanning={handleClosePlanning} onFinalizePlanning={handleFinalizePlanning} onStartClosing={handleStartClosing} onFinalizeClosing={handleFinalizeClosing} onDelete={handleDeletePeriod} onGoSetup={goSetup} />)}
+                                  </div>
+                                </div>
+                              );
+                            })
+                          )}
+                          {policyPeriods.length === 0 && (
+                            <div className="text-center py-4 text-slate-400 text-sm">이 연도에 해당 단위의 기간이 없습니다.</div>
+                          )}
+                        </div>
+                      )}
                     </div>
-                    {expandedYears.has(year) && (
-                      <div className="p-4 space-y-3">
-                        {halves.map(half => {
-                          const hq = quarters.filter(q => q.parent_period_id === half.id);
-                          return (
-                            <div key={half.id} className="space-y-2">
-                              <PeriodCard period={half} onClosePlanning={handleClosePlanning} onFinalizePlanning={handleFinalizePlanning} onStartClosing={handleStartClosing} onFinalizeClosing={handleFinalizeClosing} onDelete={handleDeletePeriod} onGoSetup={goSetup} />
-                              <div className="ml-8 space-y-2">
-                                {hq.map(q => <PeriodCard key={q.id} period={q} onClosePlanning={handleClosePlanning} onFinalizePlanning={handleFinalizePlanning} onStartClosing={handleStartClosing} onFinalizeClosing={handleFinalizeClosing} onDelete={handleDeletePeriod} onGoSetup={goSetup} />)}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
           )}
@@ -582,4 +622,4 @@ function ClosingCard({ period: p, onStartClosing, onFinalizeClosing }: ClosingCa
       </div>
     </div>
   );
-} 
+}
