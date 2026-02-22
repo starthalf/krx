@@ -1763,7 +1763,7 @@ export default function CEOOKRSetup() {
                   <div className="flex gap-3 justify-center">
                     <button
                       onClick={() => navigate('/okr-setup')}
-                      className="px-6 py-2.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 flex items-center gap-2" 
+                      className="px-6 py-2.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 flex items-center gap-2"
                     >
                       <Megaphone className="w-4 h-4" /> 수립 현황 보기
                     </button>
@@ -1791,7 +1791,7 @@ export default function CEOOKRSetup() {
             {/* 네비게이션 */}
             {!cycleStarted && (
               <div className="flex justify-start max-w-2xl mx-auto">
-                <button onClick={() => setCurrentStep(2)} className="px-6 py-2.5 border border-slate-300 text-slate-700 rounded-lg font-medium hover:bg-slate-50 flex items-center gap-2">
+                <button onClick={() => setCurrentStep(3)} className="px-6 py-2.5 border border-slate-300 text-slate-700 rounded-lg font-medium hover:bg-slate-50 flex items-center gap-2">
                   <ChevronLeft className="w-4 h-4" /> 이전
                 </button>
               </div>
