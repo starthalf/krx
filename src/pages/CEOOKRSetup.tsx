@@ -68,10 +68,11 @@ interface OrgDraftStatus {
 // ─── Steps ───────────────────────────────────────────────
 
 const STEPS = [
-  { id: 0, name: '경영 컨텍스트', icon: '📋', description: '회사 현황과 전략 방향 입력' },
-  { id: 1, name: '전사 OKR 수립', icon: '🎯', description: 'AI 생성 → 수정 → 확정' },
-  { id: 2, name: '전체 조직 초안', icon: '🏗️', description: '모든 조직 OKR 초안 일괄 생성' },
-  { id: 3, name: '사이클 시작', icon: '🚀', description: '마감일 설정 및 알림 발송' },
+  { id: 0, name: '기간 설정', icon: '📅', description: '수립 대상 기간 선택' },
+  { id: 1, name: '경영 컨텍스트', icon: '📋', description: '회사 현황과 전략 방향 입력' },
+  { id: 2, name: '전사 OKR 수립', icon: '🎯', description: 'AI 생성 → 수정 → 확정' },
+  { id: 3, name: '전체 조직 초안', icon: '🏗️', description: '모든 조직 OKR 초안 일괄 생성' },
+  { id: 4, name: '사이클 시작', icon: '🚀', description: '마감일 설정 및 알림 발송' },
 ];
 
 // ─── Helpers ─────────────────────────────────────────────
@@ -1200,12 +1201,12 @@ export default function CEOOKRSetup() {
           <div className="flex items-center justify-between">
             {STEPS.map((step, idx) => {
               const isActive = idx === currentStep;
-              const isDone = idx < currentStep || (idx === 1 && companyOKRFinalized) || (idx === 2 && allDraftsComplete) || (idx === 3 && cycleStarted);
+              const isDone = (idx === 0 && periodConfirmed) || (idx === 1 && periodConfirmed && currentStep > 1) || (idx === 2 && companyOKRFinalized) || (idx === 3 && allDraftsComplete) || (idx === 4 && cycleStarted);
               return (
                 <div key={step.id} className="flex items-center flex-1">
                   <div
                     className={`flex items-center gap-3 cursor-pointer ${isActive ? 'opacity-100' : isDone ? 'opacity-80' : 'opacity-40'}`}
-                    onClick={() => setCurrentStep(idx)}
+                    onClick={() => { if (idx === 0 || periodConfirmed) setCurrentStep(idx); }}
                   >
                     <div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg
                       ${isDone ? 'bg-green-100 text-green-700' : isActive ? 'bg-blue-100 text-blue-700 ring-2 ring-blue-300' : 'bg-slate-100'}`}
