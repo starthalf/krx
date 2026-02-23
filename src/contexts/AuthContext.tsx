@@ -1,5 +1,5 @@
 // src/contexts/AuthContext.tsx
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, useRef, ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import type { User, Session } from '@supabase/supabase-js';
 
@@ -32,26 +32,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // 프로필 조회 (에러 핸들링 개선)
+  // ★ 초대 플로우 중에는 AuthContext가 프로필 자동 생성을 시도하지 않도록 하는 플래그
+  const skipAutoProfileRef = useRef(false);
+
+  // 프로필 조회 (maybeSingle 사용 → 0 rows여도 에러 안 남)
   const fetchProfile = async (userId: string): Promise<Profile | null> => {
     try {
       console.log('📡 프로필 조회 시도:', userId);
       
+      // ★ .single() 대신 .maybeSingle() 사용 → 0 rows일 때 null 반환 (406 에러 방지)
       const { data, error } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', userId)
-        .single();
+        .maybeSingle();
 
       if (error) {
         console.error('❌ 프로필 조회 실패:', error);
-        
-        // 404 에러 (프로필이 없음) - 자동 생성 시도
-        if (error.code === 'PGRST116') {
-          console.log('🔧 프로필이 없음. 자동 생성 시도...');
-          return await createProfile(userId);
-        }
-        
+        return null;
+      }
+
+      if (!data) {
+        console.log('ℹ️ 프로필이 아직 없음 (초대 플로우 중일 수 있음)');
         return null;
       }
 
@@ -63,39 +65,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  // 프로필 생성 (트리거가 작동하지 않을 경우 대비)
-  const createProfile = async (userId: string): Promise<Profile | null> => {
-    try {
-      console.log('🔧 프로필 생성 시도:', userId);
-      
-      const { data, error } = await supabase
-        .from('profiles')
-        .insert({
-          id: userId,
-          full_name: '사용자',
-          company_id: '00000000-0000-0000-0000-000000000001', // 기본 회사
-          role: 'member'
-        })
-        .select()
-        .single();
-
-      if (error) {
-        console.error('❌ 프로필 생성 실패:', error);
-        return null;
-      }
-
-      console.log('✅ 프로필 생성 성공:', data);
-      return data as Profile;
-    } catch (error) {
-      console.error('❌ 프로필 생성 예외:', error);
-      return null;
-    }
-  };
-
-  // 프로필 새로고침
+  // 프로필 새로고침 (외부에서 호출 가능 - AcceptInvite 등에서 사용)
   const refreshProfile = async () => {
-    if (user) {
-      const profileData = await fetchProfile(user.id);
+    const currentUser = user || (await supabase.auth.getUser()).data.user;
+    if (currentUser) {
+      const profileData = await fetchProfile(currentUser.id);
       setProfile(profileData);
     }
   };
@@ -104,7 +78,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let mounted = true;
 
-    // 현재 세션 가져오기
     const getInitialSession = async () => {
       try {
         console.log('🔐 초기 세션 확인 중...');
@@ -154,14 +127,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(newSession?.user ?? null);
 
         if (newSession?.user) {
-          // 약간의 딜레이 후 프로필 조회 (트리거가 프로필 생성할 시간 확보)
-          setTimeout(async () => {
-            if (!mounted) return;
-            const profileData = await fetchProfile(newSession.user.id);
-            if (mounted) {
-              setProfile(profileData);
-            }
-          }, 500); // 500ms 대기
+          // ★ 초대 플로우 중이면 프로필 조회를 건너뛴다
+          //   (AcceptInvite가 프로필 생성 완료 후 refreshProfile()을 호출할 것)
+          if (skipAutoProfileRef.current) {
+            console.log('⏭️ 초대 플로우 중 - 자동 프로필 조회 건너뜀');
+          } else {
+            // 약간의 딜레이 후 프로필 조회 (트리거가 프로필 생성할 시간 확보)
+            setTimeout(async () => {
+              if (!mounted) return;
+              const profileData = await fetchProfile(newSession.user.id);
+              if (mounted) {
+                setProfile(profileData);
+              }
+            }, 300);
+          }
         } else {
           setProfile(null);
         }
@@ -177,6 +156,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       subscription.unsubscribe();
     };
   }, []);
+
+  // ★ 초대 플로우 중 자동 프로필 로딩을 억제하는 setter를 외부에 노출
+  //   (AcceptInvite에서 signUp 전에 true로 설정, 완료 후 false + refreshProfile)
+  const setSkipAutoProfile = (skip: boolean) => {
+    skipAutoProfileRef.current = skip;
+  };
 
   // 로그인
   const signIn = async (email: string, password: string) => {
@@ -255,6 +240,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     signUp,
     signOut,
     refreshProfile,
+    setSkipAutoProfile, // ★ 추가 export
   };
 
   return (
