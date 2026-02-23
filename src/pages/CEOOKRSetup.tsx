@@ -1874,7 +1874,7 @@ export default function CEOOKRSetup() {
                   <Rocket className="w-5 h-5 text-orange-600" />
                 </div>
                 <div>
-                  <h2 className="text-lg font-bold text-slate-900">OKR 수립 사이클 시작</h2>
+                  <h2 className="text-lg font-bold text-slate-900">조직장님들, OKR 수립을 시작해주세요!</h2>
                   <p className="text-sm text-slate-500">마감일을 설정하고 모든 조직장에게 수립 알림을 보냅니다</p>
                 </div>
               </div>
