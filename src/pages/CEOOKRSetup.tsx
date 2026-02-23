@@ -8,7 +8,7 @@ import {
   Building2, Bot, Target, ChevronRight, ChevronLeft, Check, CheckCircle2,
   RefreshCw, Pencil, Trash2, Plus, X, Loader2, ArrowLeft, Send,
   GitBranch, CalendarClock, Megaphone, Zap, Eye, AlertCircle,
-  ChevronDown, ChevronUp, Sparkles, Rocket
+  ChevronDown, ChevronUp, Sparkles, Rocket, Calendar, Settings
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useStore } from '../store/useStore';
@@ -143,14 +143,17 @@ export default function CEOOKRSetup() {
   // company가 없으면 자동 로딩
   useEffect(() => {
     const loadCompany = async () => {
+      console.log('[loadCompany] user?.id:', user?.id, 'company:', company?.id);
       if (!user?.id) return;
       if (company) return; // 이미 있으면 스킵
       
-      const { data: profile } = await supabase
+      const { data: profile, error: profileErr } = await supabase
         .from('profiles')
         .select('company_id')
         .eq('id', user.id)
         .single();
+      
+      console.log('[loadCompany] profile:', profile, 'error:', profileErr);
       
       if (profile?.company_id) {
         const { data: companyData } = await supabase
@@ -158,6 +161,8 @@ export default function CEOOKRSetup() {
           .select('*')
           .eq('id', profile.company_id)
           .single();
+        
+        console.log('[loadCompany] companyData:', companyData?.id, companyData?.name);
         
         if (companyData) {
           useStore.getState().setCompany({
