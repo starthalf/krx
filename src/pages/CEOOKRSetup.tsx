@@ -435,9 +435,8 @@ export default function CEOOKRSetup() {
           competitiveLandscape: row.competitive_landscape || '',
           additionalContext: row.additional_context || '',
         });
-        if (row.status === 'finalized') {
-          setContextSaved(true);
-        }
+        // 데이터가 있으면 (draft든 finalized든) 저장됨 표시
+        setContextSaved(true);
       }
     } catch {
       // 첫 사용 - 빈 컨텍스트
@@ -1201,7 +1200,7 @@ export default function CEOOKRSetup() {
           <div className="flex items-center justify-between">
             {STEPS.map((step, idx) => {
               const isActive = idx === currentStep;
-              const isDone = (idx === 0 && periodConfirmed) || (idx === 1 && periodConfirmed && currentStep > 1) || (idx === 2 && companyOKRFinalized) || (idx === 3 && allDraftsComplete) || (idx === 4 && cycleStarted);
+              const isDone = (idx === 0 && periodConfirmed) || (idx === 1 && contextSaved) || (idx === 2 && companyOKRFinalized) || (idx === 3 && allDraftsComplete) || (idx === 4 && cycleStarted);
               return (
                 <div key={step.id} className="flex items-center flex-1">
                   <div
