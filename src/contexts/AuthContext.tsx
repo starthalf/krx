@@ -116,6 +116,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         console.log('🔄 Auth 상태 변경:', event);
         
         if (!mounted) return;
+        
+        // INITIAL_SESSION은 getInitialSession에서 이미 처리 — 스킵
+        if (event === 'INITIAL_SESSION') return;
 
         setSession(newSession);
         setUser(newSession?.user ?? null);
@@ -129,14 +132,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             return;
           }
 
-          // 프로필 조회 — 최대 3회 재시도 (트리거가 생성할 시간 확보)
-          let profileData: Profile | null = null;
-          for (let i = 0; i < 3; i++) {
-            await new Promise(r => setTimeout(r, 500 * (i + 1)));
-            if (!mounted) return;
-            profileData = await fetchProfile(newSession.user.id);
-            if (profileData?.company_id) break;
-          }
+          // 약간의 딜레이 후 프로필 조회 (트리거가 생성할 시간 확보)
+          await new Promise(r => setTimeout(r, 300));
+          if (!mounted) return;
+          const profileData = await fetchProfile(newSession.user.id);
           if (mounted) {
             setProfile(profileData);
           }
