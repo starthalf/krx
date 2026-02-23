@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Mail, CheckCircle, XCircle, Loader2, Crown, User, Building2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
 
 interface InvitationData {
   company_id: string;
@@ -40,6 +41,8 @@ const waitForProfile = async (userId: string, maxRetries = 10): Promise<boolean>
 export default function AcceptInvite() {
   const { token } = useParams<{ token: string }>();
   const navigate = useNavigate();
+  // ★ useAuth에서 refreshProfile과 setSkipAutoProfile 가져오기
+  const { refreshProfile, setSkipAutoProfile } = useAuth() as any;
   const [loading, setLoading] = useState(true);
   const [invitation, setInvitation] = useState<InvitationData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -201,6 +204,11 @@ export default function AcceptInvite() {
     try {
       setAccepting(true);
 
+      // ★ AuthContext에 "초대 플로우 중"임을 알려서 자동 프로필 조회/생성을 방지
+      if (setSkipAutoProfile) {
+        setSkipAutoProfile(true);
+      }
+
       // ── 1. 회원가입 또는 로그인 ──
       let userId: string | null = null;
 
@@ -208,7 +216,10 @@ export default function AcceptInvite() {
         email: invitation.email,
         password: password,
         options: {
-          data: { full_name: fullName }
+          data: { 
+            full_name: fullName,
+            company_id: invitation.company_id,  // ★ 실제 초대 회사 ID 전달
+          }
         }
       });
 
@@ -269,7 +280,6 @@ export default function AcceptInvite() {
       let roleId = invitation.role_id;
 
       if (!roleId) {
-        // 선택된 역할 타입으로 role_id 조회
         const { data: roleData } = await supabase
           .from('roles')
           .select('id')
@@ -279,7 +289,6 @@ export default function AcceptInvite() {
       }
 
       if (orgId && roleId) {
-        // 이미 있는지 확인
         const { data: existingRole } = await supabase
           .from('user_roles')
           .select('id')
@@ -313,8 +322,7 @@ export default function AcceptInvite() {
         })
         .eq('token', token);
 
-      // ── 5. onboarding 상태 + 리다이렉트 ──
-      // 역할 레벨 확인
+      // ── 5. onboarding 상태 설정 ──
       const { data: userRoles } = await supabase
         .from('user_roles')
         .select('roles!inner(level)')
@@ -331,6 +339,16 @@ export default function AcceptInvite() {
         })
         .eq('id', userId);
 
+      // ── 6. ★ 모든 설정 완료 후 AuthContext의 프로필을 갱신 ──
+      if (setSkipAutoProfile) {
+        setSkipAutoProfile(false);
+      }
+      // refreshProfile을 호출하여 AuthContext가 최신 프로필을 가지도록 함
+      if (refreshProfile) {
+        await refreshProfile();
+      }
+
+      // ── 7. 리다이렉트 ──
       if (isCompanyAdmin) {
         alert('가입이 완료되었습니다! 조직 구조를 설정해주세요.');
         navigate('/onboarding');
@@ -341,6 +359,10 @@ export default function AcceptInvite() {
 
     } catch (err) {
       console.error('Failed to accept invitation:', err);
+      // ★ 에러 발생 시에도 플래그 복원
+      if (setSkipAutoProfile) {
+        setSkipAutoProfile(false);
+      }
       alert('처리 중 오류가 발생했습니다: ' + (err as Error).message);
     } finally {
       setAccepting(false);
