@@ -335,23 +335,10 @@ useEffect(() => {
       } else {
         setHasDraft(false);
         let isCeoPreparing = false;
-        // 초안 없으면: 사이클 미시작이면 CEO 작업 중, 아니면 원클릭 모달
-        if (companyId) {
-          // 전사 OKR이 존재하는지 체크 (CEO가 초안 작업 중인지 판단)
-          const companyOrg = organizations.find(o => o.companyId === companyId && o.level === '전사');
-          if (companyOrg) {
-            const { count } = await supabase
-              .from('objectives')
-              .select('id', { count: 'exact', head: true })
-              .eq('org_id', companyOrg.id)
-      .eq('period', selectedPeriodCode);
-            
-            if ((count || 0) > 0 && !cycleActive) {
-              // 전사 OKR은 있는데 사이클이 안 돌고 있고 이 조직에는 초안이 없음 → CEO 작업 중
-              isCeoPreparing = true;
-              setCeoDraftInProgress(true);
-            }
-          }
+        // 초안 없으면: 사이클이 in_progress가 아니면 무조건 차단 (CEO 배포 전)
+        if (companyId && !cycleActive) {
+          isCeoPreparing = true;
+          setCeoDraftInProgress(true);
         }
         if (!urlOrgId && !isCeoPreparing) setShowOneClickModal(true);
       }
