@@ -121,7 +121,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(newSession?.user ?? null);
 
         if (newSession?.user) {
-          // 프로필 조회 — 최대 3회 재시도 (트리거/AcceptInvite가 생성할 시간 확보)
+          // 초대 수락 페이지에서는 프로필 조회를 스킵 (AcceptInvite가 직접 처리)
+          const isAcceptInvitePage = window.location.pathname.startsWith('/accept-invite');
+          if (isAcceptInvitePage) {
+            console.log('ℹ️ 초대 수락 페이지 — 프로필 조회 스킵');
+            if (mounted) setLoading(false);
+            return;
+          }
+
+          // 프로필 조회 — 최대 3회 재시도 (트리거가 생성할 시간 확보)
           let profileData: Profile | null = null;
           for (let i = 0; i < 3; i++) {
             await new Promise(r => setTimeout(r, 500 * (i + 1)));
