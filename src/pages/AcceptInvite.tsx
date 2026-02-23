@@ -41,24 +41,20 @@ const waitForProfile = async (userId: string, maxRetries = 10): Promise<boolean>
 export default function AcceptInvite() {
   const { token } = useParams<{ token: string }>();
   const navigate = useNavigate();
-  // ★ useAuth에서 refreshProfile과 setSkipAutoProfile 가져오기
   const { refreshProfile, setSkipAutoProfile } = useAuth() as any;
   const [loading, setLoading] = useState(true);
   const [invitation, setInvitation] = useState<InvitationData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [accepting, setAccepting] = useState(false);
   
-  // 회원가입 폼
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [fullName, setFullName] = useState('');
 
-  // 조직/역할 선택 (초대에 지정 안 됐을 때만 사용)
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [selectedOrgId, setSelectedOrgId] = useState('');
   const [selectedRoleType, setSelectedRoleType] = useState<'org_head' | 'team_member' | ''>('');
 
-  // 초대 정보 로딩
   useEffect(() => {
     if (token) {
       loadInvitation();
@@ -204,7 +200,7 @@ export default function AcceptInvite() {
     try {
       setAccepting(true);
 
-      // ★ AuthContext에 "초대 플로우 중"임을 알려서 자동 프로필 조회/생성을 방지
+      // ★ AuthContext의 자동 프로필 조회 억제
       if (setSkipAutoProfile) {
         setSkipAutoProfile(true);
       }
@@ -218,14 +214,13 @@ export default function AcceptInvite() {
         options: {
           data: { 
             full_name: fullName,
-            company_id: invitation.company_id,  // ★ 실제 초대 회사 ID 전달
+            company_id: invitation.company_id,
           }
         }
       });
 
       if (signUpError) {
         if (signUpError.message.includes('already registered')) {
-          // 이미 가입 → 로그인
           const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
             email: invitation.email,
             password: password
@@ -245,12 +240,22 @@ export default function AcceptInvite() {
         throw new Error('사용자 계정 생성에 실패했습니다');
       }
 
-      // ── 2. profiles 테이블에 row 생성 대기 ──
+      // ── ★ 2. 초대 상태를 즉시 accepted로 업데이트 ──
+      //    (이후 프로필/역할 생성에서 에러가 나도 초대는 수락 처리됨)
+      console.log('✅ 초대 상태 accepted로 업데이트');
+      await supabase
+        .from('invitations')
+        .update({ 
+          status: 'accepted',
+          accepted_at: new Date().toISOString(),
+        })
+        .eq('token', token);
+
+      // ── 3. profiles 테이블에 row 생성 대기 ──
       console.log('⏳ Waiting for profile to be created...', userId);
       const profileExists = await waitForProfile(userId);
       
       if (!profileExists) {
-        // trigger가 안 돌았으면 직접 생성
         console.log('⚠️ Profile not auto-created, creating manually...');
         const { error: profileError } = await supabase
           .from('profiles')
@@ -265,7 +270,6 @@ export default function AcceptInvite() {
           throw new Error('프로필 생성에 실패했습니다: ' + profileError.message);
         }
       } else {
-        // profiles 존재하면 company_id, full_name 업데이트
         await supabase
           .from('profiles')
           .update({ 
@@ -275,7 +279,7 @@ export default function AcceptInvite() {
           .eq('id', userId);
       }
 
-      // ── 3. user_roles 할당 ──
+      // ── 4. user_roles 할당 ──
       const orgId = invitation.org_id || selectedOrgId;
       let roleId = invitation.role_id;
 
@@ -313,15 +317,6 @@ export default function AcceptInvite() {
         }
       }
 
-      // ── 4. 초대 상태 업데이트 ──
-      await supabase
-        .from('invitations')
-        .update({ 
-          status: 'accepted',
-          accepted_at: new Date().toISOString(),
-        })
-        .eq('token', token);
-
       // ── 5. onboarding 상태 설정 ──
       const { data: userRoles } = await supabase
         .from('user_roles')
@@ -339,16 +334,14 @@ export default function AcceptInvite() {
         })
         .eq('id', userId);
 
-      // ── 6. ★ 모든 설정 완료 후 AuthContext의 프로필을 갱신 ──
+      // ── 6. ★ AuthContext 프로필 갱신 후 리다이렉트 ──
       if (setSkipAutoProfile) {
         setSkipAutoProfile(false);
       }
-      // refreshProfile을 호출하여 AuthContext가 최신 프로필을 가지도록 함
       if (refreshProfile) {
         await refreshProfile();
       }
 
-      // ── 7. 리다이렉트 ──
       if (isCompanyAdmin) {
         alert('가입이 완료되었습니다! 조직 구조를 설정해주세요.');
         navigate('/onboarding');
@@ -359,7 +352,6 @@ export default function AcceptInvite() {
 
     } catch (err) {
       console.error('Failed to accept invitation:', err);
-      // ★ 에러 발생 시에도 플래그 복원
       if (setSkipAutoProfile) {
         setSkipAutoProfile(false);
       }
@@ -369,7 +361,6 @@ export default function AcceptInvite() {
     }
   };
 
-  // 조직을 계층별로 그룹핑
   const groupedOrgs = organizations.reduce((acc, org) => {
     const level = org.level || '기타';
     if (!acc[level]) acc[level] = [];
@@ -415,12 +406,10 @@ export default function AcceptInvite() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-6">
       <div className="max-w-md w-full bg-white rounded-2xl shadow-xl p-8">
-        {/* 아이콘 */}
         <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-6">
           <Mail className="w-8 h-8 text-blue-600" />
         </div>
 
-        {/* 제목 */}
         <h1 className="text-2xl font-bold text-slate-900 text-center mb-2">
           초대를 받으셨습니다
         </h1>
@@ -432,7 +421,6 @@ export default function AcceptInvite() {
           <span className="font-semibold">{invitation.company_name}</span>에 초대하셨습니다
         </p>
 
-        {/* 초대 정보 */}
         <div className="bg-slate-50 rounded-lg p-4 mb-6 space-y-2">
           <div className="flex justify-between text-sm">
             <span className="text-slate-600">이메일</span>
@@ -456,12 +444,9 @@ export default function AcceptInvite() {
           )}
         </div>
 
-        {/* 회원가입 폼 */}
         <div className="space-y-4 mb-6">
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">
-              이름 *
-            </label>
+            <label className="block text-sm font-medium text-slate-700 mb-2">이름 *</label>
             <input
               type="text"
               value={fullName}
@@ -473,9 +458,7 @@ export default function AcceptInvite() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">
-              비밀번호 *
-            </label>
+            <label className="block text-sm font-medium text-slate-700 mb-2">비밀번호 *</label>
             <input
               type="password"
               value={password}
@@ -489,9 +472,7 @@ export default function AcceptInvite() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">
-              비밀번호 확인 *
-            </label>
+            <label className="block text-sm font-medium text-slate-700 mb-2">비밀번호 확인 *</label>
             <input
               type="password"
               value={confirmPassword}
@@ -504,7 +485,6 @@ export default function AcceptInvite() {
           </div>
         </div>
 
-        {/* 조직/역할 선택 (필요한 경우만) */}
         {needsOrgRoleSelection && (
           <div className="space-y-4 mb-6 p-4 bg-amber-50 border border-amber-200 rounded-lg">
             <div className="flex items-center gap-2 text-amber-800 mb-2">
@@ -514,9 +494,7 @@ export default function AcceptInvite() {
 
             {!invitation.org_id && (
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">
-                  소속 조직 *
-                </label>
+                <label className="block text-sm font-medium text-slate-700 mb-2">소속 조직 *</label>
                 <select
                   value={selectedOrgId}
                   onChange={(e) => setSelectedOrgId(e.target.value)}
@@ -527,9 +505,7 @@ export default function AcceptInvite() {
                   {Object.entries(groupedOrgs).map(([level, orgs]) => (
                     <optgroup key={level} label={`━━ ${level} ━━`}>
                       {orgs.map((org) => (
-                        <option key={org.id} value={org.id}>
-                          {org.name}
-                        </option>
+                        <option key={org.id} value={org.id}>{org.name}</option>
                       ))}
                     </optgroup>
                   ))}
@@ -539,9 +515,7 @@ export default function AcceptInvite() {
 
             {!invitation.role_id && (
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">
-                  역할 *
-                </label>
+                <label className="block text-sm font-medium text-slate-700 mb-2">역할 *</label>
                 <div className="space-y-2">
                   <button
                     type="button"
@@ -553,9 +527,7 @@ export default function AcceptInvite() {
                     }`}
                   >
                     <div className="flex items-center gap-3">
-                      <Crown className={`w-5 h-5 ${
-                        selectedRoleType === 'org_head' ? 'text-amber-600' : 'text-slate-400'
-                      }`} />
+                      <Crown className={`w-5 h-5 ${selectedRoleType === 'org_head' ? 'text-amber-600' : 'text-slate-400'}`} />
                       <div>
                         <div className="font-medium text-slate-900">조직장</div>
                         <div className="text-xs text-slate-500">조직 OKR 관리, 하위 승인/독촉</div>
@@ -576,9 +548,7 @@ export default function AcceptInvite() {
                     }`}
                   >
                     <div className="flex items-center gap-3">
-                      <User className={`w-5 h-5 ${
-                        selectedRoleType === 'team_member' ? 'text-blue-600' : 'text-slate-400'
-                      }`} />
+                      <User className={`w-5 h-5 ${selectedRoleType === 'team_member' ? 'text-blue-600' : 'text-slate-400'}`} />
                       <div>
                         <div className="font-medium text-slate-900">구성원</div>
                         <div className="text-xs text-slate-500">개인 OKR 수립, 체크인</div>
@@ -594,14 +564,12 @@ export default function AcceptInvite() {
           </div>
         )}
 
-        {/* 안내 메시지 */}
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
           <p className="text-sm text-blue-800">
             💡 가입 후 자동으로 <strong>{invitation.company_name}</strong>의 구성원으로 등록됩니다
           </p>
         </div>
 
-        {/* 버튼 */}
         <button
           onClick={handleAccept}
           disabled={accepting}
@@ -620,7 +588,6 @@ export default function AcceptInvite() {
           )}
         </button>
 
-        {/* 이미 계정이 있는 경우 */}
         <p className="text-center text-sm text-slate-600 mt-4">
           이미 계정이 있으신가요?{' '}
           <button
