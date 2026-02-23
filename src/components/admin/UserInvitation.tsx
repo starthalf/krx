@@ -76,58 +76,53 @@ export default function UserInvitation() {
     }
   };
 
-  // 초대 1건 생성 (순수 insert — alert/모달 닫기 없음)
-  const createInvitation = async (formData: InvitationForm): Promise<string> => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) throw new Error('User not found');
-
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('company_id')
-      .eq('id', user.id)
-      .single();
-
-    if (!profile?.company_id) throw new Error('Company not found');
-
-    // role_type으로 role_id 찾기
-    let roleId = null;
-    if (formData.role_type) {
-      const { data: role } = await supabase
-        .from('roles')
-        .select('id')
-        .eq('name', formData.role_type)
-        .single();
-      roleId = role?.id;
-    }
-
-    // 초대 토큰 생성
-    const token = Math.random().toString(36).substring(2, 15) + 
-                 Math.random().toString(36).substring(2, 15);
-
-    // 초대 생성
-    const { error } = await supabase
-      .from('invitations')
-      .insert({
-        company_id: profile.company_id,
-        email: formData.email,
-        full_name: formData.full_name || null,
-        role_id: roleId,
-        org_id: formData.org_id || null,
-        token: token,
-        invited_by: user.id
-      });
-
-    if (error) throw error;
-    return token;
-  };
-
-  // 개별 초대 (단건 — 기존 handleSendInvite 대체)
   const handleSendInvite = async (formData: InvitationForm) => {
     try {
       setLoading(true);
-      const token = await createInvitation(formData);
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('User not found');
+
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('company_id')
+        .eq('id', user.id)
+        .single();
+
+      if (!profile?.company_id) throw new Error('Company not found');
+
+      // role_type으로 role_id 찾기
+      let roleId = null;
+      if (formData.role_type) {
+        const { data: role } = await supabase
+          .from('roles')
+          .select('id')
+          .eq('name', formData.role_type)
+          .single();
+        roleId = role?.id;
+      }
+
+      // 초대 토큰 생성
+      const token = Math.random().toString(36).substring(2, 15) + 
+                   Math.random().toString(36).substring(2, 15);
+
+      // 초대 생성 - viewer는 org_id 없이도 가능
+      const { error } = await supabase
+        .from('invitations')
+        .insert({
+          company_id: profile.company_id,
+          email: formData.email,
+          full_name: formData.full_name || null,
+          role_id: roleId,
+          org_id: formData.org_id || null,
+          token: token,
+          invited_by: user.id
+        });
+
+      if (error) throw error;
+
       const inviteLink = `${window.location.origin}/accept-invite/${token}`;
       alert(`초대가 발송되었습니다!\n\n초대 링크:\n${inviteLink}\n\n(실제 프로덕션에서는 이메일로 자동 발송됩니다)`);
+
       await loadInvitations();
       setShowInviteModal(false);
     } catch (error) {
@@ -136,11 +131,6 @@ export default function UserInvitation() {
     } finally {
       setLoading(false);
     }
-  };
-
-  // 대량 초대용 (alert/모달 닫기 없이 순수 insert만)
-  const handleBulkInvite = async (formData: InvitationForm) => {
-    await createInvitation(formData);
   };
 
   const copyInviteLink = async (token: string) => {
@@ -321,11 +311,8 @@ export default function UserInvitation() {
         <InviteModal
           organizations={organizations}
           loading={loading}
-          onSubmit={handleBulkInvite}
-          onClose={() => {
-            setShowInviteModal(false);
-            loadInvitations(); // 모달 닫힐 때 목록 새로고침
-          }}
+          onSubmit={handleSendInvite}
+          onClose={() => setShowInviteModal(false)}
         />
       )}
 
@@ -898,4 +885,4 @@ function TeamInviteLinkModal({ company, onClose, onUpdate }: TeamInviteLinkModal
       </div>
     </div>
   );
-}
+} 

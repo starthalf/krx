@@ -116,26 +116,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         console.log('🔄 Auth 상태 변경:', event);
         
         if (!mounted) return;
-        
-        // INITIAL_SESSION은 getInitialSession에서 이미 처리 — 스킵
-        if (event === 'INITIAL_SESSION') return;
 
         setSession(newSession);
         setUser(newSession?.user ?? null);
 
         if (newSession?.user) {
-          // 초대 수락 페이지에서는 프로필 조회를 스킵 (AcceptInvite가 직접 처리)
-          const isAcceptInvitePage = window.location.pathname.startsWith('/accept-invite');
-          if (isAcceptInvitePage) {
-            console.log('ℹ️ 초대 수락 페이지 — 프로필 조회 스킵');
-            if (mounted) setLoading(false);
-            return;
+          // 프로필 조회 — 최대 3회 재시도 (트리거/AcceptInvite가 생성할 시간 확보)
+          let profileData: Profile | null = null;
+          for (let i = 0; i < 3; i++) {
+            await new Promise(r => setTimeout(r, 500 * (i + 1)));
+            if (!mounted) return;
+            profileData = await fetchProfile(newSession.user.id);
+            if (profileData?.company_id) break;
           }
-
-          // 약간의 딜레이 후 프로필 조회 (트리거가 생성할 시간 확보)
-          await new Promise(r => setTimeout(r, 300));
-          if (!mounted) return;
-          const profileData = await fetchProfile(newSession.user.id);
           if (mounted) {
             setProfile(profileData);
           }
@@ -247,4 +240,4 @@ export function useAuth() {
     throw new Error('useAuth must be used within an AuthProvider');
   }
   return context;
-} 
+}
