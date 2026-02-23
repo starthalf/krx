@@ -5,7 +5,7 @@ import { getBIIColor } from '../utils/helpers';
 import { 
   TrendingUp, Target, CheckSquare, AlertTriangle, Bot, 
   MoreHorizontal, Calendar, ArrowUpRight, Trophy, AlertCircle, Activity,
-  Shield
+  Shield, Crown
 } from 'lucide-react';
 import { 
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer 
@@ -150,7 +150,8 @@ export default function Dashboard() {
     { id: 3, user: '박민수', message: '마케팅 캠페인 결과 리포트 업로드', timestamp: '2시간 전' },
   ];
 
-  const selectableOrgs = roleLevel >= 90 
+  // ✅ v2: company_admin(80)도 전사 조직 볼 수 있도록
+  const selectableOrgs = roleLevel >= 80 
     ? organizations 
     : organizations.filter(o => managableOrgs.includes(o.id) || managableOrgs.length === 0);
 
@@ -173,20 +174,22 @@ export default function Dashboard() {
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-bold text-slate-900">대시보드</h1>
             
+            {/* ✅ v2 역할 배지 */}
             {roleLevel >= 90 && (
-              <span className="px-3 py-1 bg-purple-100 text-purple-700 text-xs font-semibold rounded-full flex items-center gap-1">
+              <span className="px-3 py-1 bg-red-100 text-red-700 text-xs font-semibold rounded-full flex items-center gap-1">
+                <Crown className="w-3 h-3" />
+                CEO
+              </span>
+            )}
+            {roleLevel >= 80 && roleLevel < 90 && (
+              <span className="px-3 py-1 bg-orange-100 text-orange-700 text-xs font-semibold rounded-full flex items-center gap-1">
                 <Shield className="w-3 h-3" />
                 관리자
               </span>
             )}
-            {roleLevel >= 70 && roleLevel < 90 && (
+            {roleLevel >= 70 && roleLevel < 80 && (
               <span className="px-3 py-1 bg-blue-100 text-blue-700 text-xs font-semibold rounded-full">
-                본부장
-              </span>
-            )}
-            {roleLevel >= 50 && roleLevel < 70 && (
-              <span className="px-3 py-1 bg-green-100 text-green-700 text-xs font-semibold rounded-full">
-                팀장
+                조직장
               </span>
             )}
           </div>
@@ -397,8 +400,8 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* AI 인사이트 - 팀장 이상만 */}
-        {roleLevel >= 50 ? (
+        {/* AI 인사이트 - 조직장(70) 이상만 */}
+        {roleLevel >= 70 ? (
           <div className="bg-gradient-to-br from-indigo-50 to-blue-50 rounded-xl border border-indigo-100 p-6 shadow-sm">
             <div className="flex items-center gap-2 mb-4">
               <Bot className="w-6 h-6 text-indigo-600" />
@@ -438,9 +441,9 @@ export default function Dashboard() {
           <div className="bg-slate-50 rounded-xl border border-slate-200 p-6">
             <div className="text-center py-8">
               <Activity className="w-12 h-12 text-slate-400 mx-auto mb-3" />
-              <h3 className="text-sm font-semibold text-slate-700 mb-2">팀원 모드</h3>
+              <h3 className="text-sm font-semibold text-slate-700 mb-2">구성원 모드</h3>
               <p className="text-xs text-slate-500">
-                AI 인사이트는 팀장 이상에게만 제공됩니다.
+                AI 인사이트는 조직장 이상에게만 제공됩니다.
               </p>
             </div>
           </div>
