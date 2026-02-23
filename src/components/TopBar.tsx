@@ -256,7 +256,7 @@ export default function TopBar() {
         </div>
 
         {/* 관리자 설정 (레벨 90 이상) - 기존 */}
-        {roleLevel >= 90 && (
+        {roleLevel >= 80 && (
           <>
             <div className="h-8 w-px bg-slate-300" />
             <button onClick={handleAdminSettings} className="px-3 py-2 text-slate-700 hover:bg-slate-100 rounded-lg transition-colors flex items-center gap-2" title="관리자 설정">
