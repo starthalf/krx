@@ -1,71 +1,26 @@
 // src/components/admin/UserRolesManager.tsx
 import { useEffect, useState } from 'react';
 import { useStore } from '../../store/useStore';
-import { 
-  getAllRoles, 
-  getUserRoles, 
-  assignRole, 
+import {
+  getAllRoles,
+  getUserRoles,
+  assignRole,
   revokeRole,
-  getRolePermissions,
+  getMyRoleLevel,
+  getAssignableRoles,
+  getRoleInfo,
+  ROLE_LEVELS,
   Role,
-  UserRole 
+  UserRole,
 } from '../../lib/permissions';
-import { Shield, X, Plus, AlertCircle, Check, Eye, Pencil, Settings, Users, Target, BarChart3, FileCheck } from 'lucide-react';
+import { Shield, X, Plus, AlertCircle, Check, Eye, Settings, Users, Target, BarChart3, Crown } from 'lucide-react';
 
-// ─── 역할별 설명 맵 (레벨 기반 fallback) ─────────────────
-const ROLE_DESCRIPTIONS: Record<number, { summary: string; capabilities: string[]; color: string; bgColor: string }> = {
-  100: {
-    summary: '시스템 전체를 관리합니다',
-    capabilities: ['모든 회사 관리', '역할/권한 설정', '시스템 설정 변경', '모든 데이터 접근'],
-    color: 'text-purple-700',
-    bgColor: 'bg-purple-50 border-purple-200',
-  },
-  90: {
-    summary: '소속 회사의 모든 설정을 관리합니다',
-    capabilities: ['사용자 초대/관리', '조직 구조 설정', 'OKR 수립 사이클 관리', '전체 성과 조회'],
-    color: 'text-blue-700',
-    bgColor: 'bg-blue-50 border-blue-200',
-  },
-  70: {
-    summary: '담당 본부의 OKR을 관리·승인합니다',
-    capabilities: ['하위 조직 OKR 승인/반려', 'OKR 수립 독촉', '본부 성과 대시보드 조회', '조직 편집'],
-    color: 'text-indigo-700',
-    bgColor: 'bg-indigo-50 border-indigo-200',
-  },
-  50: {
-    summary: '담당 팀의 OKR을 수립·관리합니다',
-    capabilities: ['팀 OKR 수립/제출', '팀원 실적 관리', '팀 성과 조회', '체크인 독촉'],
-    color: 'text-green-700',
-    bgColor: 'bg-green-50 border-green-200',
-  },
-  30: {
-    summary: '개인 OKR을 수립하고 체크인합니다',
-    capabilities: ['개인 OKR 입력', '실적 체크인', '피드백 작성/수신'],
-    color: 'text-yellow-700',
-    bgColor: 'bg-yellow-50 border-yellow-200',
-  },
-  10: {
-    summary: '성과 데이터를 조회만 할 수 있습니다',
-    capabilities: ['대시보드 조회', '공개된 OKR 열람'],
-    color: 'text-slate-600',
-    bgColor: 'bg-slate-50 border-slate-200',
-  },
-};
-
-function getRoleInfo(level: number) {
-  if (ROLE_DESCRIPTIONS[level]) return ROLE_DESCRIPTIONS[level];
-  const keys = Object.keys(ROLE_DESCRIPTIONS).map(Number).sort((a, b) => b - a);
-  for (const k of keys) {
-    if (level >= k) return ROLE_DESCRIPTIONS[k];
-  }
-  return ROLE_DESCRIPTIONS[10];
-}
-
+// ─── 역할 아이콘 맵 ─────────────────────────
 function getRoleIcon(level: number) {
   if (level >= 100) return Settings;
-  if (level >= 90) return Users;
-  if (level >= 70) return FileCheck;
-  if (level >= 50) return Target;
+  if (level >= 90) return Crown;
+  if (level >= 80) return Users;
+  if (level >= 70) return Target;
   if (level >= 30) return BarChart3;
   return Eye;
 }
@@ -81,12 +36,11 @@ export default function UserRolesManager() {
   const [myRoleLevel, setMyRoleLevel] = useState(0);
 
   useEffect(() => {
-    const loadMyLevel = async () => {
-      const { getMyRoleLevel } = await import('../../lib/permissions');
+    const init = async () => {
       const level = await getMyRoleLevel();
       setMyRoleLevel(level);
     };
-    loadMyLevel();
+    init();
   }, []);
 
   useEffect(() => {
@@ -103,15 +57,14 @@ export default function UserRolesManager() {
           .single();
         if (!currentProfile) return;
 
-        const { getMyRoleLevel } = await import('../../lib/permissions');
-        const roleLevel = await getMyRoleLevel();
+        const level = await getMyRoleLevel();
 
         let query = supabase
           .from('profiles')
           .select('id, full_name, company_id, companies ( name )')
           .order('full_name');
 
-        if (roleLevel < 100 && currentProfile.company_id) {
+        if (level < ROLE_LEVELS.SUPER_ADMIN && currentProfile.company_id) {
           query = query.eq('company_id', currentProfile.company_id);
         }
 
@@ -313,7 +266,7 @@ export default function UserRolesManager() {
 }
 
 // ============================================
-// 역할 할당 모달 — 카드형 역할 선택
+// 역할 할당 모달
 // ============================================
 interface AssignRoleModalProps {
   roles: Role[];
@@ -327,7 +280,12 @@ function AssignRoleModal({ roles, organizations, myRoleLevel, onAssign, onClose 
   const [selectedRoleId, setSelectedRoleId] = useState('');
   const [selectedOrgId, setSelectedOrgId] = useState<string>('');
 
-  const assignableRoles = roles.filter(role => role.level < myRoleLevel);
+  // 핵심: getAssignableRoles로 할당 가능한 역할 필터
+  const assignableRoles = getAssignableRoles(roles, myRoleLevel);
+
+  // 선택된 역할이 org_leader면 조직 선택 필요
+  const selectedRole = roles.find(r => r.id === selectedRoleId);
+  const needsOrgSelection = selectedRole && selectedRole.level <= ROLE_LEVELS.ORG_LEADER;
 
   const handleSubmit = () => {
     if (!selectedRoleId) {
@@ -368,7 +326,13 @@ function AssignRoleModal({ roles, organizations, myRoleLevel, onAssign, onClose 
                   return (
                     <button
                       key={role.id}
-                      onClick={() => setSelectedRoleId(role.id)}
+                      onClick={() => {
+                        setSelectedRoleId(role.id);
+                        // CEO/company_admin은 조직 선택 불필요 → 초기화
+                        if (role.level >= ROLE_LEVELS.COMPANY_ADMIN) {
+                          setSelectedOrgId('');
+                        }
+                      }}
                       className={`w-full text-left rounded-xl border-2 p-4 transition-all ${
                         isSelected
                           ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-200'
@@ -405,27 +369,38 @@ function AssignRoleModal({ roles, organizations, myRoleLevel, onAssign, onClose 
             )}
           </div>
 
-          {/* 조직 선택 */}
-          <div>
-            <label className="block text-sm font-semibold text-slate-800 mb-2">
-              적용 조직 <span className="font-normal text-slate-400">(선택)</span>
-            </label>
-            <select
-              value={selectedOrgId}
-              onChange={(e) => setSelectedOrgId(e.target.value)}
-              className="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none text-sm"
-            >
-              <option value="">전체 시스템 (모든 조직)</option>
-              {organizations.map((org) => (
-                <option key={org.id} value={org.id}>
-                  {org.name} ({org.level})
+          {/* 조직 선택 — org_leader/member일 때만 표시 */}
+          {needsOrgSelection && (
+            <div>
+              <label className="block text-sm font-semibold text-slate-800 mb-2">
+                적용 조직 {selectedRole?.level === ROLE_LEVELS.ORG_LEADER
+                  ? <span className="font-normal text-red-500">(필수)</span>
+                  : <span className="font-normal text-slate-400">(선택)</span>
+                }
+              </label>
+              <select
+                value={selectedOrgId}
+                onChange={(e) => setSelectedOrgId(e.target.value)}
+                className="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none text-sm"
+              >
+                <option value="">
+                  {selectedRole?.level === ROLE_LEVELS.ORG_LEADER
+                    ? '-- 조직을 선택하세요 --'
+                    : '전체 시스템 (모든 조직)'}
                 </option>
-              ))}
-            </select>
-            <p className="text-xs text-slate-400 mt-1">
-              특정 조직을 선택하면 해당 조직에서만 이 역할이 적용됩니다
-            </p>
-          </div>
+                {organizations.map((org) => (
+                  <option key={org.id} value={org.id}>
+                    {org.name} ({org.level})
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-slate-400 mt-1">
+                {selectedRole?.level === ROLE_LEVELS.ORG_LEADER
+                  ? '조직장은 특정 조직에 배정해야 합니다. 배정된 조직과 하위 조직을 관리합니다.'
+                  : '특정 조직을 선택하면 해당 조직에서만 이 역할이 적용됩니다'}
+              </p>
+            </div>
+          )}
         </div>
 
         <div className="flex gap-3 mt-6 pt-4 border-t">
@@ -433,8 +408,14 @@ function AssignRoleModal({ roles, organizations, myRoleLevel, onAssign, onClose 
             className="flex-1 px-4 py-2.5 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 text-sm font-medium">
             취소
           </button>
-          <button onClick={handleSubmit} disabled={!selectedRoleId}
-            className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed">
+          <button
+            onClick={handleSubmit}
+            disabled={
+              !selectedRoleId ||
+              (selectedRole?.level === ROLE_LEVELS.ORG_LEADER && !selectedOrgId)
+            }
+            className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+          >
             할당
           </button>
         </div>
