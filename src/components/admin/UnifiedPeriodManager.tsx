@@ -1,16 +1,18 @@
 // src/components/admin/UnifiedPeriodManager.tsx
-// 기간(Period)과 수립(Planning) 관리를 단일 인터페이스로 통합
-// CEO가 한 곳에서 모든 기간/수립 작업 수행
+// 기간 관리 + 수립 모니터링 + 마감 관리
+// ✅ 수립 설정/시작은 CEO 수립 플로우(/ceo-okr-setup)에서 처리
+// ✅ 이 컴포넌트는 기간 생성/삭제, 수립 현황 모니터링, 수립 마감/확정, 성과 마감에 집중
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   Calendar, Plus, Play, Square, CheckCircle2, Clock, Edit3, Trash2,
   ChevronDown, ChevronRight, AlertCircle, Info, Users, FileText,
-  CalendarClock, Timer, Target, TrendingUp, Archive, Settings,
-  MessageSquare, Bell, RefreshCw, X, Save, Pause
+  Timer, Target, TrendingUp, Archive,
+  MessageSquare, RefreshCw, X, ExternalLink, Rocket
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
+import { useNavigate } from 'react-router-dom';
 
 // ─── Types ───────────────────────────────────────────────
 
@@ -47,345 +49,197 @@ interface FiscalPeriod {
   updated_at: string;
 }
 
-interface PlanningSetupForm {
-  planning_starts_at: string;
-  planning_deadline_at: string;
-  planning_grace_deadline_at: string;
-  planning_message: string;
-  planning_auto_remind_days: number[];
-}
-
 type TabType = 'periods' | 'planning' | 'closing';
 
-// ─── Helper Functions ────────────────────────────────────
+// ─── Helpers ─────────────────────────────────────────────
 
-function getYearFromCode(periodCode: string): number {
-  return parseInt(periodCode.substring(0, 4));
+function getYearFromCode(code: string): number { return parseInt(code.substring(0, 4)); }
+
+function formatDate(d: string | null) {
+  if (!d) return '-';
+  return new Date(d).toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' });
 }
 
-function formatDate(dateStr: string | null) {
-  if (!dateStr) return '-';
-  return new Date(dateStr).toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' });
+function formatDateTime(d: string | null) {
+  if (!d) return '-';
+  return new Date(d).toLocaleString('ko-KR', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
-function formatDateTime(dateStr: string | null) {
-  if (!dateStr) return '-';
-  return new Date(dateStr).toLocaleString('ko-KR', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+function daysUntil(d: string | null) {
+  if (!d) return null;
+  return Math.ceil((new Date(d).getTime() - Date.now()) / 86400000);
 }
 
-function toInputDate(dateStr: string | null) {
-  if (!dateStr) return '';
-  return new Date(dateStr).toISOString().slice(0, 10);
-}
-
-function daysUntil(dateStr: string | null) {
-  if (!dateStr) return null;
-  const diff = new Date(dateStr).getTime() - Date.now();
-  return Math.ceil(diff / (1000 * 60 * 60 * 24));
-}
-
-const STATUS_CONFIG: Record<string, { label: string; color: string; icon: any; bgColor: string }> = {
-  upcoming: { label: '예정', color: 'text-slate-600', icon: Clock, bgColor: 'bg-slate-100' },
-  planning: { label: '수립중', color: 'text-blue-600', icon: Edit3, bgColor: 'bg-blue-100' },
-  active: { label: '실행중', color: 'text-green-600', icon: Play, bgColor: 'bg-green-100' },
-  closing: { label: '마감중', color: 'text-orange-600', icon: Square, bgColor: 'bg-orange-100' },
-  closed: { label: '완료', color: 'text-gray-600', icon: Archive, bgColor: 'bg-gray-100' },
-  archived: { label: '보관', color: 'text-purple-600', icon: Archive, bgColor: 'bg-purple-100' },
+const STATUS_CFG: Record<string, { label: string; color: string; icon: any; bg: string }> = {
+  upcoming:  { label: '예정',   color: 'text-slate-600',  icon: Clock,    bg: 'bg-slate-100' },
+  planning:  { label: '수립중', color: 'text-blue-600',   icon: Edit3,    bg: 'bg-blue-100' },
+  active:    { label: '실행중', color: 'text-green-600',  icon: Play,     bg: 'bg-green-100' },
+  closing:   { label: '마감중', color: 'text-orange-600', icon: Square,   bg: 'bg-orange-100' },
+  closed:    { label: '완료',   color: 'text-gray-600',   icon: Archive,  bg: 'bg-gray-100' },
+  archived:  { label: '보관',   color: 'text-purple-600', icon: Archive,  bg: 'bg-purple-100' },
 };
 
-const PLANNING_STATUS_CONFIG: Record<string, { label: string; color: string }> = {
-  not_started: { label: '미시작', color: 'text-slate-500' },
-  setup: { label: '설정중', color: 'text-blue-500' },
-  drafting: { label: '초안작성', color: 'text-indigo-500' },
-  in_progress: { label: '진행중', color: 'text-green-600' },
-  closing: { label: '마감중', color: 'text-orange-600' },
-  completed: { label: '완료', color: 'text-gray-600' },
+const PLAN_CFG: Record<string, { label: string; color: string }> = {
+  not_started: { label: '미시작',   color: 'text-slate-500' },
+  setup:       { label: '설정중',   color: 'text-blue-500' },
+  drafting:    { label: '초안작성', color: 'text-indigo-500' },
+  in_progress: { label: '진행중',   color: 'text-green-600' },
+  closing:     { label: '마감중',   color: 'text-orange-600' },
+  completed:   { label: '완료',     color: 'text-gray-600' },
 };
 
-// ─── Main Component ──────────────────────────────────────
+// ═════════════════════════════════════════════════════════
+// Main Component
+// ═════════════════════════════════════════════════════════
 
 export default function UnifiedPeriodManager() {
-  const { user, profile, loading: authLoading } = useAuth();
+  const { user, profile } = useAuth();
   const companyId = profile?.company_id;
+  const navigate = useNavigate();
 
   const [activeTab, setActiveTab] = useState<TabType>('periods');
   const [periods, setPeriods] = useState<FiscalPeriod[]>([]);
   const [loading, setLoading] = useState(false);
-  const [selectedPeriod, setSelectedPeriod] = useState<FiscalPeriod | null>(null);
   const [showCreateYear, setShowCreateYear] = useState(false);
   const [newYear, setNewYear] = useState(new Date().getFullYear());
   const [expandedYears, setExpandedYears] = useState<Set<number>>(new Set());
-  const [showPlanningSetup, setShowPlanningSetup] = useState(false);
-  const [planningForm, setPlanningForm] = useState<PlanningSetupForm>({
-    planning_starts_at: '',
-    planning_deadline_at: '',
-    planning_grace_deadline_at: '',
-    planning_message: '',
-    planning_auto_remind_days: [7, 3, 1],
-  });
+  const [cycleUnit, setCycleUnit] = useState<'year' | 'half' | 'quarter'>('year');
 
-  // ─── Data Fetching (useRef로 안정적 fetch) ─────────────
-
-  // ✅ 핵심 수정: companyId를 ref로 추적하여 클로저 문제 방지
-  const companyIdRef = useRef(companyId);
-  companyIdRef.current = companyId;
+  // ─── Fetch ─────────────────────────────────────────────
 
   const fetchPeriods = useCallback(async () => {
-    const cid = companyIdRef.current;
-    console.log('📋 fetchPeriods 호출', { cid, authLoading });
-    if (!cid) {
-      console.log('⚠️ companyId 없음, skip');
-      return;
-    }
+    if (!companyId) return;
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('fiscal_periods')
-        .select('*')
-        .eq('company_id', cid)
-        .order('period_code', { ascending: false });
+      // 정책 로드
+      const { data: companyData } = await supabase.from('companies').select('okr_cycle_unit').eq('id', companyId).single();
+      if (companyData?.okr_cycle_unit) setCycleUnit(companyData.okr_cycle_unit);
+
+      const { data, error } = await supabase.from('fiscal_periods').select('*').eq('company_id', companyId).order('period_code', { ascending: false });
       if (error) throw error;
-      console.log('✅ 기간 로드 성공:', data?.length, '건');
       setPeriods(data || []);
-      // ✅ 로드 후 모든 연도를 자동 펼침
-      const years = new Set((data || []).map((p: any) => getYearFromCode(p.period_code)));
-      setExpandedYears(years);
-    } catch (err: any) {
-      console.error('기간 로드 실패:', err);
-      alert(`기간 로드 실패: ${err.message}`);
-    } finally {
-      setLoading(false);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    } catch (err: any) { alert(`기간 로드 실패: ${err.message}`); }
+    finally { setLoading(false); }
+  }, [companyId]);
 
-  // authLoading 완료 + companyId 있을 때 fetch
-  useEffect(() => {
-    console.log('🔄 useEffect 트리거', { authLoading, companyId });
-    if (!authLoading && companyId) {
-      fetchPeriods();
-    }
-  }, [authLoading, companyId, fetchPeriods]);
+  useEffect(() => { fetchPeriods(); }, [fetchPeriods]);
 
-  // ─── 연도 생성 ──────────────────────────────────────────
+  // ─── Create Year ───────────────────────────────────────
 
   const handleCreateYear = async () => {
-    if (!companyId || !user?.id) {
-      alert('회사 정보를 불러올 수 없습니다. 페이지를 새로고침 해주세요.');
-      return;
-    }
+    if (!companyId || !user?.id) return;
     setLoading(true);
     try {
-      const { data, error } = await supabase.rpc('create_fiscal_year_with_hierarchy', {
-        p_company_id: companyId,
-        p_year: newYear,
-      });
+      const { data, error } = await supabase.rpc('create_fiscal_year_with_hierarchy', { p_company_id: companyId, p_year: newYear });
       if (error) throw error;
-      alert(`${newYear}년도 및 하위 기간이 생성되었습니다.`);
-      setShowCreateYear(false);
-      await fetchPeriods();
-      setExpandedYears((prev) => new Set(prev).add(newYear));
-    } catch (err: any) {
-      if (err.message?.includes('duplicate')) {
-        alert(`${newYear}년도가 이미 존재합니다.`);
+      const created = data?.created || 0;
+      const skipped = data?.skipped || 0;
+      if (created > 0) {
+        alert(`${newYear}년: ${created}개 기간 생성 완료` + (skipped > 0 ? ` (${skipped}개는 이미 존재)` : ''));
       } else {
-        alert(`연도 생성 실패: ${err.message}`);
+        alert(`${newYear}년: 모든 기간이 이미 존재합니다.`);
       }
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // ─── 수립 설정 ──────────────────────────────────────────
-
-  const handleOpenPlanningSetup = (period: FiscalPeriod) => {
-    setSelectedPeriod(period);
-    setPlanningForm({
-      planning_starts_at: toInputDate(period.planning_starts_at) || toInputDate(period.starts_at),
-      planning_deadline_at: toInputDate(period.planning_deadline_at) || toInputDate(period.ends_at),
-      planning_grace_deadline_at: toInputDate(period.planning_grace_deadline_at) || '',
-      planning_message: period.planning_message || '',
-      planning_auto_remind_days: period.planning_auto_remind_days || [7, 3, 1],
-    });
-    setShowPlanningSetup(true);
-  };
-
-  const handleSavePlanningSetup = async () => {
-    if (!selectedPeriod || !user?.id) return;
-    if (!planningForm.planning_starts_at || !planningForm.planning_deadline_at) {
-      alert('수립 시작일과 마감일을 입력해주세요.');
-      return;
-    }
-    if (new Date(planningForm.planning_deadline_at) <= new Date(planningForm.planning_starts_at)) {
-      alert('마감일은 시작일보다 이후여야 합니다.');
-      return;
-    }
-    setLoading(true);
-    try {
-      const { error } = await supabase
-        .from('fiscal_periods')
-        .update({
-          planning_starts_at: new Date(planningForm.planning_starts_at).toISOString(),
-          planning_deadline_at: new Date(planningForm.planning_deadline_at + 'T23:59:59').toISOString(),
-          planning_grace_deadline_at: planningForm.planning_grace_deadline_at
-            ? new Date(planningForm.planning_grace_deadline_at + 'T23:59:59').toISOString()
-            : null,
-          planning_message: planningForm.planning_message || null,
-          planning_auto_remind_days: planningForm.planning_auto_remind_days,
-          planning_status: 'setup',
-        })
-        .eq('id', selectedPeriod.id);
-      if (error) throw error;
-      alert('수립 설정이 저장되었습니다.');
-      setShowPlanningSetup(false);
-      setSelectedPeriod(null);
+      setShowCreateYear(false);
       fetchPeriods();
+      setExpandedYears(prev => new Set(prev).add(newYear));
     } catch (err: any) {
-      alert(`저장 실패: ${err.message}`);
-    } finally {
-      setLoading(false);
-    }
+      alert(`기간 생성 실패: ${err.message}`);
+    } finally { setLoading(false); }
   };
 
-  // ─── 수립 시작/마감/확정 ─────────────────────────────────
+  // ─── Planning: Close / Finalize (모니터링 후속 조치) ───
 
-  const handleStartPlanning = async (period: FiscalPeriod) => {
-    if (!user?.id) return;
-    if (period.planning_status === 'not_started') { alert('먼저 수립 설정을 완료해주세요.'); return; }
-    if (!confirm('수립을 시작하시겠습니까?\n\n모든 조직장에게 수립 시작 알림이 발송됩니다.\n' +
-      `\n기간: ${period.period_code}\n시작일: ${formatDate(period.planning_starts_at)}\n마감일: ${formatDate(period.planning_deadline_at)}`)) return;
+  const handleClosePlanning = async (p: FiscalPeriod) => {
+    if (!user?.id || !confirm(`수립을 마감하시겠습니까?\n마감 후에는 신규 제출이 불가합니다.\n\n기간: ${p.period_code}`)) return;
     setLoading(true);
     try {
-      const { data, error } = await supabase.rpc('start_planning_period', { p_period_id: period.id, p_user_id: user.id });
-      if (error) throw error;
-      if (data?.success) { alert(data.message || '수립이 시작되었습니다.'); fetchPeriods(); }
-      else { alert(data?.message || '수립을 시작할 수 없습니다.'); }
-    } catch (err: any) { alert(`수립 시작 실패: ${err.message}`); }
-    finally { setLoading(false); }
-  };
-
-  const handleClosePlanning = async (period: FiscalPeriod) => {
-    if (!user?.id) return;
-    if (!confirm(`수립을 마감하시겠습니까?\n\n마감 후에는 신규 제출이 불가합니다.\n\n기간: ${period.period_code}`)) return;
-    setLoading(true);
-    try {
-      const { data, error } = await supabase.rpc('close_planning_period', { p_period_id: period.id, p_user_id: user.id });
+      const { data, error } = await supabase.rpc('close_planning_period', { p_period_id: p.id, p_user_id: user.id });
       if (error) throw error;
       if (data?.success) { alert(data.message || '수립이 마감되었습니다.'); fetchPeriods(); }
-      else { alert(data?.message || '수립을 마감할 수 없습니다.'); }
+      else alert(data?.message || '수립을 마감할 수 없습니다.');
     } catch (err: any) { alert(`수립 마감 실패: ${err.message}`); }
     finally { setLoading(false); }
   };
 
-  const handleFinalizePlanning = async (period: FiscalPeriod) => {
-    if (!user?.id) return;
-    if (!confirm(`수립을 최종 확정하시겠습니까?\n\n확정 후에는 실행/체크인 모드로 전환됩니다.\n\n기간: ${period.period_code}`)) return;
+  const handleFinalizePlanning = async (p: FiscalPeriod) => {
+    if (!user?.id || !confirm(`수립을 최종 확정하시겠습니까?\n확정 후 실행/체크인 모드로 전환됩니다.\n\n기간: ${p.period_code}`)) return;
     setLoading(true);
     try {
-      const { data, error } = await supabase.rpc('finalize_planning_period', { p_period_id: period.id, p_user_id: user.id });
+      const { data, error } = await supabase.rpc('finalize_planning_period', { p_period_id: p.id, p_user_id: user.id });
       if (error) throw error;
       if (data?.success) { alert(data.message || '수립이 확정되었습니다.'); fetchPeriods(); }
-      else { alert(data?.message || '수립을 확정할 수 없습니다.'); }
+      else alert(data?.message || '수립을 확정할 수 없습니다.');
     } catch (err: any) { alert(`수립 확정 실패: ${err.message}`); }
     finally { setLoading(false); }
   };
 
-  // ─── 성과 마감 ──────────────────────────────────────────
+  // ─── Closing: Start / Finalize ─────────────────────────
 
-  const handleStartClosing = async (period: FiscalPeriod) => {
-    if (!user?.id) return;
-    if (!confirm(`성과 마감을 시작하시겠습니까?\n\n미완료 항목을 검토하고 마감 처리를 진행합니다.\n\n기간: ${period.period_code}`)) return;
+  const handleStartClosing = async (p: FiscalPeriod) => {
+    if (!user?.id || !confirm(`성과 마감을 시작하시겠습니까?\n\n기간: ${p.period_code}`)) return;
     setLoading(true);
     try {
-      const { data, error } = await supabase.rpc('start_closing_period', { p_period_id: period.id, p_user_id: user.id });
+      const { data, error } = await supabase.rpc('start_closing_period', { p_period_id: p.id, p_user_id: user.id });
       if (error) throw error;
       if (data?.success) { alert(data.message || '마감이 시작되었습니다.'); fetchPeriods(); }
-      else { alert(data?.message || '마감을 시작할 수 없습니다.'); }
+      else alert(data?.message || '마감을 시작할 수 없습니다.');
     } catch (err: any) { alert(`마감 시작 실패: ${err.message}`); }
     finally { setLoading(false); }
   };
 
-  const handleFinalizeClosing = async (period: FiscalPeriod) => {
-    if (!user?.id) return;
-    if (!confirm(`성과 마감을 완료하시겠습니까?\n\n완료 후에는 수정할 수 없습니다.\n\n기간: ${period.period_code}`)) return;
+  const handleFinalizeClosing = async (p: FiscalPeriod) => {
+    if (!user?.id || !confirm(`성과 마감을 완료하시겠습니까?\n완료 후에는 수정할 수 없습니다.\n\n기간: ${p.period_code}`)) return;
     setLoading(true);
     try {
-      const { data, error } = await supabase.rpc('finalize_closing_period', { p_period_id: period.id, p_user_id: user.id });
+      const { data, error } = await supabase.rpc('finalize_closing_period', { p_period_id: p.id, p_user_id: user.id });
       if (error) throw error;
       if (data?.success) { alert(data.message || '마감이 완료되었습니다.'); fetchPeriods(); }
-      else { alert(data?.message || '마감을 완료할 수 없습니다.'); }
+      else alert(data?.message || '마감을 완료할 수 없습니다.');
     } catch (err: any) { alert(`마감 완료 실패: ${err.message}`); }
     finally { setLoading(false); }
   };
 
-  // ─── 기간 삭제 ──────────────────────────────────────────
+  // ─── Delete ────────────────────────────────────────────
 
-  const deleteSinglePeriod = async (id: string, label: string): Promise<void> => {
-    const { data, error } = await supabase
-      .from('fiscal_periods')
-      .delete()
-      .eq('id', id)
-      .select();
-    if (error) throw new Error(`${label} 삭제 실패: ${error.message}`);
-    if (!data || data.length === 0) throw new Error(`${label} 삭제 실패: RLS DELETE 정책을 확인해주세요.`);
-  };
-
-  const handleDeletePeriod = async (period: FiscalPeriod) => {
-    const year = getYearFromCode(period.period_code);
-    if (period.period_type === 'year') {
-      if (!confirm(`${year}년도 전체를 삭제하시겠습니까?\n\n연도를 삭제하면 하위 반기/분기도 모두 삭제됩니다.\n삭제된 데이터는 복구할 수 없습니다.`)) return;
-    } else if (period.period_type === 'half') {
-      if (!confirm(`${period.period_name}을(를) 삭제하시겠습니까?\n\n하위 분기도 함께 삭제됩니다.\n삭제된 데이터는 복구할 수 없습니다.`)) return;
-    } else {
-      if (!confirm(`${period.period_name}을(를) 삭제하시겠습니까?\n\n삭제된 데이터는 복구할 수 없습니다.`)) return;
-    }
+  const handleDeletePeriod = async (p: FiscalPeriod) => {
+    const year = getYearFromCode(p.period_code);
+    const msg = p.period_type === 'year'
+      ? `${year}년도 전체를 삭제하시겠습니까?\n하위 반기/분기도 모두 삭제됩니다.`
+      : `${p.period_code}를 삭제하시겠습니까?`;
+    if (!confirm(msg + '\n\n삭제된 데이터는 복구할 수 없습니다.')) return;
     setLoading(true);
     try {
-      if (period.period_type === 'year') {
-        const quarters = periods.filter((p) => p.period_type === 'quarter' && getYearFromCode(p.period_code) === year);
-        for (const q of quarters) await deleteSinglePeriod(q.id, q.period_code);
-        const halves = periods.filter((p) => p.period_type === 'half' && getYearFromCode(p.period_code) === year);
-        for (const h of halves) await deleteSinglePeriod(h.id, h.period_code);
-        await deleteSinglePeriod(period.id, period.period_code);
-      } else if (period.period_type === 'half') {
-        const childQuarters = periods.filter((p) => p.period_type === 'quarter' && p.parent_period_id === period.id);
-        for (const q of childQuarters) await deleteSinglePeriod(q.id, q.period_code);
-        await deleteSinglePeriod(period.id, period.period_code);
-      } else {
-        await deleteSinglePeriod(period.id, period.period_code);
-      }
+      const { error } = await supabase.from('fiscal_periods').delete().eq('id', p.id);
+      if (error) throw error;
       alert('삭제되었습니다.');
       fetchPeriods();
-    } catch (err: any) {
-      alert(`삭제 실패: ${err.message}`);
-      fetchPeriods();
-    } finally {
-      setLoading(false);
-    }
+    } catch (err: any) { alert(`삭제 실패: ${err.message}`); }
+    finally { setLoading(false); }
   };
 
-  // ─── UI 헬퍼 ────────────────────────────────────────────
+  // ─── Hierarchy ─────────────────────────────────────────
 
-  const toggleYear = (year: number) => {
-    const newSet = new Set(expandedYears);
-    if (newSet.has(year)) newSet.delete(year); else newSet.add(year);
-    setExpandedYears(newSet);
+  const toggleYear = (y: number) => {
+    const s = new Set(expandedYears);
+    s.has(y) ? s.delete(y) : s.add(y);
+    setExpandedYears(s);
   };
 
-  const getHierarchy = () => {
-    const years = [...new Set(periods.map((p) => getYearFromCode(p.period_code)))].sort((a, b) => b - a);
-    return years.map((year) => ({
+  const hierarchy = (() => {
+    const years = [...new Set(periods.map(p => getYearFromCode(p.period_code)))].sort((a, b) => b - a);
+    return years.map(year => ({
       year,
-      // period_code가 '2027' 또는 '2027-Y' 둘 다 대응
-      yearPeriod: periods.find((p) => p.period_type === 'year' && getYearFromCode(p.period_code) === year),
-      halves: periods.filter((p) => p.period_type === 'half' && getYearFromCode(p.period_code) === year).sort((a, b) => a.period_code.localeCompare(b.period_code)),
-      quarters: periods.filter((p) => p.period_type === 'quarter' && getYearFromCode(p.period_code) === year).sort((a, b) => a.period_code.localeCompare(b.period_code)),
-    })).filter(({ yearPeriod, halves, quarters }) => yearPeriod || halves.length > 0 || quarters.length > 0);
-  };
+      yearPeriod: periods.find(p => p.period_type === 'year' && getYearFromCode(p.period_code) === year),
+      halves: periods.filter(p => p.period_type === 'half' && getYearFromCode(p.period_code) === year).sort((a, b) => a.period_code.localeCompare(b.period_code)),
+      quarters: periods.filter(p => p.period_type === 'quarter' && getYearFromCode(p.period_code) === year).sort((a, b) => a.period_code.localeCompare(b.period_code)),
+    }));
+  })();
 
-  const hierarchy = getHierarchy();
+  const goSetup = () => navigate('/ceo-okr-setup');
 
-  // ─── Render ──────────────────────────────────────────────
+  // ═════════════════════════════════════════════════════════
+  // Render
+  // ═════════════════════════════════════════════════════════
 
   return (
     <div className="space-y-6">
@@ -393,14 +247,26 @@ export default function UnifiedPeriodManager() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
-            <Calendar className="w-6 h-6" />
-            기간 & 수립 관리
+            <Calendar className="w-6 h-6" />기간 &amp; 수립 관리
           </h2>
-          <p className="text-sm text-slate-600 mt-1">기간 생성, 수립 일정 설정, 진행 현황 관리를 한 곳에서</p>
+          <p className="text-sm text-slate-600 mt-1">기간 생성/삭제, 수립 현황 모니터링, 마감 관리</p>
         </div>
-        <button onClick={() => setShowCreateYear(true)} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition flex items-center gap-2">
-          <Plus className="w-4 h-4" />
-          연도 생성
+        <div className="flex items-center gap-2">
+          <button onClick={() => setShowCreateYear(true)} className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition flex items-center gap-2">
+            <Plus className="w-4 h-4" />기간 생성
+          </button>
+        </div>
+      </div>
+
+      {/* 수립 안내 배너 */}
+      <div className="bg-gradient-to-r from-blue-50 to-violet-50 border border-blue-200 rounded-lg p-4 flex items-start gap-3">
+        <Rocket className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
+        <div className="flex-1">
+          <p className="text-sm font-medium text-blue-900">OKR 수립은 "전사 OKR 수립" 페이지에서 시작됩니다</p>
+          <p className="text-xs text-blue-700 mt-1">기간 선택 → 경영 컨텍스트 → 전사 OKR 생성 → 조직 초안 → 사이클 시작까지 한 곳에서 진행합니다. 이 페이지에서는 기간 생성, 수립 현황 모니터링, 마감 관리를 수행합니다.</p>
+        </div>
+        <button onClick={goSetup} className="px-3 py-1.5 text-sm text-blue-700 bg-white border border-blue-300 rounded-lg hover:bg-blue-50 flex items-center gap-1 flex-shrink-0">
+          이동 <ExternalLink className="w-3 h-3" />
         </button>
       </div>
 
@@ -411,123 +277,135 @@ export default function UnifiedPeriodManager() {
             { id: 'periods' as TabType, label: '기간 목록', icon: Calendar },
             { id: 'planning' as TabType, label: '수립 현황', icon: Edit3 },
             { id: 'closing' as TabType, label: '마감 관리', icon: Archive },
-          ]).map((tab) => {
+          ]).map(tab => {
             const Icon = tab.icon;
             return (
               <button key={tab.id} onClick={() => setActiveTab(tab.id)}
                 className={`pb-3 px-1 flex items-center gap-2 border-b-2 transition ${activeTab === tab.id ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-600 hover:text-slate-900'}`}>
-                <Icon className="w-4 h-4" />
-                {tab.label}
+                <Icon className="w-4 h-4" />{tab.label}
               </button>
             );
           })}
         </div>
       </div>
 
-      {/* Tab Content */}
-      {(authLoading || loading) ? (
-        <div className="text-center py-12 text-slate-500">
-          <RefreshCw className="w-8 h-8 animate-spin mx-auto mb-2" />
-          로딩 중...
-        </div>
+      {/* Content */}
+      {loading ? (
+        <div className="text-center py-12 text-slate-500"><RefreshCw className="w-8 h-8 animate-spin mx-auto mb-2" />로딩 중...</div>
       ) : (
         <>
+          {/* ═══ 기간 목록 ═══ */}
           {activeTab === 'periods' && (
             <div className="space-y-4">
+              {/* 현재 정책 표시 */}
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Calendar className="w-4 h-4 text-slate-500" />
+                  <span className="text-sm text-slate-700">OKR 수립 주기: <strong className="text-slate-900">{cycleUnit === 'year' ? '연도' : cycleUnit === 'half' ? '반기' : '분기'} 단위</strong></span>
+                  <span className="text-xs text-slate-400">— 해당 단위의 기간만 OKR 수립 대상입니다</span>
+                </div>
+              </div>
+
               {hierarchy.length === 0 ? (
                 <div className="text-center py-12 text-slate-500">
                   <Calendar className="w-12 h-12 mx-auto mb-4 opacity-50" />
                   <p>생성된 기간이 없습니다.</p>
-                  <p className="text-sm mt-2">상단의 "연도 생성" 버튼을 클릭하여 시작하세요.</p>
+                  <p className="text-sm mt-2">상단의 "기간 생성" 버튼을 클릭하여 시작하세요.</p>
                 </div>
               ) : (
-                hierarchy.map(({ year, yearPeriod, halves, quarters }) => (
-                  <div key={year} className="border border-slate-200 rounded-lg overflow-hidden">
-                    {/* 연도 헤더: yearPeriod 레코드가 없어도 표시 */}
-                    <div className="bg-slate-50 p-4 flex items-center justify-between border-b border-slate-200">
-                      <button onClick={() => toggleYear(year)} className="flex items-center gap-3 flex-1">
-                        {expandedYears.has(year) ? <ChevronDown className="w-5 h-5 text-slate-500" /> : <ChevronRight className="w-5 h-5 text-slate-500" />}
-                        <div className="flex items-center gap-3">
-                          <div className="text-xl font-bold text-slate-900">{yearPeriod?.period_name || `${year}년`}</div>
-                          {yearPeriod && (
-                            <span className={`px-3 py-1 rounded-full text-xs font-medium ${STATUS_CONFIG[yearPeriod.status]?.bgColor} ${STATUS_CONFIG[yearPeriod.status]?.color}`}>
-                              {STATUS_CONFIG[yearPeriod.status]?.label}
+                hierarchy.map(({ year, yearPeriod, halves, quarters }) => {
+                  // 정책에 맞는 기간만 선별
+                  const policyPeriods: FiscalPeriod[] =
+                    cycleUnit === 'year' ? (yearPeriod ? [yearPeriod] : []) :
+                    cycleUnit === 'half' ? halves :
+                    quarters;
+
+                  return (
+                    <div key={year} className="border border-slate-200 rounded-lg overflow-hidden">
+                      {/* 연도 헤더 */}
+                      <div className="bg-slate-50 p-4 flex items-center justify-between border-b border-slate-200">
+                        <button onClick={() => toggleYear(year)} className="flex items-center gap-3 flex-1">
+                          {expandedYears.has(year) ? <ChevronDown className="w-5 h-5 text-slate-500" /> : <ChevronRight className="w-5 h-5 text-slate-500" />}
+                          <div className="flex items-center gap-3">
+                            <div className="text-xl font-bold text-slate-900">{yearPeriod?.period_name || `${year}년`}</div>
+                            {yearPeriod && (
+                              <span className={`px-3 py-1 rounded-full text-xs font-medium ${STATUS_CFG[yearPeriod.status].bg} ${STATUS_CFG[yearPeriod.status].color}`}>{STATUS_CFG[yearPeriod.status].label}</span>
+                            )}
+                            <span className="text-xs text-slate-400">
+                              {cycleUnit === 'year' ? '연도' : cycleUnit === 'half' ? `반기 ${halves.length}개` : `분기 ${quarters.length}개`}
                             </span>
+                          </div>
+                        </button>
+                        <div className="flex items-center gap-2">
+                          {yearPeriod && <span className="text-sm text-slate-600">{formatDate(yearPeriod.starts_at)} ~ {formatDate(yearPeriod.ends_at)}</span>}
+                          {yearPeriod?.status === 'upcoming' && (
+                            <button onClick={() => handleDeletePeriod(yearPeriod)} className="p-2 text-red-600 hover:bg-red-50 rounded" title="삭제"><Trash2 className="w-4 h-4" /></button>
                           )}
                         </div>
-                      </button>
-                      <div className="flex items-center gap-2">
-                        {yearPeriod && (
-                          <span className="text-sm text-slate-600">{formatDate(yearPeriod.starts_at)} ~ {formatDate(yearPeriod.ends_at)}</span>
-                        )}
-                        <button onClick={() => {
-                          if (yearPeriod) { handleDeletePeriod(yearPeriod); }
-                          else {
-                            // yearPeriod 없으면 하위 전체 삭제
-                            if (!confirm(`${year}년도 전체를 삭제하시겠습니까?\n\n삭제된 데이터는 복구할 수 없습니다.`)) return;
-                            const allForYear = periods.filter(p => getYearFromCode(p.period_code) === year);
-                            (async () => {
-                              setLoading(true);
-                              try {
-                                const qs = allForYear.filter(p => p.period_type === 'quarter');
-                                for (const q of qs) await deleteSinglePeriod(q.id, q.period_code);
-                                const hs = allForYear.filter(p => p.period_type === 'half');
-                                for (const h of hs) await deleteSinglePeriod(h.id, h.period_code);
-                                alert('삭제되었습니다.');
-                                fetchPeriods();
-                              } catch (err: any) { alert(`삭제 실패: ${err.message}`); fetchPeriods(); }
-                              finally { setLoading(false); }
-                            })();
-                          }
-                        }} className="p-2 text-red-600 hover:bg-red-50 rounded" title="삭제">
-                          <Trash2 className="w-4 h-4" />
-                        </button>
                       </div>
+                      {expandedYears.has(year) && (
+                        <div className="p-4 space-y-3">
+                          {cycleUnit === 'year' && yearPeriod ? (
+                            // 연도 단위: 연도 카드 직접 표시
+                            <PeriodCard period={yearPeriod} onClosePlanning={handleClosePlanning} onFinalizePlanning={handleFinalizePlanning} onStartClosing={handleStartClosing} onFinalizeClosing={handleFinalizeClosing} onDelete={handleDeletePeriod} onGoSetup={goSetup} />
+                          ) : cycleUnit === 'half' ? (
+                            // 반기 단위: 반기 카드만 표시 (분기 숨김)
+                            halves.map(half => (
+                              <PeriodCard key={half.id} period={half} onClosePlanning={handleClosePlanning} onFinalizePlanning={handleFinalizePlanning} onStartClosing={handleStartClosing} onFinalizeClosing={handleFinalizeClosing} onDelete={handleDeletePeriod} onGoSetup={goSetup} />
+                            ))
+                          ) : (
+                            // 분기 단위: 반기 > 분기 계층 표시
+                            halves.map(half => {
+                              const hq = quarters.filter(q => q.parent_period_id === half.id);
+                              return (
+                                <div key={half.id} className="space-y-2">
+                                  <div className="text-sm font-medium text-slate-500 pl-2">{half.period_name}</div>
+                                  <div className="ml-4 space-y-2">
+                                    {hq.map(q => <PeriodCard key={q.id} period={q} onClosePlanning={handleClosePlanning} onFinalizePlanning={handleFinalizePlanning} onStartClosing={handleStartClosing} onFinalizeClosing={handleFinalizeClosing} onDelete={handleDeletePeriod} onGoSetup={goSetup} />)}
+                                  </div>
+                                </div>
+                              );
+                            })
+                          )}
+                          {policyPeriods.length === 0 && (
+                            <div className="text-center py-4 text-slate-400 text-sm">이 연도에 해당 단위의 기간이 없습니다.</div>
+                          )}
+                        </div>
+                      )}
                     </div>
-                    {expandedYears.has(year) && (
-                      <div className="p-4 space-y-3">
-                        {halves.map((half) => {
-                          const halfQuarters = quarters.filter((q) => q.parent_period_id === half.id);
-                          return (
-                            <div key={half.id} className="space-y-2">
-                              <PeriodCard period={half} onOpenPlanningSetup={handleOpenPlanningSetup} onStartPlanning={handleStartPlanning} onClosePlanning={handleClosePlanning} onFinalizePlanning={handleFinalizePlanning} onStartClosing={handleStartClosing} onFinalizeClosing={handleFinalizeClosing} onDelete={handleDeletePeriod} />
-                              <div className="ml-8 space-y-2">
-                                {halfQuarters.map((quarter) => (
-                                  <PeriodCard key={quarter.id} period={quarter} onOpenPlanningSetup={handleOpenPlanningSetup} onStartPlanning={handleStartPlanning} onClosePlanning={handleClosePlanning} onFinalizePlanning={handleFinalizePlanning} onStartClosing={handleStartClosing} onFinalizeClosing={handleFinalizeClosing} onDelete={handleDeletePeriod} />
-                                ))}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
           )}
 
+          {/* ═══ 수립 현황 ═══ */}
           {activeTab === 'planning' && (
             <div className="space-y-4">
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex items-start gap-3">
                 <Info className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
                 <div className="text-sm text-blue-900">
-                  <p className="font-medium mb-1">수립 진행 중인 기간</p>
-                  <p className="text-blue-700">각 기간의 수립 현황을 확인하고 관리할 수 있습니다.</p>
+                  <p className="font-medium mb-1">수립 현황 모니터링</p>
+                  <p className="text-blue-700">진행 중인 수립의 현황을 확인하고, 마감/확정 작업을 수행할 수 있습니다.</p>
                 </div>
               </div>
-              {periods.filter((p) => ['setup', 'in_progress', 'closing'].includes(p.planning_status)).map((period) => (
-                <PlanningStatusCard key={period.id} period={period} onClosePlanning={handleClosePlanning} onFinalizePlanning={handleFinalizePlanning} />
+              {periods.filter(p => ['setup', 'drafting', 'in_progress', 'closing'].includes(p.planning_status)).map(p => (
+                <PlanningStatusCard key={p.id} period={p} onClosePlanning={handleClosePlanning} onFinalizePlanning={handleFinalizePlanning} onGoSetup={goSetup} />
               ))}
-              {periods.filter((p) => ['setup', 'in_progress', 'closing'].includes(p.planning_status)).length === 0 && (
+              {periods.filter(p => ['setup', 'drafting', 'in_progress', 'closing'].includes(p.planning_status)).length === 0 && (
                 <div className="text-center py-12 text-slate-500">
                   <FileText className="w-12 h-12 mx-auto mb-4 opacity-50" />
                   <p>수립 진행 중인 기간이 없습니다.</p>
+                  <p className="text-sm mt-2 text-slate-400">"전사 OKR 수립" 페이지에서 수립을 시작할 수 있습니다.</p>
+                  <button onClick={goSetup} className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm flex items-center gap-2 mx-auto">
+                    <Rocket className="w-4 h-4" /> 전사 OKR 수립으로 이동
+                  </button>
                 </div>
               )}
             </div>
           )}
 
+          {/* ═══ 마감 관리 ═══ */}
           {activeTab === 'closing' && (
             <div className="space-y-4">
               <div className="bg-orange-50 border border-orange-200 rounded-lg p-4 flex items-start gap-3">
@@ -537,10 +415,10 @@ export default function UnifiedPeriodManager() {
                   <p className="text-orange-700">실행 중이거나 마감 중인 기간의 성과를 최종 마감할 수 있습니다.</p>
                 </div>
               </div>
-              {periods.filter((p) => ['active', 'closing'].includes(p.status)).map((period) => (
-                <ClosingStatusCard key={period.id} period={period} onStartClosing={handleStartClosing} onFinalizeClosing={handleFinalizeClosing} />
+              {periods.filter(p => ['active', 'closing'].includes(p.status)).map(p => (
+                <ClosingCard key={p.id} period={p} onStartClosing={handleStartClosing} onFinalizeClosing={handleFinalizeClosing} />
               ))}
-              {periods.filter((p) => ['active', 'closing'].includes(p.status)).length === 0 && (
+              {periods.filter(p => ['active', 'closing'].includes(p.status)).length === 0 && (
                 <div className="text-center py-12 text-slate-500">
                   <Archive className="w-12 h-12 mx-auto mb-4 opacity-50" />
                   <p>마감 대상 기간이 없습니다.</p>
@@ -556,239 +434,194 @@ export default function UnifiedPeriodManager() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg max-w-md w-full p-6 space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="text-lg font-bold text-slate-900">연도 생성</h3>
+              <h3 className="text-lg font-bold text-slate-900">기간 생성</h3>
               <button onClick={() => setShowCreateYear(false)} className="p-1 hover:bg-slate-100 rounded"><X className="w-5 h-5" /></button>
             </div>
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">연도</label>
-              <input type="number" value={newYear} onChange={(e) => setNewYear(parseInt(e.target.value))} className="w-full px-3 py-2 border border-slate-300 rounded-lg" min={2020} max={2050} />
+              <input type="number" value={newYear} onChange={e => setNewYear(parseInt(e.target.value))} className="w-full px-3 py-2 border border-slate-300 rounded-lg" min={2020} max={2050} />
               <p className="text-xs text-slate-500 mt-1">연도를 생성하면 자동으로 반기(H1, H2)와 분기(Q1~Q4)가 생성됩니다.</p>
             </div>
             <div className="flex gap-2 pt-2">
-              <button onClick={handleCreateYear} disabled={loading} className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
-                {loading ? '생성 중...' : '생성'}
-              </button>
+              <button onClick={handleCreateYear} disabled={loading} className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{loading ? '생성 중...' : '생성'}</button>
               <button onClick={() => setShowCreateYear(false)} className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50">취소</button>
             </div>
           </div>
         </div>
       )}
-
-      {/* Planning Setup Modal */}
-      {showPlanningSetup && selectedPeriod && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto">
-          <div className="bg-white rounded-lg max-w-2xl w-full p-6 space-y-4 my-8">
-            <div className="flex items-center justify-between">
-              <h3 className="text-lg font-bold text-slate-900">수립 설정 - {selectedPeriod.period_name}</h3>
-              <button onClick={() => setShowPlanningSetup(false)} className="p-1 hover:bg-slate-100 rounded"><X className="w-5 h-5" /></button>
-            </div>
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">수립 시작일 <span className="text-red-500">*</span></label>
-                  <input type="date" value={planningForm.planning_starts_at} onChange={(e) => setPlanningForm({ ...planningForm, planning_starts_at: e.target.value })} className="w-full px-3 py-2 border border-slate-300 rounded-lg" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">수립 마감일 <span className="text-red-500">*</span></label>
-                  <input type="date" value={planningForm.planning_deadline_at} onChange={(e) => setPlanningForm({ ...planningForm, planning_deadline_at: e.target.value })} className="w-full px-3 py-2 border border-slate-300 rounded-lg" />
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">유예 마감일 (선택)</label>
-                <input type="date" value={planningForm.planning_grace_deadline_at} onChange={(e) => setPlanningForm({ ...planningForm, planning_grace_deadline_at: e.target.value })} className="w-full px-3 py-2 border border-slate-300 rounded-lg" />
-                <p className="text-xs text-slate-500 mt-1">정규 마감일 이후 추가 제출을 허용할 유예 기간</p>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">CEO 메시지</label>
-                <textarea value={planningForm.planning_message} onChange={(e) => setPlanningForm({ ...planningForm, planning_message: e.target.value })} rows={4} placeholder="조직장들에게 전달할 메시지를 입력하세요..." className="w-full px-3 py-2 border border-slate-300 rounded-lg resize-none" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">자동 알림 (마감 D-)</label>
-                <div className="flex gap-2">
-                  {[14, 7, 5, 3, 1].map((day) => (
-                    <label key={day} className="flex items-center gap-2 cursor-pointer">
-                      <input type="checkbox" checked={planningForm.planning_auto_remind_days.includes(day)}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setPlanningForm({ ...planningForm, planning_auto_remind_days: [...planningForm.planning_auto_remind_days, day].sort((a, b) => b - a) });
-                          } else {
-                            setPlanningForm({ ...planningForm, planning_auto_remind_days: planningForm.planning_auto_remind_days.filter((d) => d !== day) });
-                          }
-                        }}
-                        className="w-4 h-4 text-blue-600 rounded" />
-                      <span className="text-sm text-slate-700">D-{day}</span>
-                    </label>
-                  ))}
-                </div>
-                <p className="text-xs text-slate-500 mt-1">선택한 D-day에 미제출 조직에 자동 알림 발송</p>
-              </div>
-            </div>
-            <div className="flex gap-2 pt-4 border-t">
-              <button onClick={handleSavePlanningSetup} disabled={loading} className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2">
-                <Save className="w-4 h-4" />
-                {loading ? '저장 중...' : '저장'}
-              </button>
-              <button onClick={() => setShowPlanningSetup(false)} className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50">취소</button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
 
-// ─── Sub Components ──────────────────────────────────────
+// ═════════════════════════════════════════════════════════
+// Sub Components
+// ═════════════════════════════════════════════════════════
 
 interface PeriodCardProps {
   period: FiscalPeriod;
-  onOpenPlanningSetup: (period: FiscalPeriod) => void;
-  onStartPlanning: (period: FiscalPeriod) => void;
-  onClosePlanning: (period: FiscalPeriod) => void;
-  onFinalizePlanning: (period: FiscalPeriod) => void;
-  onStartClosing: (period: FiscalPeriod) => void;
-  onFinalizeClosing: (period: FiscalPeriod) => void;
-  onDelete: (period: FiscalPeriod) => void;
+  onClosePlanning: (p: FiscalPeriod) => void;
+  onFinalizePlanning: (p: FiscalPeriod) => void;
+  onStartClosing: (p: FiscalPeriod) => void;
+  onFinalizeClosing: (p: FiscalPeriod) => void;
+  onDelete: (p: FiscalPeriod) => void;
+  onGoSetup: () => void;
 }
 
-function PeriodCard({ period, onOpenPlanningSetup, onStartPlanning, onClosePlanning, onFinalizePlanning, onStartClosing, onFinalizeClosing, onDelete }: PeriodCardProps) {
-  const daysLeft = daysUntil(period.planning_deadline_at);
+function PeriodCard({ period: p, onClosePlanning, onFinalizePlanning, onStartClosing, onFinalizeClosing, onDelete, onGoSetup }: PeriodCardProps) {
+  const dl = daysUntil(p.planning_deadline_at);
   return (
     <div className="border border-slate-200 rounded-lg p-4 hover:shadow-sm transition">
       <div className="flex items-start justify-between">
         <div className="flex-1">
           <div className="flex items-center gap-3 mb-2">
-            <h4 className="font-semibold text-slate-900">{period.period_name}</h4>
-            <span className={`px-2 py-1 rounded-full text-xs font-medium ${STATUS_CONFIG[period.status]?.bgColor} ${STATUS_CONFIG[period.status]?.color}`}>
-              {STATUS_CONFIG[period.status]?.label}
-            </span>
-            {period.planning_status !== 'not_started' && (
-              <span className={`px-2 py-1 rounded-full text-xs font-medium bg-slate-100 ${PLANNING_STATUS_CONFIG[period.planning_status]?.color}`}>
-                수립: {PLANNING_STATUS_CONFIG[period.planning_status]?.label}
-              </span>
+            <h4 className="font-semibold text-slate-900">{p.period_name}</h4>
+            <span className={`px-2 py-1 rounded-full text-xs font-medium ${STATUS_CFG[p.status].bg} ${STATUS_CFG[p.status].color}`}>{STATUS_CFG[p.status].label}</span>
+            {p.planning_status !== 'not_started' && (
+              <span className={`px-2 py-1 rounded-full text-xs font-medium bg-slate-100 ${PLAN_CFG[p.planning_status].color}`}>수립: {PLAN_CFG[p.planning_status].label}</span>
             )}
           </div>
           <div className="text-sm text-slate-600 space-y-1">
-            <div className="flex items-center gap-2">
-              <Calendar className="w-4 h-4" />
-              <span>{formatDate(period.starts_at)} ~ {formatDate(period.ends_at)}</span>
-            </div>
-            {period.planning_deadline_at && (
-              <div className="flex items-center gap-2">
-                <Timer className="w-4 h-4" />
-                <span>수립 마감: {formatDate(period.planning_deadline_at)}
-                  {daysLeft !== null && daysLeft >= 0 && <span className="ml-2 text-orange-600 font-medium">(D-{daysLeft})</span>}
-                </span>
-              </div>
+            <div className="flex items-center gap-2"><Calendar className="w-4 h-4" /><span>{formatDate(p.starts_at)} ~ {formatDate(p.ends_at)}</span></div>
+            {p.planning_deadline_at && (
+              <div className="flex items-center gap-2"><Timer className="w-4 h-4" /><span>수립 마감: {formatDate(p.planning_deadline_at)}{dl !== null && dl >= 0 && <span className="ml-2 text-orange-600 font-medium">(D-{dl})</span>}</span></div>
             )}
-            {period.company_okr_finalized && (
-              <div className="flex items-center gap-2 text-green-600">
-                <CheckCircle2 className="w-4 h-4" />
-                <span>전사 OKR 확정 ({formatDateTime(period.company_okr_finalized_at)})</span>
-              </div>
+            {p.company_okr_finalized && (
+              <div className="flex items-center gap-2 text-green-600"><CheckCircle2 className="w-4 h-4" /><span>전사 OKR 확정 ({formatDateTime(p.company_okr_finalized_at)})</span></div>
+            )}
+            {p.all_orgs_draft_generated && (
+              <div className="flex items-center gap-2 text-indigo-600"><CheckCircle2 className="w-4 h-4" /><span>전체 조직 초안 완료 ({formatDateTime(p.all_orgs_draft_generated_at)})</span></div>
             )}
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {period.planning_status === 'not_started' && (
-            <button onClick={() => onOpenPlanningSetup(period)} className="px-3 py-1.5 text-sm border border-blue-600 text-blue-600 rounded hover:bg-blue-50 flex items-center gap-1">
-              <Settings className="w-4 h-4" />수립 설정
-            </button>
+          {/* 수립 미시작/설정중/초안 → CEO 수립 플로우 안내 */}
+          {['not_started', 'setup', 'drafting'].includes(p.planning_status) && !['closed', 'archived'].includes(p.status) && (
+            <button onClick={onGoSetup} className="px-3 py-1.5 text-sm border border-blue-600 text-blue-600 rounded hover:bg-blue-50 flex items-center gap-1"><Rocket className="w-4 h-4" />OKR 수립</button>
           )}
-          {period.planning_status === 'setup' && (
-            <>
-              <button onClick={() => onOpenPlanningSetup(period)} className="px-3 py-1.5 text-sm border border-slate-300 text-slate-700 rounded hover:bg-slate-50 flex items-center gap-1">
-                <Edit3 className="w-4 h-4" />수정
-              </button>
-              <button onClick={() => onStartPlanning(period)} className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center gap-1">
-                <Play className="w-4 h-4" />수립 시작
-              </button>
-            </>
+          {p.planning_status === 'in_progress' && (
+            <button onClick={() => onClosePlanning(p)} className="px-3 py-1.5 text-sm bg-orange-600 text-white rounded hover:bg-orange-700 flex items-center gap-1"><Square className="w-4 h-4" />수립 마감</button>
           )}
-          {period.planning_status === 'in_progress' && (
-            <button onClick={() => onClosePlanning(period)} className="px-3 py-1.5 text-sm bg-orange-600 text-white rounded hover:bg-orange-700 flex items-center gap-1">
-              <Square className="w-4 h-4" />수립 마감
-            </button>
+          {p.planning_status === 'closing' && (
+            <button onClick={() => onFinalizePlanning(p)} className="px-3 py-1.5 text-sm bg-green-600 text-white rounded hover:bg-green-700 flex items-center gap-1"><CheckCircle2 className="w-4 h-4" />수립 확정</button>
           )}
-          {period.planning_status === 'closing' && (
-            <button onClick={() => onFinalizePlanning(period)} className="px-3 py-1.5 text-sm bg-green-600 text-white rounded hover:bg-green-700 flex items-center gap-1">
-              <CheckCircle2 className="w-4 h-4" />수립 확정
-            </button>
+          {p.status === 'active' && (
+            <button onClick={() => onStartClosing(p)} className="px-3 py-1.5 text-sm border border-orange-600 text-orange-600 rounded hover:bg-orange-50 flex items-center gap-1"><Archive className="w-4 h-4" />성과 마감</button>
           )}
-          {period.status === 'active' && (
-            <button onClick={() => onStartClosing(period)} className="px-3 py-1.5 text-sm border border-orange-600 text-orange-600 rounded hover:bg-orange-50 flex items-center gap-1">
-              <Archive className="w-4 h-4" />성과 마감
-            </button>
+          {p.status === 'closing' && (
+            <button onClick={() => onFinalizeClosing(p)} className="px-3 py-1.5 text-sm bg-gray-600 text-white rounded hover:bg-gray-700 flex items-center gap-1"><CheckCircle2 className="w-4 h-4" />마감 완료</button>
           )}
-          {period.status === 'closing' && (
-            <button onClick={() => onFinalizeClosing(period)} className="px-3 py-1.5 text-sm bg-gray-600 text-white rounded hover:bg-gray-700 flex items-center gap-1">
-              <CheckCircle2 className="w-4 h-4" />마감 완료
-            </button>
-          )}
-          {period.status === 'upcoming' && (
-            <button onClick={() => onDelete(period)} className="p-2 text-red-600 hover:bg-red-50 rounded" title="삭제">
-              <Trash2 className="w-4 h-4" />
-            </button>
+          {p.status === 'upcoming' && p.planning_status === 'not_started' && (
+            <button onClick={() => onDelete(p)} className="p-2 text-red-600 hover:bg-red-50 rounded" title="삭제"><Trash2 className="w-4 h-4" /></button>
           )}
         </div>
       </div>
-      {period.planning_message && (
+      {p.planning_message && (
         <div className="mt-3 pt-3 border-t border-slate-100">
-          <div className="flex items-start gap-2 text-sm">
-            <MessageSquare className="w-4 h-4 text-slate-400 flex-shrink-0 mt-0.5" />
-            <p className="text-slate-600 italic">{period.planning_message}</p>
-          </div>
+          <div className="flex items-start gap-2 text-sm"><MessageSquare className="w-4 h-4 text-slate-400 flex-shrink-0 mt-0.5" /><p className="text-slate-600 italic">{p.planning_message}</p></div>
         </div>
       )}
     </div>
   );
 }
 
-function PlanningStatusCard({ period, onClosePlanning, onFinalizePlanning }: { period: FiscalPeriod; onClosePlanning: (p: FiscalPeriod) => void; onFinalizePlanning: (p: FiscalPeriod) => void }) {
-  const daysLeft = daysUntil(period.planning_deadline_at);
+// ─── Planning Status Card ────────────────────────────────
+
+interface PlanningStatusCardProps {
+  period: FiscalPeriod;
+  onClosePlanning: (p: FiscalPeriod) => void;
+  onFinalizePlanning: (p: FiscalPeriod) => void;
+  onGoSetup: () => void;
+}
+
+function PlanningStatusCard({ period: p, onClosePlanning, onFinalizePlanning, onGoSetup }: PlanningStatusCardProps) {
+  const dl = daysUntil(p.planning_deadline_at);
+
+  const steps = [
+    { label: '전사 OKR', done: p.company_okr_finalized, icon: Target },
+    { label: '조직 초안', done: p.all_orgs_draft_generated, icon: Users },
+    { label: '수립 진행', done: ['in_progress', 'closing', 'completed'].includes(p.planning_status), icon: Play },
+  ];
+
   return (
     <div className="border border-blue-200 bg-blue-50 rounded-lg p-4">
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-3">
-          <h4 className="font-bold text-slate-900">{period.period_name}</h4>
-          <span className={`px-2 py-1 rounded-full text-xs font-medium bg-white ${PLANNING_STATUS_CONFIG[period.planning_status]?.color}`}>
-            {PLANNING_STATUS_CONFIG[period.planning_status]?.label}
-          </span>
+          <h4 className="font-bold text-slate-900">{p.period_name}</h4>
+          <span className={`px-2 py-1 rounded-full text-xs font-medium bg-white ${PLAN_CFG[p.planning_status].color}`}>{PLAN_CFG[p.planning_status].label}</span>
         </div>
-        {daysLeft !== null && daysLeft >= 0 && <div className="text-sm text-orange-600 font-semibold">마감까지 D-{daysLeft}</div>}
+        {dl !== null && dl >= 0 && <div className="text-sm text-orange-600 font-semibold">마감까지 D-{dl}</div>}
       </div>
+
+      {/* 진행 단계 인디케이터 */}
+      <div className="flex items-center gap-4 mb-3 py-2">
+        {steps.map((s, i) => {
+          const Icon = s.icon;
+          return (
+            <div key={s.label} className="flex items-center gap-2">
+              {i > 0 && <div className={`w-8 h-0.5 ${s.done ? 'bg-green-400' : 'bg-slate-300'}`} />}
+              <div className={`flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium ${s.done ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
+                {s.done ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Icon className="w-3.5 h-3.5" />}
+                {s.label}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
       <div className="grid grid-cols-2 gap-4 text-sm mb-3">
-        <div><div className="text-slate-600">수립 기간</div><div className="font-medium text-slate-900">{formatDate(period.planning_starts_at)} ~ {formatDate(period.planning_deadline_at)}</div></div>
-        <div><div className="text-slate-600">수립 시작</div><div className="font-medium text-slate-900">{formatDateTime(period.planning_started_at)}</div></div>
+        <div><div className="text-slate-600">수립 기간</div><div className="font-medium text-slate-900">{formatDate(p.planning_starts_at)} ~ {formatDate(p.planning_deadline_at)}</div></div>
+        <div><div className="text-slate-600">수립 시작</div><div className="font-medium text-slate-900">{formatDateTime(p.planning_started_at)}</div></div>
       </div>
+
       <div className="flex items-center gap-2 pt-3 border-t border-blue-200">
-        <button className="flex-1 px-3 py-2 bg-white border border-slate-300 text-slate-700 rounded hover:bg-slate-50 text-sm"><Users className="w-4 h-4 inline mr-1" />수립 현황 보기</button>
-        {period.planning_status === 'in_progress' && <button onClick={() => onClosePlanning(period)} className="px-4 py-2 bg-orange-600 text-white rounded hover:bg-orange-700 text-sm">수립 마감</button>}
-        {period.planning_status === 'closing' && <button onClick={() => onFinalizePlanning(period)} className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 text-sm">수립 확정</button>}
+        {['setup', 'drafting'].includes(p.planning_status) && (
+          <button onClick={onGoSetup} className="flex-1 px-3 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm flex items-center justify-center gap-1">
+            <Rocket className="w-4 h-4" /> 전사 OKR 수립 계속하기
+          </button>
+        )}
+        {p.planning_status === 'in_progress' && (
+          <>
+            <button className="flex-1 px-3 py-2 bg-white border border-slate-300 text-slate-700 rounded hover:bg-slate-50 text-sm"><Users className="w-4 h-4 inline mr-1" />수립 현황 보기</button>
+            <button onClick={() => onClosePlanning(p)} className="px-4 py-2 bg-orange-600 text-white rounded hover:bg-orange-700 text-sm">수립 마감</button>
+          </>
+        )}
+        {p.planning_status === 'closing' && (
+          <>
+            <button className="flex-1 px-3 py-2 bg-white border border-slate-300 text-slate-700 rounded hover:bg-slate-50 text-sm"><Users className="w-4 h-4 inline mr-1" />수립 현황 보기</button>
+            <button onClick={() => onFinalizePlanning(p)} className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 text-sm">수립 확정</button>
+          </>
+        )}
       </div>
     </div>
   );
 }
 
-function ClosingStatusCard({ period, onStartClosing, onFinalizeClosing }: { period: FiscalPeriod; onStartClosing: (p: FiscalPeriod) => void; onFinalizeClosing: (p: FiscalPeriod) => void }) {
+// ─── Closing Status Card ─────────────────────────────────
+
+interface ClosingCardProps {
+  period: FiscalPeriod;
+  onStartClosing: (p: FiscalPeriod) => void;
+  onFinalizeClosing: (p: FiscalPeriod) => void;
+}
+
+function ClosingCard({ period: p, onStartClosing, onFinalizeClosing }: ClosingCardProps) {
   return (
     <div className="border border-orange-200 bg-orange-50 rounded-lg p-4">
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-3">
-          <h4 className="font-bold text-slate-900">{period.period_name}</h4>
-          <span className={`px-2 py-1 rounded-full text-xs font-medium ${STATUS_CONFIG[period.status]?.bgColor} ${STATUS_CONFIG[period.status]?.color}`}>
-            {STATUS_CONFIG[period.status]?.label}
-          </span>
+          <h4 className="font-bold text-slate-900">{p.period_name}</h4>
+          <span className={`px-2 py-1 rounded-full text-xs font-medium ${STATUS_CFG[p.status].bg} ${STATUS_CFG[p.status].color}`}>{STATUS_CFG[p.status].label}</span>
         </div>
       </div>
       <div className="grid grid-cols-2 gap-4 text-sm mb-3">
-        <div><div className="text-slate-600">기간</div><div className="font-medium text-slate-900">{formatDate(period.starts_at)} ~ {formatDate(period.ends_at)}</div></div>
-        {period.closing_started_at && <div><div className="text-slate-600">마감 시작</div><div className="font-medium text-slate-900">{formatDateTime(period.closing_started_at)}</div></div>}
+        <div><div className="text-slate-600">기간</div><div className="font-medium text-slate-900">{formatDate(p.starts_at)} ~ {formatDate(p.ends_at)}</div></div>
+        {p.closing_started_at && <div><div className="text-slate-600">마감 시작</div><div className="font-medium text-slate-900">{formatDateTime(p.closing_started_at)}</div></div>}
       </div>
       <div className="flex items-center gap-2 pt-3 border-t border-orange-200">
         <button className="flex-1 px-3 py-2 bg-white border border-slate-300 text-slate-700 rounded hover:bg-slate-50 text-sm"><TrendingUp className="w-4 h-4 inline mr-1" />성과 현황 보기</button>
-        {period.status === 'active' && <button onClick={() => onStartClosing(period)} className="px-4 py-2 bg-orange-600 text-white rounded hover:bg-orange-700 text-sm">마감 시작</button>}
-        {period.status === 'closing' && <button onClick={() => onFinalizeClosing(period)} className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 text-sm">마감 완료</button>}
+        {p.status === 'active' && <button onClick={() => onStartClosing(p)} className="px-4 py-2 bg-orange-600 text-white rounded hover:bg-orange-700 text-sm">마감 시작</button>}
+        {p.status === 'closing' && <button onClick={() => onFinalizeClosing(p)} className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 text-sm">마감 완료</button>}
       </div>
     </div>
   );
-} 
+}
