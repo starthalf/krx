@@ -31,15 +31,9 @@ export default function WithOnboardingCheck({ children }: WithOnboardingCheckPro
         .from('profiles')
         .select('onboarding_completed, company_id')
         .eq('id', user.id)
-        .maybeSingle();
+        .single();
 
       if (error) throw error;
-      
-      // 프로필이 아직 없으면 (초대 수락 진행 중) 통과
-      if (!profile) {
-        setShouldRender(true);
-        return;
-      }
 
       // 온보딩이 이미 완료되었는지 확인
       if (profile.onboarding_completed) {

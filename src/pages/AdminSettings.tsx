@@ -1,9 +1,9 @@
 // src/pages/AdminSettings.tsx
 import { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import {
+import { 
   Shield, Users, Layers, Lock, Settings as SettingsIcon, ChevronRight, 
-  Building2, Mail, CalendarClock, ArrowLeft, X, Archive, Target
+  Building2, Mail, CalendarClock, ArrowLeft, X, Archive
 } from 'lucide-react';
 import UserRolesManager from '../components/admin/UserRolesManager';
 import OrgStructureSettings from '../components/admin/OrgStructureSettings';
@@ -11,18 +11,19 @@ import OrgStructureManager from '../components/admin/OrgStructureManager';
 import RolePermissionsManager from '../components/admin/RolePermissionsManager';
 import CompanyManagement from '../components/admin/CompanyManagement';
 import UserInvitation from '../components/admin/UserInvitation';
+// ✅ 통합된 기간 & 수립 관리 컴포넌트
 import UnifiedPeriodManager from '../components/admin/UnifiedPeriodManager';
-import OKRPolicySettings from '../components/admin/OKRPolicySettings';
+// [NEW] 성과 히스토리
 import PeriodHistoryViewer from '../components/admin/PeriodHistoryViewer';
 
 // ✅ 'cycles' 제거, 'periods'만 유지
-type TabType = 'companies' | 'invite' | 'users' | 'roles' | 'structure' | 'levels' | 'permissions' | 'okr-policy' | 'periods' | 'history';
+type TabType = 'companies' | 'invite' | 'users' | 'roles' | 'structure' | 'levels' | 'permissions' | 'periods' | 'history';
 
+// ✅ 'cycles' → 'periods' 리다이렉트 추가
 const TAB_ALIASES: Record<string, TabType> = {
-  'planning-cycles': 'periods',
-  'cycles': 'periods',
+  'planning-cycles': 'periods', // ✅ 변경
+  'cycles': 'periods',           // ✅ 변경
   'periods': 'periods',
-  'okr-policy': 'okr-policy',
   'history': 'history',
   'period-history': 'history',
   'users': 'users',
@@ -95,8 +96,7 @@ export default function AdminSettings() {
     { id: 'companies' as TabType, name: '회사 관리', icon: Building2, description: '등록된 회사 목록 및 관리 (Super Admin)', minLevel: 100 },
     { id: 'invite' as TabType, name: '사용자 초대', icon: Mail, description: '새로운 팀원 초대 및 초대 관리', minLevel: 90 },
     { id: 'users' as TabType, name: '사용자 관리', icon: Users, description: '사용자별 역할 및 권한 할당', minLevel: 90 },
-    { id: 'okr-policy' as TabType, name: 'OKR 정책', icon: Target, description: 'OKR 수립 주기 및 운영 정책 설정', minLevel: 90 },
-    { id: 'periods' as TabType, name: '기간 관리', icon: CalendarClock, description: '정책에 맞는 기간 생성 및 관리', minLevel: 90 },
+    { id: 'periods' as TabType, name: '기간 & 수립 관리', icon: CalendarClock, description: '기간 생성 및 OKR 수립 사이클 관리', minLevel: 90 },
     { id: 'history' as TabType, name: '성과 히스토리', icon: Archive, description: '마감된 기간의 성과 스냅샷 조회', minLevel: 90 },
     { id: 'structure' as TabType, name: '조직 편집', icon: Building2, description: '조직 추가/수정/삭제 및 AI 생성', minLevel: 90 },
     { id: 'levels' as TabType, name: '조직 계층', icon: Layers, description: '조직 계층 구조 템플릿 설정', minLevel: 90 },
@@ -186,8 +186,7 @@ export default function AdminSettings() {
                 {activeTab === 'structure' && '조직을 추가, 수정, 삭제하거나 AI로 자동 생성할 수 있습니다.'}
                 {activeTab === 'levels' && '회사의 조직 계층 구조(전사-본부-팀 등)를 정의합니다.'}
                 {activeTab === 'permissions' && '시스템의 모든 권한 목록을 확인할 수 있습니다.'}
-                {activeTab === 'periods' && '정책에서 설정한 주기에 맞는 기간을 생성하고 관리합니다. 기간 활성화는 전사 OKR 수립 페이지에서 진행됩니다.'}
-                {activeTab === 'okr-policy' && 'OKR 수립 주기(연도/반기/분기)를 설정합니다. 이 설정은 기간 생성과 수립 플로우에 반영됩니다.'}
+                {activeTab === 'periods' && '기간을 생성하고 OKR 수립 사이클을 관리합니다. 기간 활성화 → 수립 시작 → 진행 추적 → 마감 순서로 운영합니다.'}
                 {activeTab === 'history' && '마감된 기간의 성과 스냅샷을 조회합니다. 전사 요약, 조직별 달성률, 등급 분포 등을 확인할 수 있습니다.'}
                 {activeTab === 'companies' && '등록된 회사 목록을 관리하고 새 회사를 추가할 수 있습니다.'}
                 {activeTab === 'invite' && '이메일로 새로운 팀원을 초대하거나 팀 초대 링크를 생성할 수 있습니다.'}
@@ -205,9 +204,7 @@ export default function AdminSettings() {
               {activeTab === 'structure' && <StructureManagement />}
               {activeTab === 'levels' && <LevelSettings />}
               {activeTab === 'permissions' && <PermissionsList />}
-              {/* ✅ OKR 정책 */}
-              {activeTab === 'okr-policy' && <OKRPolicySettings />}
-              {/* ✅ 기간 관리 */}
+              {/* ✅ periods 탭에 통합 컴포넌트 사용 */}
               {activeTab === 'periods' && <UnifiedPeriodManager />}
               {activeTab === 'history' && <PeriodHistoryViewer />}
             </div>
