@@ -3,7 +3,6 @@ import { createContext, useContext, useEffect, useState, ReactNode } from 'react
 import { supabase } from '../lib/supabase';
 import type { User, Session } from '@supabase/supabase-js';
 
-// Profile 타입 (간소화)
 interface Profile {
   id: string;
   company_id: string | null;
@@ -32,7 +31,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // 프로필 조회 (에러 핸들링 개선)
+  // 프로필 조회 — .maybeSingle()로 0건이어도 에러 안 남
   const fetchProfile = async (userId: string): Promise<Profile | null> => {
     try {
       console.log('📡 프로필 조회 시도:', userId);
@@ -41,17 +40,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .from('profiles')
         .select('*')
         .eq('id', userId)
-        .single();
+        .maybeSingle();
 
       if (error) {
         console.error('❌ 프로필 조회 실패:', error);
-        
-        // 404 에러 (프로필이 없음) - 자동 생성 시도
-        if (error.code === 'PGRST116') {
-          console.log('🔧 프로필이 없음. 자동 생성 시도...');
-          return await createProfile(userId);
-        }
-        
+        return null;
+      }
+
+      if (!data) {
+        console.log('ℹ️ 프로필이 아직 없음 (초대 수락 진행 중일 수 있음)');
         return null;
       }
 
@@ -59,35 +56,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return data as Profile;
     } catch (error) {
       console.error('❌ 프로필 조회 예외:', error);
-      return null;
-    }
-  };
-
-  // 프로필 생성 (트리거가 작동하지 않을 경우 대비)
-  const createProfile = async (userId: string): Promise<Profile | null> => {
-    try {
-      console.log('🔧 프로필 생성 시도:', userId);
-      
-      const { data, error } = await supabase
-        .from('profiles')
-        .insert({
-          id: userId,
-          full_name: '사용자',
-          company_id: '00000000-0000-0000-0000-000000000001', // 기본 회사
-          role: 'member'
-        })
-        .select()
-        .single();
-
-      if (error) {
-        console.error('❌ 프로필 생성 실패:', error);
-        return null;
-      }
-
-      console.log('✅ 프로필 생성 성공:', data);
-      return data as Profile;
-    } catch (error) {
-      console.error('❌ 프로필 생성 예외:', error);
       return null;
     }
   };
@@ -104,7 +72,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let mounted = true;
 
-    // 현재 세션 가져오기
     const getInitialSession = async () => {
       try {
         console.log('🔐 초기 세션 확인 중...');
@@ -154,14 +121,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(newSession?.user ?? null);
 
         if (newSession?.user) {
-          // 약간의 딜레이 후 프로필 조회 (트리거가 프로필 생성할 시간 확보)
-          setTimeout(async () => {
+          // 프로필 조회 — 최대 3회 재시도 (트리거/AcceptInvite가 생성할 시간 확보)
+          let profileData: Profile | null = null;
+          for (let i = 0; i < 3; i++) {
+            await new Promise(r => setTimeout(r, 500 * (i + 1)));
             if (!mounted) return;
-            const profileData = await fetchProfile(newSession.user.id);
-            if (mounted) {
-              setProfile(profileData);
-            }
-          }, 500); // 500ms 대기
+            profileData = await fetchProfile(newSession.user.id);
+            if (profileData?.company_id) break;
+          }
+          if (mounted) {
+            setProfile(profileData);
+          }
         } else {
           setProfile(null);
         }
@@ -217,7 +187,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         options: {
           data: {
             full_name: fullName,
-            company_id: companyId || '00000000-0000-0000-0000-000000000001',
+            company_id: companyId,
             role: 'member',
           },
         },
@@ -264,7 +234,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 }
 
-// 커스텀 훅
 export function useAuth() {
   const context = useContext(AuthContext);
   if (context === undefined) {
