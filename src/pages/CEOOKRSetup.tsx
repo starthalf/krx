@@ -1750,7 +1750,7 @@ export default function CEOOKRSetup() {
                             style={{ width: `${pct}%` }}
                           />
                         </div>
-                        {isGeneratingAllDrafts && <p className="text-xs text-slate-400 mt-1">조직당 약 20~40초 소요됩니다</p>}
+                        {isGeneratingAllDrafts && <p className="text-xs text-slate-400 mt-1">내외부 환경을 분석하고 방대한 OKR DB 참조하여 조직별 최적 목표를 생성하며, 10분 이상 소요될 수 있습니다. 기다려주세요 </p>}
                       </div>
                     );
                   })()}
