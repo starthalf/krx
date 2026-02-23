@@ -1,16 +1,19 @@
 // src/components/PeriodStatusWidget.tsx
 // 대시보드에 표시되는 현재 기간 상태 및 요약 위젯
-// ✅ 정책(okr_cycle_unit) 기반 기간 조회, planning 상태도 표시
 
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Calendar, Clock, CheckCircle2, AlertTriangle, TrendingUp,
   ChevronRight, BarChart3, Target, Lock, Play, Archive,
-  Loader2, ArrowUpRight, ArrowDownRight, Edit3
+  Loader2, ArrowUpRight, ArrowDownRight
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
-import { supabase } from '../lib/supabase';
+import {
+  fetchFiscalPeriods,
+  fetchActivePeriod,
+  fetchCompanyPeriodSummary,
+} from '../lib/period-api';
 import {
   FiscalPeriod,
   CompanyPeriodSummary,
@@ -62,7 +65,6 @@ function StatusBadge({ status }: { status: string }) {
   };
   
   const Icon = status === 'active' ? Play :
-               status === 'planning' ? Edit3 :
                status === 'closing' ? Lock :
                status === 'closed' ? CheckCircle2 :
                status === 'archived' ? Archive :
@@ -89,7 +91,7 @@ export default function PeriodStatusWidget({ variant = 'full' }: PeriodStatusWid
   const companyId = profile?.company_id;
   
   const [loading, setLoading] = useState(true);
-  const [currentPeriod, setCurrentPeriod] = useState<FiscalPeriod | null>(null);
+  const [activePeriod, setActivePeriod] = useState<FiscalPeriod | null>(null);
   const [previousPeriodSummary, setPreviousPeriodSummary] = useState<CompanyPeriodSummary | null>(null);
   const [recentPeriods, setRecentPeriods] = useState<FiscalPeriod[]>([]);
   
@@ -107,75 +109,25 @@ export default function PeriodStatusWidget({ variant = 'full' }: PeriodStatusWid
     const loadData = async () => {
       setLoading(true);
       try {
-        // 1. 회사 정책에서 수립 주기 조회
-        const { data: companyData } = await supabase
-          .from('companies')
-          .select('okr_cycle_unit')
-          .eq('id', companyId)
-          .single();
-        const cycleUnit = companyData?.okr_cycle_unit || 'year';
-
-        // 2. 정책 단위 기간 조회 (active > planning > upcoming 순)
-        const { data: periods } = await supabase
-          .from('fiscal_periods')
-          .select('*')
-          .eq('company_id', companyId)
-          .eq('period_type', cycleUnit)
-          .in('status', ['active', 'planning', 'upcoming', 'closing', 'closed'])
-          .order('starts_at', { ascending: false });
-
-        if (periods && periods.length > 0) {
-          // camelCase 변환
-          const mapped: FiscalPeriod[] = periods.map(p => ({
-            id: p.id,
-            companyId: p.company_id,
-            periodCode: p.period_code,
-            periodName: p.period_name,
-            periodType: p.period_type,
-            startsAt: p.starts_at,
-            endsAt: p.ends_at,
-            status: p.status,
-            planningStatus: p.planning_status,
-            parentPeriodId: p.parent_period_id,
-            companyOkrFinalized: p.company_okr_finalized,
-            allOrgsDraftGenerated: p.all_orgs_draft_generated,
-            planningMessage: p.planning_message,
-            createdAt: p.created_at,
-            updatedAt: p.updated_at,
-          }));
-
-          // 현재 기간 선택: active > planning > 현재 날짜 포함 > 가장 가까운 미래
-          const now = new Date();
-          const active = mapped.find(p => p.status === 'active');
-          const planning = mapped.find(p => p.status === 'planning');
-          const current = mapped.find(p => new Date(p.startsAt) <= now && now <= new Date(p.endsAt));
-          const future = mapped
-            .filter(p => new Date(p.startsAt) > now)
-            .sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime())[0];
-
-          setCurrentPeriod(active || planning || current || future || mapped[0]);
-          
-          // 최근 기간들
-          setRecentPeriods(mapped.slice(0, 4));
-          
-          // 직전 마감 기간 요약
-          const lastClosed = mapped.find(p => p.status === 'closed' || p.status === 'archived');
-          if (lastClosed) {
-            try {
-              const { data: summary } = await supabase
-                .from('company_period_summary')
-                .select('*')
-                .eq('fiscal_period_id', lastClosed.id)
-                .eq('company_id', companyId)
-                .maybeSingle();
-              if (summary) {
-                setPreviousPeriodSummary({
-                  companyAvgAchievement: summary.company_avg_achievement || 0,
-                  totalObjectives: summary.total_objectives || 0,
-                  totalOrgs: summary.total_orgs || 0,
-                } as CompanyPeriodSummary);
-              }
-            } catch (e) { /* 요약 없을 수 있음 */ }
+        // 활성 기간 조회
+        const active = await fetchActivePeriod(companyId, 'half');
+        setActivePeriod(active);
+        
+        // 전체 기간 목록 (최근 것들)
+        const periods = await fetchFiscalPeriods(companyId);
+        const recentHalves = periods
+          .filter(p => p.periodType === 'half')
+          .slice(0, 4);
+        setRecentPeriods(recentHalves);
+        
+        // 직전 마감 기간의 요약 조회
+        const lastClosed = periods.find(p => p.status === 'closed' || p.status === 'archived');
+        if (lastClosed) {
+          try {
+            const summary = await fetchCompanyPeriodSummary(lastClosed.id, companyId);
+            setPreviousPeriodSummary(summary);
+          } catch (e) {
+            // 요약 없을 수 있음
           }
         }
       } catch (err) {
@@ -207,16 +159,16 @@ export default function PeriodStatusWidget({ variant = 'full' }: PeriodStatusWid
             <Calendar className="w-5 h-5 text-blue-600" />
             <span className="font-medium text-slate-900">현재 기간</span>
           </div>
-          {currentPeriod && <StatusBadge status={currentPeriod.status} />}
+          {activePeriod && <StatusBadge status={activePeriod.status} />}
         </div>
         
-        {currentPeriod ? (
+        {activePeriod ? (
           <>
-            <h3 className="font-semibold text-slate-900 mb-2">{currentPeriod.periodName}</h3>
-            <PeriodProgressBar period={currentPeriod} />
+            <h3 className="font-semibold text-slate-900 mb-2">{activePeriod.periodName}</h3>
+            <PeriodProgressBar period={activePeriod} />
           </>
         ) : (
-          <p className="text-slate-500 text-sm">설정된 기간이 없습니다</p>
+          <p className="text-slate-500 text-sm">활성 기간이 없습니다</p>
         )}
         
         <button
@@ -245,50 +197,39 @@ export default function PeriodStatusWidget({ variant = 'full' }: PeriodStatusWid
         </button>
       </div>
 
-      {/* 현재 기간 */}
-      {currentPeriod ? (
+      {/* 활성 기간 */}
+      {activePeriod ? (
         <div className="mb-6">
           <div className="flex items-center justify-between mb-2">
-            <h3 className="font-semibold text-lg text-slate-900">{currentPeriod.periodName}</h3>
-            <StatusBadge status={currentPeriod.status} />
+            <h3 className="font-semibold text-lg text-slate-900">{activePeriod.periodName}</h3>
+            <StatusBadge status={activePeriod.status} />
           </div>
-          <PeriodProgressBar period={currentPeriod} />
+          <PeriodProgressBar period={activePeriod} />
           
           {/* 빠른 액션 */}
           <div className="flex gap-2 mt-4">
-            {currentPeriod.status === 'active' && (
+            {activePeriod.status === 'active' && (
               <button
-                onClick={() => navigate(`/period-close/${currentPeriod.id}`)}
+                onClick={() => navigate(`/period-close/${activePeriod.id}`)}
                 className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-amber-50 text-amber-700 rounded-lg hover:bg-amber-100 transition-colors text-sm"
               >
                 <Lock className="w-4 h-4" />
                 마감 시작
               </button>
             )}
-            {currentPeriod.status === 'planning' && (
-              <button
-                onClick={() => navigate('/ceo-okr-setup')}
-                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition-colors text-sm"
-              >
-                <Target className="w-4 h-4" />
-                OKR 수립 계속하기
-              </button>
-            )}
-            {currentPeriod.status === 'upcoming' && (
-              <button
-                onClick={() => navigate('/ceo-okr-setup')}
-                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition-colors text-sm"
-              >
-                <Target className="w-4 h-4" />
-                OKR 수립 시작
-              </button>
-            )}
+            <button
+              onClick={() => navigate('/wizard')}
+              className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition-colors text-sm"
+            >
+              <Target className="w-4 h-4" />
+              OKR 수립
+            </button>
           </div>
         </div>
       ) : (
         <div className="mb-6 p-4 bg-slate-50 rounded-lg text-center">
           <AlertTriangle className="w-8 h-8 text-amber-400 mx-auto mb-2" />
-          <p className="text-slate-600">설정된 기간이 없습니다</p>
+          <p className="text-slate-600">활성 기간이 없습니다</p>
           <button
             onClick={() => navigate('/admin?tab=periods')}
             className="mt-2 text-sm text-blue-600 hover:text-blue-700"
