@@ -1787,7 +1787,7 @@ export default function CEOOKRSetup() {
                             style={{ width: `${pct}%` }}
                           />
                         </div>
-                        {isGeneratingAllDrafts && <p className="text-xs text-slate-400 mt-1">조직당 약 20~40초 소요됩니다</p>}
+                        {isGeneratingAllDrafts && <p className="text-xs text-slate-400 mt-1">방대한 OKR DB 참조와 내외부 환경 분석을 반영하기 때문에 10분 이상 소요될 수 있으니 기다려주세요</p>}
                       </div>
                     );
                   })()}
