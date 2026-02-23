@@ -1408,7 +1408,7 @@ export default function CEOOKRSetup() {
               <div className="bg-white rounded-xl border border-slate-200 p-12 text-center">
                 <Bot className="w-16 h-16 text-blue-600 mx-auto mb-4 animate-bounce" />
                 <h3 className="text-xl font-bold text-slate-900 mb-2">AI가 전사 OKR을 생성하고 있습니다...</h3>
-                <p className="text-slate-600 mb-6">{company?.industry} 업종 KPI DB를 참조하여 최적의 목표를 설계 중</p>
+                <p className="text-slate-600 mb-6">{company?.industry} 업종 OKR DB를 참조하여 최적의 목표를 설계 중</p>
                 <div className="max-w-xs mx-auto mb-3">
                   <div className="h-2 bg-slate-200 rounded-full overflow-hidden">
                     <div className="h-full bg-gradient-to-r from-blue-500 via-violet-500 to-blue-500 rounded-full animate-[shimmer_2s_infinite]"
