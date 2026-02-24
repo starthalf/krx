@@ -141,18 +141,34 @@ useEffect(() => {
     setPeriodLoading(true);
     try {
       // 분기 기준 활성 기간 가져오기
-      const activePeriod = await fetchActivePeriod(targetOrg.companyId, 'quarter');
-      if (activePeriod) {
-        setSelectedPeriodId(activePeriod.id);
-        setSelectedPeriodCode(activePeriod.periodCode);
-      } else {
-        // 활성 분기가 없으면 반기 확인
-        const activeHalf = await fetchActivePeriod(targetOrg.companyId, 'half');
-        if (activeHalf) {
-          setSelectedPeriodId(activeHalf.id);
-          setSelectedPeriodCode(activeHalf.periodCode);
-        }
-      }
+     // quarter → half → year 순서로 활성 기간 찾기
+const periodTypes = ['quarter', 'half', 'year'] as const;
+let found = false;
+
+for (const pType of periodTypes) {
+  const activePeriod = await fetchActivePeriod(targetOrg.companyId, pType);
+  if (activePeriod) {
+    setSelectedPeriodId(activePeriod.id);
+    setSelectedPeriodCode(activePeriod.periodCode);
+    found = true;
+    break;
+  }
+}
+
+// 그래도 못 찾으면 okr_planning_cycles에서 직접 가져오기
+if (!found) {
+  const { data: cycles } = await supabase
+    .from('okr_planning_cycles')
+    .select('period')
+    .eq('company_id', targetOrg.companyId)
+    .eq('status', 'in_progress')
+    .order('created_at', { ascending: false })
+    .limit(1);
+  
+  if (cycles && cycles.length > 0) {
+    setSelectedPeriodCode(cycles[0].period);
+  }
+}
     } catch (err) {
       console.error('활성 기간 로드 실패:', err);
     } finally {
