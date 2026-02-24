@@ -41,17 +41,18 @@ export async function fetchFiscalPeriod(periodId: string): Promise<FiscalPeriod 
     .from('fiscal_periods')
     .select('*')
     .eq('id', periodId)
-    .single();
+    .maybeSingle();  // ★ .single() → .maybeSingle()
 
-  if (error) {
-    if (error.code === 'PGRST116') return null;
-    throw error;
-  }
+  if (error) throw error;
+  if (!data) return null;
   return mapFiscalPeriod(data);
 }
 
 /**
  * 활성 기간 조회 (현재 active 상태인 기간)
+ * ★ FIX: .limit(1).single() → .limit(1) + 배열 첫 번째
+ *   - 결과 0개일 때 406 에러 방지
+ *   - 결과 여러 개일 때도 안전하게 첫 번째만 반환
  */
 export async function fetchActivePeriod(
   companyId: string,
@@ -67,13 +68,11 @@ export async function fetchActivePeriod(
     query = query.eq('period_type', periodType);
   }
 
-  const { data, error } = await query.order('starts_at', { ascending: false }).limit(1).single();
+  const { data, error } = await query.order('starts_at', { ascending: false }).limit(1);
 
-  if (error) {
-    if (error.code === 'PGRST116') return null;
-    throw error;
-  }
-  return mapFiscalPeriod(data);
+  if (error) throw error;
+  if (!data || data.length === 0) return null;
+  return mapFiscalPeriod(data[0]);
 }
 
 /**
@@ -89,12 +88,10 @@ export async function fetchPeriodHierarchy(
     .eq('company_id', companyId)
     .eq('period_type', 'year')
     .eq('period_code', year.toString())
-    .single();
+    .maybeSingle();  // ★ .single() → .maybeSingle()
 
-  if (error) {
-    if (error.code === 'PGRST116') return null;
-    throw error;
-  }
+  if (error) throw error;
+  if (!data) return null;
 
   const yearPeriod = mapFiscalPeriod(data);
 
@@ -332,12 +329,10 @@ export async function fetchOrgSnapshot(
     .select('*')
     .eq('fiscal_period_id', periodId)
     .eq('org_id', orgId)
-    .single();
+    .maybeSingle();  // ★ .single() → .maybeSingle()
 
-  if (error) {
-    if (error.code === 'PGRST116') return null;
-    throw error;
-  }
+  if (error) throw error;
+  if (!data) return null;
   return mapPeriodSnapshot(data);
 }
 
@@ -353,12 +348,10 @@ export async function fetchCompanyPeriodSummary(
     .select('*')
     .eq('fiscal_period_id', periodId)
     .eq('company_id', companyId)
-    .single();
+    .maybeSingle();  // ★ .single() → .maybeSingle()
 
-  if (error) {
-    if (error.code === 'PGRST116') return null;
-    throw error;
-  }
+  if (error) throw error;
+  if (!data) return null;
 
   return {
     id: data.id,
@@ -534,6 +527,7 @@ export async function fetchPeriodCloseLogs(periodId: string) {
 
 /**
  * period_code로 기간 조회
+ * ★ FIX: .single() → .maybeSingle()
  */
 export async function fetchPeriodByCode(
   companyId: string,
@@ -544,12 +538,10 @@ export async function fetchPeriodByCode(
     .select('*')
     .eq('company_id', companyId)
     .eq('period_code', periodCode)
-    .single();
+    .maybeSingle();  // ★ .single() → .maybeSingle()
 
-  if (error) {
-    if (error.code === 'PGRST116') return null;
-    throw error;
-  }
+  if (error) throw error;
+  if (!data) return null;
   return mapFiscalPeriod(data);
 }
 
