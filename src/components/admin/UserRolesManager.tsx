@@ -13,9 +13,14 @@ import {
   Role,
   UserRole,
 } from '../../lib/permissions';
-import { Shield, X, Plus, AlertCircle, Check, Eye, Settings, Users, Target, BarChart3, Crown } from 'lucide-react';
+import { supabase } from '../../lib/supabase';
+import {
+  Shield, X, Plus, AlertCircle, Check, Eye, Settings, Users,
+  Target, BarChart3, Crown, Search, Building2,
+  Pencil, Trash2, UserPlus,
+} from 'lucide-react';
 
-// ─── 역할 아이콘 맵 ─────────────────────────
+// ─── 역할 아이콘 ─────────────────────────
 function getRoleIcon(level: number) {
   if (level >= 100) return Settings;
   if (level >= 90) return Crown;
@@ -25,243 +30,372 @@ function getRoleIcon(level: number) {
   return Eye;
 }
 
+// ─── 역할 배지 색상 ─────────────────────────
+function getRoleBadge(level: number) {
+  if (level >= 100) return { bg: 'bg-purple-100', text: 'text-purple-700' };
+  if (level >= 90) return { bg: 'bg-red-100', text: 'text-red-700' };
+  if (level >= 80) return { bg: 'bg-orange-100', text: 'text-orange-700' };
+  if (level >= 70) return { bg: 'bg-blue-100', text: 'text-blue-700' };
+  if (level >= 30) return { bg: 'bg-green-100', text: 'text-green-700' };
+  return { bg: 'bg-slate-100', text: 'text-slate-600' };
+}
+
+// ─── 사용자 + 역할 통합 타입 ─────────────────
+interface UserWithRoles {
+  id: string;
+  full_name: string;
+  company_name?: string;
+  roles: Array<{
+    userRoleId: string;
+    roleId: string;
+    roleName: string;
+    roleDisplayName: string;
+    roleLevel: number;
+    orgId?: string;
+    orgName?: string;
+  }>;
+  maxLevel: number;
+}
+
 export default function UserRolesManager() {
   const { organizations } = useStore();
-  const [users, setUsers] = useState<any[]>([]);
-  const [roles, setRoles] = useState<Role[]>([]);
-  const [selectedUser, setSelectedUser] = useState<any | null>(null);
-  const [userRoles, setUserRoles] = useState<UserRole[]>([]);
-  const [showAssignModal, setShowAssignModal] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [usersWithRoles, setUsersWithRoles] = useState<UserWithRoles[]>([]);
+  const [allRoles, setAllRoles] = useState<Role[]>([]);
   const [myRoleLevel, setMyRoleLevel] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
 
-  useEffect(() => {
-    const init = async () => {
-      const level = await getMyRoleLevel();
-      setMyRoleLevel(level);
-    };
-    init();
-  }, []);
+  // 모달
+  const [showAssignModal, setShowAssignModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [targetUserId, setTargetUserId] = useState<string | null>(null);
+  const [editingUserRole, setEditingUserRole] = useState<UserWithRoles['roles'][0] | null>(null);
 
-  useEffect(() => {
-    const loadUsers = async () => {
-      try {
-        const { supabase } = await import('../../lib/supabase');
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return;
+  useEffect(() => { loadAll(); }, []);
 
-        const { data: currentProfile } = await supabase
-          .from('profiles')
-          .select('company_id')
-          .eq('id', user.id)
-          .single();
-        if (!currentProfile) return;
-
-        const level = await getMyRoleLevel();
-
-        let query = supabase
-          .from('profiles')
-          .select('id, full_name, company_id, companies ( name )')
-          .order('full_name');
-
-        if (level < ROLE_LEVELS.SUPER_ADMIN && currentProfile.company_id) {
-          query = query.eq('company_id', currentProfile.company_id);
-        }
-
-        const { data, error } = await query;
-        if (error) throw error;
-        setUsers(data || []);
-      } catch (error) {
-        console.error('Failed to load users:', error);
-      }
-    };
-    loadUsers();
-  }, []);
-
-  useEffect(() => {
-    const loadRoles = async () => {
-      try {
-        const rolesList = await getAllRoles();
-        setRoles(rolesList);
-      } catch (error) {
-        console.error('Failed to load roles:', error);
-      }
-    };
-    loadRoles();
-  }, []);
-
-  useEffect(() => {
-    const loadUserRoles = async () => {
-      if (!selectedUser) return;
-      try {
-        setLoading(true);
-        const roles = await getUserRoles(selectedUser.id);
-        setUserRoles(roles);
-      } catch (error) {
-        console.error('Failed to load user roles:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-    loadUserRoles();
-  }, [selectedUser]);
-
-  const handleAssignRole = async (roleId: string, orgId?: string) => {
-    if (!selectedUser) return;
+  const loadAll = async () => {
     try {
       setLoading(true);
-      await assignRole(selectedUser.id, roleId, orgId);
-      const updatedRoles = await getUserRoles(selectedUser.id);
-      setUserRoles(updatedRoles);
-      setShowAssignModal(false);
-      alert('✅ 역할이 할당되었습니다');
+      const level = await getMyRoleLevel();
+      setMyRoleLevel(level);
+      const rolesList = await getAllRoles();
+      setAllRoles(rolesList);
+      await loadUsersWithRoles(level);
     } catch (error) {
-      console.error('Failed to assign role:', error);
-      alert('역할 할당에 실패했습니다: ' + (error as Error).message);
+      console.error('Failed to load:', error);
     } finally {
       setLoading(false);
     }
+  };
+
+  const loadUsersWithRoles = async (level?: number) => {
+    const myLevel = level ?? myRoleLevel;
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const { data: currentProfile } = await supabase
+      .from('profiles')
+      .select('company_id')
+      .eq('id', user.id)
+      .single();
+    if (!currentProfile) return;
+
+    let query = supabase
+      .from('profiles')
+      .select(`
+        id, full_name,
+        companies ( name ),
+        user_roles (
+          id, role_id, org_id,
+          roles ( name, display_name, level ),
+          organizations ( id, name )
+        )
+      `)
+      .order('full_name');
+
+    if (myLevel < ROLE_LEVELS.SUPER_ADMIN && currentProfile.company_id) {
+      query = query.eq('company_id', currentProfile.company_id);
+    }
+
+    const { data, error } = await query;
+    if (error) { console.error('Failed to load users:', error); return; }
+
+    const mapped: UserWithRoles[] = (data || []).map((u: any) => {
+      const roles = (u.user_roles || []).map((ur: any) => ({
+        userRoleId: ur.id,
+        roleId: ur.role_id,
+        roleName: ur.roles?.name || '',
+        roleDisplayName: ur.roles?.display_name || '알 수 없음',
+        roleLevel: ur.roles?.level || 0,
+        orgId: ur.org_id || undefined,
+        orgName: ur.organizations?.name || undefined,
+      }));
+      return {
+        id: u.id,
+        full_name: u.full_name || '이름 미설정',
+        company_name: u.companies?.name || '',
+        roles,
+        maxLevel: roles.length > 0 ? Math.max(...roles.map((r: any) => r.roleLevel)) : 0,
+      };
+    });
+
+    mapped.sort((a, b) => b.maxLevel - a.maxLevel);
+    setUsersWithRoles(mapped);
+  };
+
+  const filteredUsers = usersWithRoles.filter(u =>
+    u.full_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    u.roles.some(r => r.roleDisplayName.includes(searchQuery)) ||
+    u.roles.some(r => r.orgName?.includes(searchQuery))
+  );
+
+  // ─── 핸들러 ─────────────────
+  const handleAssignRole = async (roleId: string, orgId?: string) => {
+    if (!targetUserId) return;
+    try {
+      await assignRole(targetUserId, roleId, orgId);
+      await loadUsersWithRoles();
+      setShowAssignModal(false);
+      setTargetUserId(null);
+    } catch (error) { alert('역할 할당 실패: ' + (error as Error).message); }
   };
 
   const handleRevokeRole = async (userRoleId: string) => {
     if (!confirm('이 역할을 해제하시겠습니까?')) return;
     try {
-      setLoading(true);
       await revokeRole(userRoleId);
-      if (selectedUser) {
-        const updatedRoles = await getUserRoles(selectedUser.id);
-        setUserRoles(updatedRoles);
-      }
-      alert('✅ 역할이 해제되었습니다');
-    } catch (error) {
-      console.error('Failed to revoke role:', error);
-      alert('역할 해제에 실패했습니다: ' + (error as Error).message);
-    } finally {
-      setLoading(false);
-    }
+      await loadUsersWithRoles();
+    } catch (error) { alert('역할 해제 실패: ' + (error as Error).message); }
   };
 
+  const handleEditRole = async (userRoleId: string, newRoleId: string, newOrgId?: string) => {
+    try {
+      const userId = usersWithRoles.find(u => u.roles.some(r => r.userRoleId === userRoleId))?.id;
+      await revokeRole(userRoleId);
+      if (userId) await assignRole(userId, newRoleId, newOrgId);
+      await loadUsersWithRoles();
+      setShowEditModal(false);
+      setEditingUserRole(null);
+    } catch (error) { alert('역할 변경 실패: ' + (error as Error).message); }
+  };
+
+  const handleChangeOrg = async (userRoleId: string, userId: string, roleId: string, newOrgId: string) => {
+    try {
+      await revokeRole(userRoleId);
+      await assignRole(userId, roleId, newOrgId || undefined);
+      await loadUsersWithRoles();
+    } catch (error) { alert('조직 변경 실패: ' + (error as Error).message); }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+      </div>
+    );
+  }
+
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      {/* 왼쪽: 사용자 목록 */}
-      <div>
-        <div className="mb-4">
-          <h3 className="text-lg font-semibold text-slate-900">사용자 목록</h3>
-          <p className="text-sm text-slate-600">역할을 관리할 사용자를 선택하세요</p>
-        </div>
-        <div className="space-y-2 max-h-[60vh] overflow-y-auto">
-          {users.map((user) => (
-            <button
-              key={user.id}
-              onClick={() => setSelectedUser(user)}
-              className={`w-full flex items-center gap-3 p-3 rounded-lg border transition-all text-left ${
-                selectedUser?.id === user.id
-                  ? 'border-blue-500 bg-blue-50'
-                  : 'border-slate-200 bg-white hover:border-slate-300'
-              }`}
-            >
-              <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-violet-500 rounded-full flex items-center justify-center flex-shrink-0">
-                <span className="text-white text-xs font-bold">
-                  {user.full_name?.charAt(0) || '?'}
-                </span>
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="font-medium text-sm text-slate-900 truncate">
-                  {user.full_name || '이름 미설정'}
-                </div>
-                <div className="text-xs text-slate-500 truncate">
-                  {(user.companies as any)?.name || '회사 미지정'}
-                </div>
-              </div>
-            </button>
-          ))}
+    <div>
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h2 className="text-xl font-bold text-slate-900">사용자 관리</h2>
+          <p className="text-sm text-slate-600 mt-1">{usersWithRoles.length}명의 사용자</p>
         </div>
       </div>
 
-      {/* 오른쪽: 역할 관리 */}
-      <div>
-        {selectedUser ? (
-          <>
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h3 className="text-lg font-semibold text-slate-900">
-                  {selectedUser.full_name}의 역할
-                </h3>
-                <p className="text-sm text-slate-600">
-                  {(selectedUser.companies as any)?.name}
-                </p>
-              </div>
-              <button
-                onClick={() => setShowAssignModal(true)}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium flex items-center gap-2"
-              >
-                <Plus className="w-4 h-4" />
-                역할 추가
-              </button>
+      {/* 검색 */}
+      <div className="relative mb-4">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+        <input
+          type="text"
+          placeholder="이름, 역할, 조직으로 검색..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className="w-full pl-10 pr-4 py-2.5 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+        />
+      </div>
+
+      {/* 테이블 */}
+      <div className="border border-slate-200 rounded-xl overflow-hidden">
+        <div className="grid grid-cols-12 gap-4 px-5 py-3 bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wider">
+          <div className="col-span-3">사용자</div>
+          <div className="col-span-3">역할</div>
+          <div className="col-span-3">소속 조직</div>
+          <div className="col-span-3 text-right">관리</div>
+        </div>
+
+        <div className="divide-y divide-slate-100">
+          {filteredUsers.length === 0 ? (
+            <div className="py-16 text-center text-slate-500">
+              <Users className="w-10 h-10 mx-auto mb-3 text-slate-300" />
+              <p className="text-sm">{searchQuery ? '검색 결과가 없습니다' : '사용자가 없습니다'}</p>
             </div>
-
-            {loading ? (
-              <div className="text-center py-10">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
-              </div>
-            ) : userRoles.length > 0 ? (
-              <div className="space-y-3">
-                {userRoles.map((userRole) => {
-                  const role = userRole.role;
-                  const org = userRole.organization;
-                  const info = getRoleInfo(role?.level || 0);
-                  const Icon = getRoleIcon(role?.level || 0);
-
-                  return (
-                    <div key={userRole.id}
-                      className={`flex items-center gap-3 p-4 rounded-lg border ${info.bgColor}`}>
-                      <div className="p-2 rounded-lg bg-white/60">
-                        <Icon className={`w-5 h-5 ${info.color}`} />
-                      </div>
-                      <div className="flex-1">
-                        <div className="font-medium text-slate-900">
-                          {role?.display_name || '알 수 없는 역할'}
-                        </div>
-                        <div className="text-xs text-slate-600 mt-0.5">{info.summary}</div>
-                        <div className="text-xs text-slate-400 mt-0.5">
-                          {org ? `${org.name}에서` : '전체 시스템'}
-                        </div>
-                      </div>
-                      <button onClick={() => handleRevokeRole(userRole.id)}
-                        className="p-2 text-red-600 hover:bg-red-100 rounded-lg transition-colors" title="역할 해제">
-                        <X className="w-4 h-4" />
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="text-center py-20 bg-slate-50 rounded-lg border border-slate-200">
-                <Shield className="w-12 h-12 text-slate-400 mx-auto mb-3" />
-                <p className="text-slate-600">할당된 역할이 없습니다</p>
-                <p className="text-sm text-slate-500 mt-1">'역할 추가' 버튼을 눌러 역할을 할당하세요</p>
-              </div>
-            )}
-          </>
-        ) : (
-          <div className="text-center py-20 bg-slate-50 rounded-lg border border-slate-200">
-            <AlertCircle className="w-12 h-12 text-slate-400 mx-auto mb-3" />
-            <p className="text-slate-600">왼쪽에서 사용자를 선택하세요</p>
-          </div>
-        )}
+          ) : (
+            filteredUsers.map((user) => (
+              <UserRow
+                key={user.id}
+                user={user}
+                organizations={organizations}
+                onAddRole={() => { setTargetUserId(user.id); setShowAssignModal(true); }}
+                onRevokeRole={handleRevokeRole}
+                onChangeOrg={handleChangeOrg}
+                onEditRole={(userRole) => { setTargetUserId(user.id); setEditingUserRole(userRole); setShowEditModal(true); }}
+              />
+            ))
+          )}
+        </div>
       </div>
 
-      {/* 역할 할당 모달 */}
-      {showAssignModal && (
+      {/* 역할 추가 모달 */}
+      {showAssignModal && targetUserId && (
         <AssignRoleModal
-          roles={roles}
+          roles={allRoles}
           organizations={organizations}
           myRoleLevel={myRoleLevel}
+          userName={usersWithRoles.find(u => u.id === targetUserId)?.full_name || ''}
           onAssign={handleAssignRole}
-          onClose={() => setShowAssignModal(false)}
+          onClose={() => { setShowAssignModal(false); setTargetUserId(null); }}
+        />
+      )}
+
+      {/* 역할 수정 모달 */}
+      {showEditModal && editingUserRole && targetUserId && (
+        <EditRoleModal
+          currentRole={editingUserRole}
+          roles={allRoles}
+          organizations={organizations}
+          myRoleLevel={myRoleLevel}
+          userName={usersWithRoles.find(u => u.id === targetUserId)?.full_name || ''}
+          onSave={handleEditRole}
+          onClose={() => { setShowEditModal(false); setEditingUserRole(null); setTargetUserId(null); }}
         />
       )}
     </div>
+  );
+}
+
+// ============================================
+// 사용자 행
+// ============================================
+interface UserRowProps {
+  user: UserWithRoles;
+  organizations: any[];
+  onAddRole: () => void;
+  onRevokeRole: (userRoleId: string) => void;
+  onChangeOrg: (userRoleId: string, userId: string, roleId: string, newOrgId: string) => void;
+  onEditRole: (userRole: UserWithRoles['roles'][0]) => void;
+}
+
+function UserRow({ user, organizations, onAddRole, onRevokeRole, onChangeOrg, onEditRole }: UserRowProps) {
+  const [showOrgSelect, setShowOrgSelect] = useState<string | null>(null);
+
+  if (user.roles.length === 0) {
+    return (
+      <div className="grid grid-cols-12 gap-4 px-5 py-4 items-center hover:bg-slate-50 transition-colors">
+        <div className="col-span-3 flex items-center gap-3">
+          <div className="w-9 h-9 bg-gradient-to-br from-blue-500 to-violet-500 rounded-full flex items-center justify-center flex-shrink-0">
+            <span className="text-white text-sm font-bold">{user.full_name.charAt(0)}</span>
+          </div>
+          <div>
+            <div className="font-medium text-sm text-slate-900">{user.full_name}</div>
+            <div className="text-xs text-slate-400">{user.company_name}</div>
+          </div>
+        </div>
+        <div className="col-span-3"><span className="text-xs text-slate-400 italic">역할 미할당</span></div>
+        <div className="col-span-3"><span className="text-xs text-slate-400">-</span></div>
+        <div className="col-span-3 flex justify-end">
+          <button onClick={onAddRole} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
+            <UserPlus className="w-3.5 h-3.5" />역할 추가
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      {user.roles.map((role, idx) => {
+        const badge = getRoleBadge(role.roleLevel);
+        const Icon = getRoleIcon(role.roleLevel);
+
+        return (
+          <div key={role.userRoleId} className="grid grid-cols-12 gap-4 px-5 py-3.5 items-center hover:bg-slate-50 transition-colors">
+            {/* 사용자 */}
+            <div className="col-span-3 flex items-center gap-3">
+              {idx === 0 ? (
+                <>
+                  <div className="w-9 h-9 bg-gradient-to-br from-blue-500 to-violet-500 rounded-full flex items-center justify-center flex-shrink-0">
+                    <span className="text-white text-sm font-bold">{user.full_name.charAt(0)}</span>
+                  </div>
+                  <div>
+                    <div className="font-medium text-sm text-slate-900">{user.full_name}</div>
+                    <div className="text-xs text-slate-400">{user.company_name}</div>
+                  </div>
+                </>
+              ) : (
+                <div className="ml-12 border-l-2 border-slate-200 pl-3">
+                  <div className="text-xs text-slate-400">추가 역할</div>
+                </div>
+              )}
+            </div>
+
+            {/* 역할 */}
+            <div className="col-span-3">
+              <div className="flex items-center gap-2">
+                <Icon className={`w-4 h-4 ${badge.text}`} />
+                <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${badge.bg} ${badge.text}`}>
+                  {role.roleDisplayName}
+                </span>
+              </div>
+            </div>
+
+            {/* 소속 조직 */}
+            <div className="col-span-3">
+              {showOrgSelect === role.userRoleId ? (
+                <select
+                  defaultValue={role.orgId || ''}
+                  onChange={(e) => { onChangeOrg(role.userRoleId, user.id, role.roleId, e.target.value); setShowOrgSelect(null); }}
+                  className="w-full px-2 py-1.5 border border-blue-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-500 outline-none"
+                  autoFocus
+                  onBlur={() => setShowOrgSelect(null)}
+                >
+                  <option value="">전체 (미지정)</option>
+                  {organizations.map((org) => (
+                    <option key={org.id} value={org.id}>{org.name}</option>
+                  ))}
+                </select>
+              ) : (
+                <button
+                  onClick={() => setShowOrgSelect(role.userRoleId)}
+                  className="flex items-center gap-1.5 text-sm text-slate-700 hover:text-blue-600 transition-colors group"
+                  title="클릭하여 조직 변경"
+                >
+                  <Building2 className="w-3.5 h-3.5 text-slate-400 group-hover:text-blue-500" />
+                  <span className={role.orgName ? '' : 'text-slate-400 italic text-xs'}>{role.orgName || '전체'}</span>
+                  <Pencil className="w-3 h-3 text-slate-300 group-hover:text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                </button>
+              )}
+            </div>
+
+            {/* 관리 */}
+            <div className="col-span-3 flex items-center justify-end gap-1">
+              <button onClick={() => onEditRole(role)} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="역할 변경">
+                <Pencil className="w-3.5 h-3.5" />
+              </button>
+              <button onClick={() => onRevokeRole(role.userRoleId)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="역할 해제">
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+              {idx === 0 && (
+                <button onClick={onAddRole} className="p-1.5 text-slate-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors" title="역할 추가">
+                  <Plus className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </>
   );
 }
 
@@ -272,92 +406,58 @@ interface AssignRoleModalProps {
   roles: Role[];
   organizations: any[];
   myRoleLevel: number;
+  userName: string;
   onAssign: (roleId: string, orgId?: string) => void;
   onClose: () => void;
 }
 
-function AssignRoleModal({ roles, organizations, myRoleLevel, onAssign, onClose }: AssignRoleModalProps) {
+function AssignRoleModal({ roles, organizations, myRoleLevel, userName, onAssign, onClose }: AssignRoleModalProps) {
   const [selectedRoleId, setSelectedRoleId] = useState('');
-  const [selectedOrgId, setSelectedOrgId] = useState<string>('');
+  const [selectedOrgId, setSelectedOrgId] = useState('');
 
-  // 핵심: getAssignableRoles로 할당 가능한 역할 필터
   const assignableRoles = getAssignableRoles(roles, myRoleLevel);
-
-  // 선택된 역할이 org_leader면 조직 선택 필요
   const selectedRole = roles.find(r => r.id === selectedRoleId);
   const needsOrgSelection = selectedRole && selectedRole.level <= ROLE_LEVELS.ORG_LEADER;
-
-  const handleSubmit = () => {
-    if (!selectedRoleId) {
-      alert('역할을 선택해주세요');
-      return;
-    }
-    onAssign(selectedRoleId, selectedOrgId || undefined);
-  };
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-2xl max-w-lg w-full p-6 max-h-[85vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-5">
-          <h3 className="text-lg font-bold text-slate-900">역할 할당</h3>
-          <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-lg transition-colors">
-            <X className="w-5 h-5" />
-          </button>
+          <div>
+            <h3 className="text-lg font-bold text-slate-900">역할 할당</h3>
+            <p className="text-sm text-slate-500">{userName}에게 새 역할을 할당합니다</p>
+          </div>
+          <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-lg"><X className="w-5 h-5" /></button>
         </div>
 
         <div className="space-y-5">
-          {/* 역할 선택 — 카드형 */}
           <div>
-            <label className="block text-sm font-semibold text-slate-800 mb-3">
-              역할 선택
-            </label>
-
+            <label className="block text-sm font-semibold text-slate-800 mb-3">역할 선택</label>
             {assignableRoles.length === 0 ? (
-              <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
-                할당 가능한 역할이 없습니다. 자신보다 낮은 레벨의 역할만 할당할 수 있습니다.
-              </div>
+              <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">할당 가능한 역할이 없습니다.</div>
             ) : (
               <div className="space-y-2">
                 {assignableRoles.map((role) => {
                   const info = getRoleInfo(role.level);
                   const Icon = getRoleIcon(role.level);
                   const isSelected = selectedRoleId === role.id;
-
                   return (
-                    <button
-                      key={role.id}
-                      onClick={() => {
-                        setSelectedRoleId(role.id);
-                        // CEO/company_admin은 조직 선택 불필요 → 초기화
-                        if (role.level >= ROLE_LEVELS.COMPANY_ADMIN) {
-                          setSelectedOrgId('');
-                        }
-                      }}
-                      className={`w-full text-left rounded-xl border-2 p-4 transition-all ${
-                        isSelected
-                          ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-200'
-                          : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'
-                      }`}
-                    >
+                    <button key={role.id}
+                      onClick={() => { setSelectedRoleId(role.id); if (role.level >= ROLE_LEVELS.COMPANY_ADMIN) setSelectedOrgId(''); }}
+                      className={`w-full text-left rounded-xl border-2 p-4 transition-all ${isSelected ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-200' : 'border-slate-200 bg-white hover:border-slate-300'}`}>
                       <div className="flex items-start gap-3">
-                        <div className={`p-2 rounded-lg ${isSelected ? 'bg-blue-100' : 'bg-slate-100'} flex-shrink-0 mt-0.5`}>
+                        <div className={`p-2 rounded-lg ${isSelected ? 'bg-blue-100' : 'bg-slate-100'} flex-shrink-0`}>
                           <Icon className={`w-4 h-4 ${isSelected ? 'text-blue-600' : info.color}`} />
                         </div>
-                        <div className="flex-1 min-w-0">
+                        <div className="flex-1">
                           <div className="flex items-center gap-2">
-                            <span className="font-semibold text-sm text-slate-900">
-                              {role.display_name}
-                            </span>
+                            <span className="font-semibold text-sm text-slate-900">{role.display_name}</span>
                             {isSelected && <Check className="w-4 h-4 text-blue-600" />}
                           </div>
-                          <p className="text-xs text-slate-500 mt-0.5">
-                            {role.description || info.summary}
-                          </p>
+                          <p className="text-xs text-slate-500 mt-0.5">{role.description || info.summary}</p>
                           <div className="flex flex-wrap gap-1 mt-2">
                             {info.capabilities.slice(0, 4).map((cap, i) => (
-                              <span key={i} className="inline-flex items-center px-2 py-0.5 text-[11px] rounded-full bg-slate-100 text-slate-600">
-                                {cap}
-                              </span>
+                              <span key={i} className="px-2 py-0.5 text-[11px] rounded-full bg-slate-100 text-slate-600">{cap}</span>
                             ))}
                           </div>
                         </div>
@@ -369,54 +469,112 @@ function AssignRoleModal({ roles, organizations, myRoleLevel, onAssign, onClose 
             )}
           </div>
 
-          {/* 조직 선택 — org_leader/member일 때만 표시 */}
           {needsOrgSelection && (
             <div>
               <label className="block text-sm font-semibold text-slate-800 mb-2">
-                적용 조직 {selectedRole?.level === ROLE_LEVELS.ORG_LEADER
-                  ? <span className="font-normal text-red-500">(필수)</span>
-                  : <span className="font-normal text-slate-400">(선택)</span>
-                }
-              </label>
-              <select
-                value={selectedOrgId}
-                onChange={(e) => setSelectedOrgId(e.target.value)}
-                className="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none text-sm"
-              >
-                <option value="">
-                  {selectedRole?.level === ROLE_LEVELS.ORG_LEADER
-                    ? '-- 조직을 선택하세요 --'
-                    : '전체 시스템 (모든 조직)'}
-                </option>
-                {organizations.map((org) => (
-                  <option key={org.id} value={org.id}>
-                    {org.name} ({org.level})
-                  </option>
-                ))}
-              </select>
-              <p className="text-xs text-slate-400 mt-1">
+                적용 조직
                 {selectedRole?.level === ROLE_LEVELS.ORG_LEADER
-                  ? '조직장은 특정 조직에 배정해야 합니다. 배정된 조직과 하위 조직을 관리합니다.'
-                  : '특정 조직을 선택하면 해당 조직에서만 이 역할이 적용됩니다'}
-              </p>
+                  ? <span className="font-normal text-red-500 ml-1">(필수)</span>
+                  : <span className="font-normal text-slate-400 ml-1">(선택)</span>}
+              </label>
+              <select value={selectedOrgId} onChange={(e) => setSelectedOrgId(e.target.value)}
+                className="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+                <option value="">{selectedRole?.level === ROLE_LEVELS.ORG_LEADER ? '-- 조직을 선택하세요 --' : '전체 (미지정)'}</option>
+                {organizations.map((org) => (<option key={org.id} value={org.id}>{org.name}</option>))}
+              </select>
             </div>
           )}
         </div>
 
         <div className="flex gap-3 mt-6 pt-4 border-t">
-          <button onClick={onClose}
-            className="flex-1 px-4 py-2.5 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 text-sm font-medium">
-            취소
-          </button>
-          <button
-            onClick={handleSubmit}
-            disabled={
-              !selectedRoleId ||
-              (selectedRole?.level === ROLE_LEVELS.ORG_LEADER && !selectedOrgId)
-            }
-            className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-          >
+          <button onClick={onClose} className="flex-1 px-4 py-2.5 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 text-sm font-medium">취소</button>
+          <button onClick={() => onAssign(selectedRoleId, selectedOrgId || undefined)}
+            disabled={!selectedRoleId || (selectedRole?.level === ROLE_LEVELS.ORG_LEADER && !selectedOrgId)}
+            className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed">
             할당
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================
+// 역할 수정 모달
+// ============================================
+interface EditRoleModalProps {
+  currentRole: UserWithRoles['roles'][0];
+  roles: Role[];
+  organizations: any[];
+  myRoleLevel: number;
+  userName: string;
+  onSave: (userRoleId: string, newRoleId: string, newOrgId?: string) => void;
+  onClose: () => void;
+}
+
+function EditRoleModal({ currentRole, roles, organizations, myRoleLevel, userName, onSave, onClose }: EditRoleModalProps) {
+  const [selectedRoleId, setSelectedRoleId] = useState(currentRole.roleId);
+  const [selectedOrgId, setSelectedOrgId] = useState(currentRole.orgId || '');
+
+  const assignableRoles = getAssignableRoles(roles, myRoleLevel);
+  const selectedRole = roles.find(r => r.id === selectedRoleId);
+  const needsOrgSelection = selectedRole && selectedRole.level <= ROLE_LEVELS.ORG_LEADER;
+  const hasChanged = selectedRoleId !== currentRole.roleId || selectedOrgId !== (currentRole.orgId || '');
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl max-w-md w-full p-6">
+        <div className="flex items-center justify-between mb-5">
+          <div>
+            <h3 className="text-lg font-bold text-slate-900">역할 변경</h3>
+            <p className="text-sm text-slate-500">{userName}</p>
+          </div>
+          <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-lg"><X className="w-5 h-5" /></button>
+        </div>
+
+        <div className="mb-4 p-3 bg-slate-50 rounded-lg border border-slate-200">
+          <div className="text-xs text-slate-400 mb-1">현재</div>
+          <div className="flex items-center gap-2">
+            <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${getRoleBadge(currentRole.roleLevel).bg} ${getRoleBadge(currentRole.roleLevel).text}`}>
+              {currentRole.roleDisplayName}
+            </span>
+            {currentRole.orgName && <span className="text-xs text-slate-500">@ {currentRole.orgName}</span>}
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-semibold text-slate-800 mb-2">새 역할</label>
+            <select value={selectedRoleId}
+              onChange={(e) => { setSelectedRoleId(e.target.value); const r = roles.find(r => r.id === e.target.value); if (r && r.level >= ROLE_LEVELS.COMPANY_ADMIN) setSelectedOrgId(''); }}
+              className="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+              {assignableRoles.map((role) => (
+                <option key={role.id} value={role.id}>{role.display_name} (Lv.{role.level})</option>
+              ))}
+            </select>
+          </div>
+
+          {needsOrgSelection && (
+            <div>
+              <label className="block text-sm font-semibold text-slate-800 mb-2">
+                적용 조직
+                {selectedRole?.level === ROLE_LEVELS.ORG_LEADER ? <span className="font-normal text-red-500 ml-1">(필수)</span> : <span className="font-normal text-slate-400 ml-1">(선택)</span>}
+              </label>
+              <select value={selectedOrgId} onChange={(e) => setSelectedOrgId(e.target.value)}
+                className="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+                <option value="">{selectedRole?.level === ROLE_LEVELS.ORG_LEADER ? '-- 조직을 선택하세요 --' : '전체 (미지정)'}</option>
+                {organizations.map((org) => (<option key={org.id} value={org.id}>{org.name}</option>))}
+              </select>
+            </div>
+          )}
+        </div>
+
+        <div className="flex gap-3 mt-6 pt-4 border-t">
+          <button onClick={onClose} className="flex-1 px-4 py-2.5 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 text-sm font-medium">취소</button>
+          <button onClick={() => onSave(currentRole.userRoleId, selectedRoleId, selectedOrgId || undefined)}
+            disabled={!hasChanged || (selectedRole?.level === ROLE_LEVELS.ORG_LEADER && !selectedOrgId)}
+            className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed">
+            변경
           </button>
         </div>
       </div>
