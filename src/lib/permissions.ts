@@ -706,9 +706,9 @@ export function isDirectChild(
 // ============================================
 
 export function getAssignableRoles(roles: Role[], myLevel: number): Role[] {
-  if (myLevel >= ROLE_LEVELS.SUPER_ADMIN) return roles;
-  if (myLevel >= ROLE_LEVELS.CEO) return roles.filter(r => r.level <= ROLE_LEVELS.COMPANY_ADMIN);
-  if (myLevel >= ROLE_LEVELS.COMPANY_ADMIN) return roles.filter(r => r.level <= ROLE_LEVELS.ORG_LEADER);
+  if (myLevel >= ROLE_LEVELS.SUPER_ADMIN) return roles; // 전부
+  if (myLevel >= ROLE_LEVELS.CEO) return roles.filter(r => r.level <= ROLE_LEVELS.CEO); // CEO까지 (다른 사람에게 CEO 부여 가능)
+  if (myLevel >= ROLE_LEVELS.COMPANY_ADMIN) return roles.filter(r => r.level <= ROLE_LEVELS.ORG_LEADER); // 조직장까지
   return roles.filter(r => r.level < myLevel);
 }
 
