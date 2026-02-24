@@ -35,12 +35,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // ★ 초대 플로우 중에는 AuthContext가 프로필 자동 생성을 시도하지 않도록 하는 플래그
   const skipAutoProfileRef = useRef(false);
 
+  // ★ 초기 세션 처리 완료 여부 — onAuthStateChange 중복 방지용
+  const initialSessionDoneRef = useRef(false);
+
   // 프로필 조회 (maybeSingle 사용 → 0 rows여도 에러 안 남)
   const fetchProfile = async (userId: string): Promise<Profile | null> => {
     try {
       console.log('📡 프로필 조회 시도:', userId);
       
-      // ★ .single() 대신 .maybeSingle() 사용 → 0 rows일 때 null 반환 (406 에러 방지)
       const { data, error } = await supabase
         .from('profiles')
         .select('*')
@@ -105,11 +107,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         if (mounted) {
           setLoading(false);
+          // ★ 초기 세션 처리 완료 표시
+          initialSessionDoneRef.current = true;
         }
       } catch (error) {
         console.error('❌ 초기 세션 확인 예외:', error);
         if (mounted) {
           setLoading(false);
+          initialSessionDoneRef.current = true;
         }
       }
     };
@@ -117,11 +122,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     getInitialSession();
 
     // Auth 상태 변경 리스너
+    // ★ getInitialSession()에서 이미 세션+프로필을 처리하므로
+    //   INITIAL_SESSION / 초기 SIGNED_IN 이벤트는 건너뛰어 중복 방지
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, newSession) => {
         console.log('🔄 Auth 상태 변경:', event);
         
         if (!mounted) return;
+
+        // ★ INITIAL_SESSION → getInitialSession과 100% 중복이므로 무시
+        if (event === 'INITIAL_SESSION') {
+          console.log('⏭️ INITIAL_SESSION 건너뜀 (getInitialSession에서 처리됨)');
+          return;
+        }
+
+        // ★ 앱 로드 직후 SIGNED_IN → getInitialSession이 아직 처리 중이거나 이미 처리함
+        //   초기 세션 처리가 끝나지 않았으면(race condition) 무시
+        //   끝났으면 실제 로그인(signIn 호출)에서 온 것이므로 처리
+        if (event === 'SIGNED_IN' && !initialSessionDoneRef.current) {
+          console.log('⏭️ 초기 SIGNED_IN 건너뜀 (getInitialSession 진행 중)');
+          return;
+        }
 
         setSession(newSession);
         setUser(newSession?.user ?? null);
@@ -132,14 +153,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           if (skipAutoProfileRef.current) {
             console.log('⏭️ 초대 플로우 중 - 자동 프로필 조회 건너뜀');
           } else {
-            // 약간의 딜레이 후 프로필 조회 (트리거가 프로필 생성할 시간 확보)
-            setTimeout(async () => {
-              if (!mounted) return;
-              const profileData = await fetchProfile(newSession.user.id);
-              if (mounted) {
-                setProfile(profileData);
-              }
-            }, 300);
+            // ★ setTimeout 300ms 제거 — 불필요한 지연 없이 즉시 조회
+            const profileData = await fetchProfile(newSession.user.id);
+            if (mounted) {
+              setProfile(profileData);
+            }
           }
         } else {
           setProfile(null);
@@ -158,7 +176,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // ★ 초대 플로우 중 자동 프로필 로딩을 억제하는 setter를 외부에 노출
-  //   (AcceptInvite에서 signUp 전에 true로 설정, 완료 후 false + refreshProfile)
   const setSkipAutoProfile = (skip: boolean) => {
     skipAutoProfileRef.current = skip;
   };
