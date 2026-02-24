@@ -1,12 +1,8 @@
 // src/components/admin/RolePermissionsManager.tsx
-// 역할별 내장 권한을 시각적으로 보여주는 읽기 전용 뷰
-// (permissions 테이블 매핑 미사용 — level 기반으로 코드 내장)
-
 import { useEffect, useState } from 'react';
-import { getAllRoles, getRoleInfo, ROLE_LEVELS, Role } from '../../lib/permissions';
+import { getAllRoles, getRoleInfo, getMyRoleLevel, ROLE_LEVELS, Role } from '../../lib/permissions';
 import { Shield, Check, Crown, Settings, Users, Target, BarChart3, Eye } from 'lucide-react';
 
-// ─── 역할별 기능 매트릭스 (코드 내장) ─────────────────
 const CAPABILITY_MATRIX = [
   { group: 'OKR 수립', items: [
     { name: '전사 OKR 수립/확정', minLevel: ROLE_LEVELS.CEO },
@@ -68,8 +64,13 @@ export default function RolePermissionsManager() {
     const loadRoles = async () => {
       try {
         const data = await getAllRoles();
-        setRoles(data);
-        if (data.length > 0) setSelectedRole(data[0]);
+        const myLevel = await getMyRoleLevel();
+        // ✅ super_admin이 아니면 level 100 역할 숨김
+        const filtered = myLevel >= ROLE_LEVELS.SUPER_ADMIN
+          ? data
+          : data.filter(r => r.level < ROLE_LEVELS.SUPER_ADMIN);
+        setRoles(filtered);
+        if (filtered.length > 0) setSelectedRole(filtered[0]);
       } catch (error) {
         console.error('Failed to load roles:', error);
       }
@@ -79,7 +80,6 @@ export default function RolePermissionsManager() {
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      {/* 왼쪽: 역할 선택 */}
       <div>
         <div className="mb-4">
           <h3 className="text-lg font-semibold text-slate-900">역할 목록</h3>
@@ -92,9 +92,7 @@ export default function RolePermissionsManager() {
             return (
               <button key={role.id} onClick={() => setSelectedRole(role)}
                 className={`w-full flex items-center gap-3 p-4 rounded-lg border-2 transition-all text-left ${
-                  selectedRole?.id === role.id
-                    ? `${info.bgColor}`
-                    : 'border-slate-200 bg-white hover:border-slate-300'
+                  selectedRole?.id === role.id ? info.bgColor : 'border-slate-200 bg-white hover:border-slate-300'
                 }`}>
                 <div className={`p-2 rounded-lg ${selectedRole?.id === role.id ? 'bg-white/60' : 'bg-slate-100'}`}>
                   <Icon className={`w-5 h-5 ${info.color}`} />
@@ -108,16 +106,13 @@ export default function RolePermissionsManager() {
             );
           })}
         </div>
-
         <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
           <p className="text-xs text-blue-800">
             <strong>상위 포함 원칙:</strong> 상위 역할은 하위 역할의 모든 권한을 자동으로 포함합니다.
-            (100 ⊃ 90 ⊃ 80 ⊃ 70 ⊃ 30 ⊃ 10)
           </p>
         </div>
       </div>
 
-      {/* 오른쪽: 권한 매트릭스 */}
       <div className="lg:col-span-2">
         {selectedRole ? (
           <>
@@ -125,44 +120,28 @@ export default function RolePermissionsManager() {
               <h3 className="text-lg font-semibold text-slate-900">{selectedRole.display_name} 권한</h3>
               <p className="text-sm text-slate-600">{selectedRole.description}</p>
             </div>
-
             <div className="space-y-4">
               {CAPABILITY_MATRIX.map(({ group, items }) => {
                 const activeItems = items.filter(item => selectedRole.level >= item.minLevel);
-                const inactiveItems = items.filter(item => selectedRole.level < item.minLevel);
-
                 return (
                   <div key={group} className="bg-white rounded-lg border border-slate-200 p-4">
                     <h4 className="text-sm font-bold text-slate-900 mb-3 flex items-center gap-2">
                       <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
                       {group}
-                      <span className="text-xs font-normal text-slate-400">
-                        ({activeItems.length}/{items.length})
-                      </span>
+                      <span className="text-xs font-normal text-slate-400">({activeItems.length}/{items.length})</span>
                     </h4>
                     <div className="space-y-1.5">
                       {items.map((item) => {
                         const hasAccess = selectedRole.level >= item.minLevel;
                         return (
                           <div key={item.name}
-                            className={`flex items-center gap-3 px-3 py-2 rounded-lg ${
-                              hasAccess ? 'bg-green-50' : 'bg-slate-50 opacity-50'
-                            }`}>
-                            <div className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 ${
-                              hasAccess ? 'bg-green-500' : 'bg-slate-300'
-                            }`}>
-                              {hasAccess
-                                ? <Check className="w-3 h-3 text-white" />
-                                : <span className="w-2 h-2 bg-white rounded-full"></span>
-                              }
+                            className={`flex items-center gap-3 px-3 py-2 rounded-lg ${hasAccess ? 'bg-green-50' : 'bg-slate-50 opacity-50'}`}>
+                            <div className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 ${hasAccess ? 'bg-green-500' : 'bg-slate-300'}`}>
+                              {hasAccess ? <Check className="w-3 h-3 text-white" /> : <span className="w-2 h-2 bg-white rounded-full"></span>}
                             </div>
-                            <span className={`text-sm ${hasAccess ? 'text-slate-900' : 'text-slate-400'}`}>
-                              {item.name}
-                            </span>
+                            <span className={`text-sm ${hasAccess ? 'text-slate-900' : 'text-slate-400'}`}>{item.name}</span>
                             {hasAccess && item.minLevel === selectedRole.level && (
-                              <span className="ml-auto text-[10px] px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded-full">
-                                이 역할부터
-                              </span>
+                              <span className="ml-auto text-[10px] px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded-full">이 역할부터</span>
                             )}
                           </div>
                         );
