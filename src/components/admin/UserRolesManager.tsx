@@ -3,7 +3,6 @@ import { useEffect, useState } from 'react';
 import { useStore } from '../../store/useStore';
 import {
   getAllRoles,
-  getUserRoles,
   assignRole,
   revokeRole,
   getMyRoleLevel,
@@ -11,16 +10,15 @@ import {
   getRoleInfo,
   ROLE_LEVELS,
   Role,
-  UserRole,
 } from '../../lib/permissions';
 import { supabase } from '../../lib/supabase';
 import {
-  Shield, X, Plus, AlertCircle, Check, Eye, Settings, Users,
+  Shield, X, Plus, Check, Eye, Settings, Users,
   Target, BarChart3, Crown, Search, Building2,
   Pencil, Trash2, UserPlus,
 } from 'lucide-react';
 
-// ─── 역할 아이콘 ─────────────────────────
+// ─── helpers ─────────────────────────
 function getRoleIcon(level: number) {
   if (level >= 100) return Settings;
   if (level >= 90) return Crown;
@@ -30,7 +28,6 @@ function getRoleIcon(level: number) {
   return Eye;
 }
 
-// ─── 역할 배지 색상 ─────────────────────────
 function getRoleBadge(level: number) {
   if (level >= 100) return { bg: 'bg-purple-100', text: 'text-purple-700' };
   if (level >= 90) return { bg: 'bg-red-100', text: 'text-red-700' };
@@ -40,23 +37,27 @@ function getRoleBadge(level: number) {
   return { bg: 'bg-slate-100', text: 'text-slate-600' };
 }
 
-// ─── 사용자 + 역할 통합 타입 ─────────────────
+interface RoleEntry {
+  userRoleId: string;
+  roleId: string;
+  roleName: string;
+  roleDisplayName: string;
+  roleLevel: number;
+  orgId?: string;
+  orgName?: string;
+}
+
 interface UserWithRoles {
   id: string;
   full_name: string;
   company_name?: string;
-  roles: Array<{
-    userRoleId: string;
-    roleId: string;
-    roleName: string;
-    roleDisplayName: string;
-    roleLevel: number;
-    orgId?: string;
-    orgName?: string;
-  }>;
+  roles: RoleEntry[];
   maxLevel: number;
 }
 
+// ============================================
+// 메인 컴포넌트
+// ============================================
 export default function UserRolesManager() {
   const { organizations } = useStore();
   const [usersWithRoles, setUsersWithRoles] = useState<UserWithRoles[]>([]);
@@ -65,11 +66,10 @@ export default function UserRolesManager() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
 
-  // 모달
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [targetUserId, setTargetUserId] = useState<string | null>(null);
-  const [editingUserRole, setEditingUserRole] = useState<UserWithRoles['roles'][0] | null>(null);
+  const [editingUserRole, setEditingUserRole] = useState<RoleEntry | null>(null);
 
   useEffect(() => { loadAll(); }, []);
 
@@ -90,57 +90,79 @@ export default function UserRolesManager() {
 
   const loadUsersWithRoles = async (level?: number) => {
     const myLevel = level ?? myRoleLevel;
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
 
-    const { data: currentProfile } = await supabase
-      .from('profiles')
-      .select('company_id')
-      .eq('id', user.id)
-      .single();
-    if (!currentProfile) return;
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
 
-    let query = supabase
-      .from('profiles')
-      .select(`
-        id, full_name,
-        companies ( name ),
-        user_roles (
-          id, role_id, org_id,
+      const { data: currentProfile } = await supabase
+        .from('profiles')
+        .select('company_id')
+        .eq('id', user.id)
+        .single();
+      if (!currentProfile) return;
+
+      // ── 1단계: profiles 조회 ──
+      let profileQuery = supabase
+        .from('profiles')
+        .select('id, full_name, company_id, companies ( name )')
+        .order('full_name');
+
+      if (myLevel < ROLE_LEVELS.SUPER_ADMIN && currentProfile.company_id) {
+        profileQuery = profileQuery.eq('company_id', currentProfile.company_id);
+      }
+
+      const { data: profiles, error: pErr } = await profileQuery;
+      if (pErr) { console.error('profiles 조회 실패:', pErr); return; }
+      if (!profiles || profiles.length === 0) { setUsersWithRoles([]); return; }
+
+      // ── 2단계: user_roles 조회 (별도) ──
+      const profileIds = profiles.map(p => p.id);
+      const { data: rawRoles, error: rErr } = await supabase
+        .from('user_roles')
+        .select(`
+          id, profile_id, role_id, org_id,
           roles ( name, display_name, level ),
           organizations ( id, name )
-        )
-      `)
-      .order('full_name');
+        `)
+        .in('profile_id', profileIds);
 
-    if (myLevel < ROLE_LEVELS.SUPER_ADMIN && currentProfile.company_id) {
-      query = query.eq('company_id', currentProfile.company_id);
+      if (rErr) console.error('user_roles 조회 실패:', rErr);
+
+      // ── 3단계: 병합 ──
+      const rolesMap = new Map<string, any[]>();
+      (rawRoles || []).forEach((ur: any) => {
+        const list = rolesMap.get(ur.profile_id) || [];
+        list.push(ur);
+        rolesMap.set(ur.profile_id, list);
+      });
+
+      const mapped: UserWithRoles[] = profiles.map((u: any) => {
+        const userRoles = rolesMap.get(u.id) || [];
+        const roles: RoleEntry[] = userRoles.map((ur: any) => ({
+          userRoleId: ur.id,
+          roleId: ur.role_id,
+          roleName: ur.roles?.name || '',
+          roleDisplayName: ur.roles?.display_name || '알 수 없음',
+          roleLevel: ur.roles?.level || 0,
+          orgId: ur.org_id || undefined,
+          orgName: ur.organizations?.name || undefined,
+        }));
+
+        return {
+          id: u.id,
+          full_name: u.full_name || '이름 미설정',
+          company_name: (u.companies as any)?.name || '',
+          roles,
+          maxLevel: roles.length > 0 ? Math.max(...roles.map(r => r.roleLevel)) : 0,
+        };
+      });
+
+      mapped.sort((a, b) => b.maxLevel - a.maxLevel);
+      setUsersWithRoles(mapped);
+    } catch (error) {
+      console.error('loadUsersWithRoles 전체 실패:', error);
     }
-
-    const { data, error } = await query;
-    if (error) { console.error('Failed to load users:', error); return; }
-
-    const mapped: UserWithRoles[] = (data || []).map((u: any) => {
-      const roles = (u.user_roles || []).map((ur: any) => ({
-        userRoleId: ur.id,
-        roleId: ur.role_id,
-        roleName: ur.roles?.name || '',
-        roleDisplayName: ur.roles?.display_name || '알 수 없음',
-        roleLevel: ur.roles?.level || 0,
-        orgId: ur.org_id || undefined,
-        orgName: ur.organizations?.name || undefined,
-      }));
-      return {
-        id: u.id,
-        full_name: u.full_name || '이름 미설정',
-        company_name: u.companies?.name || '',
-        roles,
-        maxLevel: roles.length > 0 ? Math.max(...roles.map((r: any) => r.roleLevel)) : 0,
-      };
-    });
-
-    mapped.sort((a, b) => b.maxLevel - a.maxLevel);
-    setUsersWithRoles(mapped);
   };
 
   const filteredUsers = usersWithRoles.filter(u =>
@@ -204,7 +226,6 @@ export default function UserRolesManager() {
         </div>
       </div>
 
-      {/* 검색 */}
       <div className="relative mb-4">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
         <input
@@ -216,7 +237,6 @@ export default function UserRolesManager() {
         />
       </div>
 
-      {/* 테이블 */}
       <div className="border border-slate-200 rounded-xl overflow-hidden">
         <div className="grid grid-cols-12 gap-4 px-5 py-3 bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wider">
           <div className="col-span-3">사용자</div>
@@ -240,32 +260,25 @@ export default function UserRolesManager() {
                 onAddRole={() => { setTargetUserId(user.id); setShowAssignModal(true); }}
                 onRevokeRole={handleRevokeRole}
                 onChangeOrg={handleChangeOrg}
-                onEditRole={(userRole) => { setTargetUserId(user.id); setEditingUserRole(userRole); setShowEditModal(true); }}
+                onEditRole={(r) => { setTargetUserId(user.id); setEditingUserRole(r); setShowEditModal(true); }}
               />
             ))
           )}
         </div>
       </div>
 
-      {/* 역할 추가 모달 */}
       {showAssignModal && targetUserId && (
         <AssignRoleModal
-          roles={allRoles}
-          organizations={organizations}
-          myRoleLevel={myRoleLevel}
+          roles={allRoles} organizations={organizations} myRoleLevel={myRoleLevel}
           userName={usersWithRoles.find(u => u.id === targetUserId)?.full_name || ''}
           onAssign={handleAssignRole}
           onClose={() => { setShowAssignModal(false); setTargetUserId(null); }}
         />
       )}
 
-      {/* 역할 수정 모달 */}
       {showEditModal && editingUserRole && targetUserId && (
         <EditRoleModal
-          currentRole={editingUserRole}
-          roles={allRoles}
-          organizations={organizations}
-          myRoleLevel={myRoleLevel}
+          currentRole={editingUserRole} roles={allRoles} organizations={organizations} myRoleLevel={myRoleLevel}
           userName={usersWithRoles.find(u => u.id === targetUserId)?.full_name || ''}
           onSave={handleEditRole}
           onClose={() => { setShowEditModal(false); setEditingUserRole(null); setTargetUserId(null); }}
@@ -278,21 +291,17 @@ export default function UserRolesManager() {
 // ============================================
 // 사용자 행
 // ============================================
-interface UserRowProps {
-  user: UserWithRoles;
-  organizations: any[];
-  onAddRole: () => void;
-  onRevokeRole: (userRoleId: string) => void;
-  onChangeOrg: (userRoleId: string, userId: string, roleId: string, newOrgId: string) => void;
-  onEditRole: (userRole: UserWithRoles['roles'][0]) => void;
-}
-
-function UserRow({ user, organizations, onAddRole, onRevokeRole, onChangeOrg, onEditRole }: UserRowProps) {
+function UserRow({ user, organizations, onAddRole, onRevokeRole, onChangeOrg, onEditRole }: {
+  user: UserWithRoles; organizations: any[];
+  onAddRole: () => void; onRevokeRole: (id: string) => void;
+  onChangeOrg: (urId: string, userId: string, roleId: string, newOrgId: string) => void;
+  onEditRole: (r: RoleEntry) => void;
+}) {
   const [showOrgSelect, setShowOrgSelect] = useState<string | null>(null);
 
   if (user.roles.length === 0) {
     return (
-      <div className="grid grid-cols-12 gap-4 px-5 py-4 items-center hover:bg-slate-50 transition-colors">
+      <div className="grid grid-cols-12 gap-4 px-5 py-4 items-center hover:bg-slate-50">
         <div className="col-span-3 flex items-center gap-3">
           <div className="w-9 h-9 bg-gradient-to-br from-blue-500 to-violet-500 rounded-full flex items-center justify-center flex-shrink-0">
             <span className="text-white text-sm font-bold">{user.full_name.charAt(0)}</span>
@@ -305,7 +314,7 @@ function UserRow({ user, organizations, onAddRole, onRevokeRole, onChangeOrg, on
         <div className="col-span-3"><span className="text-xs text-slate-400 italic">역할 미할당</span></div>
         <div className="col-span-3"><span className="text-xs text-slate-400">-</span></div>
         <div className="col-span-3 flex justify-end">
-          <button onClick={onAddRole} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
+          <button onClick={onAddRole} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-600 hover:bg-blue-50 rounded-lg">
             <UserPlus className="w-3.5 h-3.5" />역할 추가
           </button>
         </div>
@@ -318,10 +327,8 @@ function UserRow({ user, organizations, onAddRole, onRevokeRole, onChangeOrg, on
       {user.roles.map((role, idx) => {
         const badge = getRoleBadge(role.roleLevel);
         const Icon = getRoleIcon(role.roleLevel);
-
         return (
-          <div key={role.userRoleId} className="grid grid-cols-12 gap-4 px-5 py-3.5 items-center hover:bg-slate-50 transition-colors">
-            {/* 사용자 */}
+          <div key={role.userRoleId} className="grid grid-cols-12 gap-4 px-5 py-3.5 items-center hover:bg-slate-50">
             <div className="col-span-3 flex items-center gap-3">
               {idx === 0 ? (
                 <>
@@ -340,7 +347,6 @@ function UserRow({ user, organizations, onAddRole, onRevokeRole, onChangeOrg, on
               )}
             </div>
 
-            {/* 역할 */}
             <div className="col-span-3">
               <div className="flex items-center gap-2">
                 <Icon className={`w-4 h-4 ${badge.text}`} />
@@ -350,44 +356,39 @@ function UserRow({ user, organizations, onAddRole, onRevokeRole, onChangeOrg, on
               </div>
             </div>
 
-            {/* 소속 조직 */}
             <div className="col-span-3">
               {showOrgSelect === role.userRoleId ? (
                 <select
                   defaultValue={role.orgId || ''}
                   onChange={(e) => { onChangeOrg(role.userRoleId, user.id, role.roleId, e.target.value); setShowOrgSelect(null); }}
                   className="w-full px-2 py-1.5 border border-blue-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-500 outline-none"
-                  autoFocus
-                  onBlur={() => setShowOrgSelect(null)}
+                  autoFocus onBlur={() => setShowOrgSelect(null)}
                 >
                   <option value="">전체 (미지정)</option>
-                  {organizations.map((org) => (
-                    <option key={org.id} value={org.id}>{org.name}</option>
-                  ))}
+                  {organizations.map((org) => (<option key={org.id} value={org.id}>{org.name}</option>))}
                 </select>
               ) : (
                 <button
                   onClick={() => setShowOrgSelect(role.userRoleId)}
-                  className="flex items-center gap-1.5 text-sm text-slate-700 hover:text-blue-600 transition-colors group"
+                  className="flex items-center gap-1.5 text-sm text-slate-700 hover:text-blue-600 group"
                   title="클릭하여 조직 변경"
                 >
                   <Building2 className="w-3.5 h-3.5 text-slate-400 group-hover:text-blue-500" />
                   <span className={role.orgName ? '' : 'text-slate-400 italic text-xs'}>{role.orgName || '전체'}</span>
-                  <Pencil className="w-3 h-3 text-slate-300 group-hover:text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                  <Pencil className="w-3 h-3 text-slate-300 opacity-0 group-hover:opacity-100" />
                 </button>
               )}
             </div>
 
-            {/* 관리 */}
             <div className="col-span-3 flex items-center justify-end gap-1">
-              <button onClick={() => onEditRole(role)} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="역할 변경">
+              <button onClick={() => onEditRole(role)} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg" title="역할 변경">
                 <Pencil className="w-3.5 h-3.5" />
               </button>
-              <button onClick={() => onRevokeRole(role.userRoleId)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="역할 해제">
+              <button onClick={() => onRevokeRole(role.userRoleId)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg" title="역할 해제">
                 <Trash2 className="w-3.5 h-3.5" />
               </button>
               {idx === 0 && (
-                <button onClick={onAddRole} className="p-1.5 text-slate-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors" title="역할 추가">
+                <button onClick={onAddRole} className="p-1.5 text-slate-400 hover:text-green-600 hover:bg-green-50 rounded-lg" title="역할 추가">
                   <Plus className="w-3.5 h-3.5" />
                 </button>
               )}
@@ -402,19 +403,12 @@ function UserRow({ user, organizations, onAddRole, onRevokeRole, onChangeOrg, on
 // ============================================
 // 역할 할당 모달
 // ============================================
-interface AssignRoleModalProps {
-  roles: Role[];
-  organizations: any[];
-  myRoleLevel: number;
-  userName: string;
-  onAssign: (roleId: string, orgId?: string) => void;
-  onClose: () => void;
-}
-
-function AssignRoleModal({ roles, organizations, myRoleLevel, userName, onAssign, onClose }: AssignRoleModalProps) {
+function AssignRoleModal({ roles, organizations, myRoleLevel, userName, onAssign, onClose }: {
+  roles: Role[]; organizations: any[]; myRoleLevel: number; userName: string;
+  onAssign: (roleId: string, orgId?: string) => void; onClose: () => void;
+}) {
   const [selectedRoleId, setSelectedRoleId] = useState('');
   const [selectedOrgId, setSelectedOrgId] = useState('');
-
   const assignableRoles = getAssignableRoles(roles, myRoleLevel);
   const selectedRole = roles.find(r => r.id === selectedRoleId);
   const needsOrgSelection = selectedRole && selectedRole.level <= ROLE_LEVELS.ORG_LEADER;
@@ -502,20 +496,12 @@ function AssignRoleModal({ roles, organizations, myRoleLevel, userName, onAssign
 // ============================================
 // 역할 수정 모달
 // ============================================
-interface EditRoleModalProps {
-  currentRole: UserWithRoles['roles'][0];
-  roles: Role[];
-  organizations: any[];
-  myRoleLevel: number;
-  userName: string;
-  onSave: (userRoleId: string, newRoleId: string, newOrgId?: string) => void;
-  onClose: () => void;
-}
-
-function EditRoleModal({ currentRole, roles, organizations, myRoleLevel, userName, onSave, onClose }: EditRoleModalProps) {
+function EditRoleModal({ currentRole, roles, organizations, myRoleLevel, userName, onSave, onClose }: {
+  currentRole: RoleEntry; roles: Role[]; organizations: any[]; myRoleLevel: number; userName: string;
+  onSave: (urId: string, newRoleId: string, newOrgId?: string) => void; onClose: () => void;
+}) {
   const [selectedRoleId, setSelectedRoleId] = useState(currentRole.roleId);
   const [selectedOrgId, setSelectedOrgId] = useState(currentRole.orgId || '');
-
   const assignableRoles = getAssignableRoles(roles, myRoleLevel);
   const selectedRole = roles.find(r => r.id === selectedRoleId);
   const needsOrgSelection = selectedRole && selectedRole.level <= ROLE_LEVELS.ORG_LEADER;
@@ -553,7 +539,6 @@ function EditRoleModal({ currentRole, roles, organizations, myRoleLevel, userNam
               ))}
             </select>
           </div>
-
           {needsOrgSelection && (
             <div>
               <label className="block text-sm font-semibold text-slate-800 mb-2">
