@@ -1,311 +1,296 @@
-// src/contexts/AuthContext.tsx
-import { createContext, useContext, useEffect, useState, useRef, ReactNode } from 'react';
+// src/pages/AdminSettings.tsx
+import { useState, useEffect, useRef } from 'react';
+import { useSearchParams, useNavigate } from 'react-router-dom';
+import { 
+  Shield, Users, Layers, Lock, Settings as SettingsIcon, ChevronRight, 
+  Building2, Mail, CalendarClock, ArrowLeft, X, Archive
+} from 'lucide-react';
+import UserRolesManager from '../components/admin/UserRolesManager';
+import OrgStructureSettings from '../components/admin/OrgStructureSettings';
+import OrgStructureManager from '../components/admin/OrgStructureManager';
+import RolePermissionsManager from '../components/admin/RolePermissionsManager';
+import CompanyManagement from '../components/admin/CompanyManagement';
+import UserInvitation from '../components/admin/UserInvitation';
+import UnifiedPeriodManager from '../components/admin/UnifiedPeriodManager';
+import PeriodHistoryViewer from '../components/admin/PeriodHistoryViewer';
+// ★ FIX: dynamic import 제거 → 정적 import
 import { supabase } from '../lib/supabase';
-import type { User, Session } from '@supabase/supabase-js';
+import { useAuth } from '../contexts/AuthContext';
 
-// Profile 타입 (간소화)
-interface Profile {
-  id: string;
-  company_id: string | null;
-  full_name: string;
-  role: string;
-  avatar_url: string | null;
-  created_at: string;
-}
+type TabType = 'companies' | 'invite' | 'users' | 'roles' | 'structure' | 'levels' | 'permissions' | 'periods' | 'history';
 
-interface AuthContextType {
-  user: User | null;
-  session: Session | null;
-  profile: Profile | null;
-  loading: boolean;
-  signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
-  signUp: (email: string, password: string, fullName: string, companyId?: string) => Promise<{ error: Error | null }>;
-  signOut: () => Promise<void>;
-  refreshProfile: () => Promise<void>;
-}
+const TAB_ALIASES: Record<string, TabType> = {
+  'planning-cycles': 'periods',
+  'cycles': 'periods',
+  'periods': 'periods',
+  'history': 'history',
+  'period-history': 'history',
+  'users': 'users',
+  'invite': 'invite',
+  'roles': 'roles',
+  'structure': 'structure',
+  'levels': 'levels',
+  'permissions': 'permissions',
+  'companies': 'companies',
+};
 
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
+export default function AdminSettings() {
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const { user } = useAuth();  // ★ FIX: AuthContext에서 user 가져오기
+  const tabParam = searchParams.get('tab');
+  const initialTab: TabType = (tabParam && TAB_ALIASES[tabParam]) || 'companies';
 
-export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [session, setSession] = useState<Session | null>(null);
-  const [profile, setProfile] = useState<Profile | null>(null);
+  const [activeTab, setActiveTab] = useState<TabType>(initialTab);
+  const [userLevel, setUserLevel] = useState<number>(0);
   const [loading, setLoading] = useState(true);
+  const mountedRef = useRef(true);
 
-  // ★ 초대 플로우 중에는 AuthContext가 프로필 자동 생성을 시도하지 않도록 하는 플래그
-  const skipAutoProfileRef = useRef(false);
-
-  // ★ 초기 세션 처리 완료 여부 — onAuthStateChange 중복 방지용
-  const initialSessionDoneRef = useRef(false);
-
-  // ★ FIX: 현재 profile을 ref로도 추적 → 값 비교에 사용
-  const profileRef = useRef<Profile | null>(null);
-
-  // 프로필 조회 (maybeSingle 사용 → 0 rows여도 에러 안 남)
-  const fetchProfile = async (userId: string): Promise<Profile | null> => {
-    try {
-      console.log('📡 프로필 조회 시도:', userId);
-      
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .maybeSingle();
-
-      if (error) {
-        console.error('❌ 프로필 조회 실패:', error);
-        return null;
-      }
-
-      if (!data) {
-        console.log('ℹ️ 프로필이 아직 없음 (초대 플로우 중일 수 있음)');
-        return null;
-      }
-
-      console.log('✅ 프로필 조회 성공:', data);
-      return data as Profile;
-    } catch (error) {
-      console.error('❌ 프로필 조회 예외:', error);
-      return null;
-    }
-  };
-
-  // 프로필 새로고침 (외부에서 호출 가능 - AcceptInvite 등에서 사용)
-  const refreshProfile = async () => {
-    const currentUser = user || (await supabase.auth.getUser()).data.user;
-    if (currentUser) {
-      const profileData = await fetchProfile(currentUser.id);
-      profileRef.current = profileData;
-      setProfile(profileData);
-    }
-  };
-
-  // ★ FIX: profile을 set할 때 이전 값과 비교 → 같으면 참조 변경 안 함
-  const setProfileSafe = (newProfile: Profile | null) => {
-    const prev = profileRef.current;
-    // 둘 다 null이면 스킵
-    if (!prev && !newProfile) return;
-    // 핵심 값이 같으면 스킵 (불필요한 re-render 방지)
-    if (prev && newProfile && 
-        prev.id === newProfile.id && 
-        prev.company_id === newProfile.company_id &&
-        prev.full_name === newProfile.full_name &&
-        prev.role === newProfile.role) {
-      console.log('⏭️ 프로필 변경 없음 — setProfile 건너뜀');
-      return;
-    }
-    profileRef.current = newProfile;
-    setProfile(newProfile);
-  };
-
-  // 초기 세션 확인 및 Auth 상태 리스너
+  // URL 파라미터 변경 시 탭 동기화
   useEffect(() => {
-    let mounted = true;
+    if (tabParam && TAB_ALIASES[tabParam]) {
+      setActiveTab(TAB_ALIASES[tabParam]);
+    }
+  }, [tabParam]);
 
-    const getInitialSession = async () => {
-      try {
-        console.log('🔐 초기 세션 확인 중...');
-        
-        const { data: { session: currentSession }, error } = await supabase.auth.getSession();
-        
-        if (error) {
-          console.error('❌ 세션 조회 실패:', error);
+  // ★ FIX: user가 준비되면 권한 체크 실행
+  //   이전: useEffect([], []) → 마운트 시 1회, 이때 user null이면 영영 안 됨
+  //   이후: user?.id 의존성 → user 준비되면 실행, re-mount 시에도 정상 동작
+  useEffect(() => {
+    mountedRef.current = true;
+    
+    console.log('🔍 AdminSettings: useEffect, user =', user?.id || 'NULL');
+    
+    if (!user) {
+      // user 아직 없으면 5초 안전장치
+      const timeout = setTimeout(() => {
+        if (mountedRef.current) {
+          console.warn('⚠️ AdminSettings: 5초 타임아웃 — loading 해제');
+          setLoading(false);
         }
+      }, 5000);
+      return () => { clearTimeout(timeout); mountedRef.current = false; };
+    }
 
-        if (!mounted) return;
+    checkUserPermissions(user.id);
+    
+    return () => { mountedRef.current = false; };
+  }, [user?.id]);
 
-        setSession(currentSession);
-        setUser(currentSession?.user ?? null);
+  const checkUserPermissions = async (userId: string) => {
+    console.log('🔍 AdminSettings: checkUserPermissions 시작');
+    
+    try {
+      setLoading(true);
 
-        if (currentSession?.user) {
-          console.log('✅ 세션 있음. 프로필 조회 중...');
-          const profileData = await fetchProfile(currentSession.user.id);
-          if (mounted) {
-            setProfileSafe(profileData);
-          }
+      const { data: roles, error } = await supabase
+        .from('user_roles')
+        .select(`
+          role:roles(level)
+        `)
+        .eq('profile_id', userId);
+
+      console.log('🔍 AdminSettings: roles =', roles, 'error =', error);
+
+      if (!mountedRef.current) return;
+
+      if (error) {
+        console.error('역할 조회 실패:', error);
+      }
+
+      const levels = (roles || [])
+        .map(r => (r.role as any)?.level ?? 0)
+        .filter((l): l is number => typeof l === 'number' && l > 0);
+      const maxLevel = levels.length > 0 ? Math.max(...levels) : 0;
+      
+      console.log('🔍 AdminSettings: maxLevel =', maxLevel);
+      
+      setUserLevel(maxLevel);
+
+      if (!tabParam) {
+        if (maxLevel >= 100) {
+          setActiveTab('companies');
+        } else if (maxLevel >= 80) {
+          setActiveTab('invite');
         } else {
-          console.log('ℹ️ 세션 없음 (로그아웃 상태)');
-        }
-
-        if (mounted) {
-          setLoading(false);
-          // ★ 초기 세션 처리 완료 표시
-          initialSessionDoneRef.current = true;
-        }
-      } catch (error) {
-        console.error('❌ 초기 세션 확인 예외:', error);
-        if (mounted) {
-          setLoading(false);
-          initialSessionDoneRef.current = true;
+          setActiveTab('users');
         }
       }
-    };
-
-    getInitialSession();
-
-    // Auth 상태 변경 리스너
-    // ★ getInitialSession()에서 이미 세션+프로필을 처리하므로
-    //   INITIAL_SESSION / 초기 SIGNED_IN 이벤트는 건너뛰어 중복 방지
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, newSession) => {
-        console.log('🔄 Auth 상태 변경:', event);
-        
-        if (!mounted) return;
-
-        // ★ INITIAL_SESSION → getInitialSession과 100% 중복이므로 무시
-        if (event === 'INITIAL_SESSION') {
-          console.log('⏭️ INITIAL_SESSION 건너뜀 (getInitialSession에서 처리됨)');
-          return;
-        }
-
-        // ★ 앱 로드 직후 SIGNED_IN → getInitialSession이 아직 처리 중이거나 이미 처리함
-        //   초기 세션 처리가 끝나지 않았으면(race condition) 무시
-        //   끝났으면 실제 로그인(signIn 호출)에서 온 것이므로 처리
-        if (event === 'SIGNED_IN' && !initialSessionDoneRef.current) {
-          console.log('⏭️ 초기 SIGNED_IN 건너뜀 (getInitialSession 진행 중)');
-          return;
-        }
-
-        // ★ FIX: TOKEN_REFRESHED 이벤트 — 세션만 갱신, 프로필 재조회 불필요
-        //   토큰 갱신은 사용자 프로필이 변경된 게 아니므로 재조회하면
-        //   profile 참조가 변경되어 하위 컴포넌트(Layout→Dashboard)가 전부 re-render됨
-        if (event === 'TOKEN_REFRESHED') {
-          console.log('🔄 TOKEN_REFRESHED — 세션만 갱신 (프로필 재조회 건너뜀)');
-          setSession(newSession);
-          setUser(newSession?.user ?? null);
-          return;
-        }
-
-        setSession(newSession);
-        setUser(newSession?.user ?? null);
-
-        if (newSession?.user) {
-          // ★ 초대 플로우 중이면 프로필 조회를 건너뛴다
-          //   (AcceptInvite가 프로필 생성 완료 후 refreshProfile()을 호출할 것)
-          if (skipAutoProfileRef.current) {
-            console.log('⏭️ 초대 플로우 중 - 자동 프로필 조회 건너뜀');
-          } else {
-            // ★ setTimeout 300ms 제거 — 불필요한 지연 없이 즉시 조회
-            const profileData = await fetchProfile(newSession.user.id);
-            if (mounted) {
-              setProfileSafe(profileData);
-            }
-          }
-        } else {
-          profileRef.current = null;
-          setProfile(null);
-        }
-
-        if (mounted) {
-          setLoading(false);
-        }
+    } catch (error) {
+      console.error('Failed to check permissions:', error);
+    } finally {
+      if (mountedRef.current) {
+        console.log('🔍 AdminSettings: loading = false');
+        setLoading(false);
       }
+    }
+  };
+
+  const tabs = [
+    { id: 'companies' as TabType, name: '회사 관리', icon: Building2, description: '등록된 회사 목록 및 관리 (Super Admin)', minLevel: 100 },
+    { id: 'invite' as TabType, name: '사용자 초대', icon: Mail, description: '새로운 팀원 초대 및 초대 관리', minLevel: 80 },
+    { id: 'users' as TabType, name: '사용자 관리', icon: Users, description: '사용자별 역할 및 권한 할당', minLevel: 80 },
+    { id: 'periods' as TabType, name: '기간 & 수립 관리', icon: CalendarClock, description: '기간 생성 및 OKR 수립 사이클 관리', minLevel: 80 },
+    { id: 'history' as TabType, name: '성과 히스토리', icon: Archive, description: '마감된 기간의 성과 스냅샷 조회', minLevel: 80 },
+    { id: 'structure' as TabType, name: '조직 편집', icon: Building2, description: '조직 추가/수정/삭제 및 AI 생성', minLevel: 80 },
+    { id: 'levels' as TabType, name: '조직 계층', icon: Layers, description: '조직 계층 구조 템플릿 설정', minLevel: 80 },
+    { id: 'roles' as TabType, name: '역할 관리', icon: Shield, description: '역할별 권한 설정 및 수정', minLevel: 80 },
+    { id: 'permissions' as TabType, name: '권한 목록', icon: Lock, description: '전체 권한 목록 조회', minLevel: 80 },
+  ];
+
+  const visibleTabs = tabs.filter(tab => userLevel >= tab.minLevel);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-3"></div>
+          <p className="text-sm text-slate-500">권한 확인 중...</p>
+        </div>
+      </div>
     );
-
-    return () => {
-      mounted = false;
-      subscription.unsubscribe();
-    };
-  }, []);
-
-  // ★ 초대 플로우 중 자동 프로필 로딩을 억제하는 setter를 외부에 노출
-  const setSkipAutoProfile = (skip: boolean) => {
-    skipAutoProfileRef.current = skip;
-  };
-
-  // 로그인
-  const signIn = async (email: string, password: string) => {
-    try {
-      console.log('🔑 로그인 시도:', email);
-      
-      const { error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-
-      if (error) {
-        console.error('❌ 로그인 실패:', error);
-        return { error };
-      }
-
-      console.log('✅ 로그인 성공');
-      return { error: null };
-    } catch (error) {
-      console.error('❌ 로그인 예외:', error);
-      return { error: error as Error };
-    }
-  };
-
-  // 회원가입
-  const signUp = async (
-    email: string, 
-    password: string, 
-    fullName: string, 
-    companyId?: string
-  ) => {
-    try {
-      console.log('📝 회원가입 시도:', email);
-      
-      const { error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          data: {
-            full_name: fullName,
-            company_id: companyId || '00000000-0000-0000-0000-000000000001',
-            role: 'member',
-          },
-        },
-      });
-
-      if (error) {
-        console.error('❌ 회원가입 실패:', error);
-        return { error };
-      }
-
-      console.log('✅ 회원가입 성공');
-      return { error: null };
-    } catch (error) {
-      console.error('❌ 회원가입 예외:', error);
-      return { error: error as Error };
-    }
-  };
-
-  // 로그아웃
-  const signOut = async () => {
-    console.log('👋 로그아웃 시도');
-    await supabase.auth.signOut();
-    profileRef.current = null;
-    setUser(null);
-    setSession(null);
-    setProfile(null);
-    console.log('✅ 로그아웃 완료');
-  };
-
-  const value = {
-    user,
-    session,
-    profile,
-    loading,
-    signIn,
-    signUp,
-    signOut,
-    refreshProfile,
-    setSkipAutoProfile, // ★ 추가 export
-  };
+  }
 
   return (
-    <AuthContext.Provider value={value}>
-      {children}
-    </AuthContext.Provider>
+    <div className="min-h-screen bg-slate-50">
+      {/* 헤더 */}
+      <div className="bg-white border-b border-slate-200 sticky top-0 z-10">
+        <div className="max-w-7xl mx-auto px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <button
+                onClick={() => navigate('/')}
+                className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
+                title="대시보드로 돌아가기"
+              >
+                <ArrowLeft className="w-5 h-5 text-slate-600" />
+              </button>
+              
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-purple-100 rounded-lg">
+                  <SettingsIcon className="w-6 h-6 text-purple-600" />
+                </div>
+                <div>
+                  <h1 className="text-xl font-bold text-slate-900">관리자 설정</h1>
+                  <p className="text-sm text-slate-600">권한 및 조직 구조 관리</p>
+                </div>
+              </div>
+            </div>
+            
+            <button
+              onClick={() => navigate('/')}
+              className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
+              title="닫기"
+            >
+              <X className="w-5 h-5 text-slate-600" />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* 메인 컨텐츠 */}
+      <div className="max-w-7xl mx-auto px-6 py-8">
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+          <div className="lg:col-span-1">
+            <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-2">
+              {visibleTabs.map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${
+                    activeTab === tab.id
+                      ? 'bg-blue-50 text-blue-700 font-medium'
+                      : 'text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  <tab.icon className={`w-5 h-5 ${activeTab === tab.id ? 'text-blue-600' : 'text-slate-400'}`} />
+                  <span className="flex-1 text-left text-sm">{tab.name}</span>
+                  {activeTab === tab.id && <ChevronRight className="w-4 h-4" />}
+                </button>
+              ))}
+            </div>
+
+            <div className="mt-6 bg-gradient-to-br from-purple-50 to-blue-50 rounded-xl border border-purple-100 p-4">
+              <h3 className="text-sm font-semibold text-purple-900 mb-2">💡 도움말</h3>
+              <p className="text-xs text-purple-700 leading-relaxed">
+                {activeTab === 'users' && '사용자에게 역할을 할당하거나 특정 조직에서의 권한을 설정할 수 있습니다.'}
+                {activeTab === 'roles' && '각 역할(CEO, 관리자, 조직장 등)의 권한을 확인합니다.'}
+                {activeTab === 'structure' && '조직을 추가, 수정, 삭제하거나 AI로 자동 생성할 수 있습니다.'}
+                {activeTab === 'levels' && '회사의 조직 계층 구조(전사-본부-팀 등)를 정의합니다.'}
+                {activeTab === 'permissions' && '시스템의 모든 권한 목록을 확인할 수 있습니다.'}
+                {activeTab === 'periods' && '기간을 생성하고 OKR 수립 사이클을 관리합니다. 기간 활성화 → 수립 시작 → 진행 추적 → 마감 순서로 운영합니다.'}
+                {activeTab === 'history' && '마감된 기간의 성과 스냅샷을 조회합니다. 전사 요약, 조직별 달성률, 등급 분포 등을 확인할 수 있습니다.'}
+                {activeTab === 'companies' && '등록된 회사 목록을 관리하고 새 회사를 추가할 수 있습니다.'}
+                {activeTab === 'invite' && '이메일로 새로운 팀원을 초대하거나 팀 초대 링크를 생성할 수 있습니다.'}
+              </p>
+            </div>
+          </div>
+
+          <div className="lg:col-span-3">
+            <div className="bg-white rounded-xl border border-slate-200 p-6">
+              {activeTab === 'companies' && <CompanyManagement />}
+              {activeTab === 'invite' && <UserInvitation />}
+              {activeTab === 'users' && <UserManagement />}
+              {activeTab === 'roles' && <RoleManagement />}
+              {activeTab === 'structure' && <StructureManagement />}
+              {activeTab === 'levels' && <LevelSettings />}
+              {activeTab === 'permissions' && <PermissionsList />}
+              {activeTab === 'periods' && <UnifiedPeriodManager />}
+              {activeTab === 'history' && <PeriodHistoryViewer />}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
-// 커스텀 훅
-export function useAuth() {
-  const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
-  return context;
+function UserManagement() {
+  return <UserRolesManager />;
+}
+
+function RoleManagement() {
+  return <RolePermissionsManager />;
+}
+
+function StructureManagement() {
+  return <OrgStructureManager />;
+}
+
+function LevelSettings() {
+  return <OrgStructureSettings />;
+}
+
+function PermissionsList() {
+  return (
+    <div>
+      <div className="mb-6">
+        <h2 className="text-xl font-bold text-slate-900 mb-2">권한 체계</h2>
+        <p className="text-sm text-slate-600">
+          상위 역할은 하위 역할의 모든 권한을 자동으로 포함합니다. (100 ⊃ 90 ⊃ 80 ⊃ 70 ⊃ 30 ⊃ 10)
+        </p>
+      </div>
+
+      <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+        <h3 className="text-sm font-semibold text-blue-900 mb-2">💡 역할별 권한 요약</h3>
+        <ul className="text-xs text-blue-700 space-y-1">
+          <li>• <strong>CEO (90):</strong> 전사 OKR 수립/승인 + 관리자 기능 전부</li>
+          <li>• <strong>회사 관리자 (80):</strong> 조직/사용자/설정 관리 + 전사 조회</li>
+          <li>• <strong>조직장 (70):</strong> 담당 조직 OKR 수립 + 하위 승인 (배정된 조직 범위)</li>
+          <li>• <strong>구성원 (30):</strong> 개인 OKR + 체크인 + 피드백</li>
+          <li>• <strong>조회자 (10):</strong> 공개 데이터 읽기 전용</li>
+        </ul>
+      </div>
+
+      <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+        <h3 className="text-sm font-semibold text-amber-900 mb-2">🔑 접근 범위</h3>
+        <ul className="text-xs text-amber-700 space-y-1">
+          <li>• <strong>CEO/관리자:</strong> 전사 데이터 전체</li>
+          <li>• <strong>조직장:</strong> 배정된 조직 + 하위 조직 (organizations 계층 기반)</li>
+          <li>• <strong>구성원:</strong> 소속 조직만</li>
+          <li>• <strong>조회자:</strong> 공개 설정된 데이터만</li>
+        </ul>
+      </div>
+    </div>
+  );
 }
