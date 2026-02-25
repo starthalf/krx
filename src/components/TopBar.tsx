@@ -148,17 +148,14 @@ export default function TopBar() {
 
   // ==================== 기존 핸들러 ====================
 
-  const { profile, user, signOut } = useAuth();
-
-// 2) handleLogout 수정
-const handleLogout = async () => {
+  const handleLogout = async () => {
     try {
-      await signOut();
+      await supabase.auth.signOut();
       navigate('/login');
     } catch (error) {
       console.error('Logout failed:', error);
     }
-  };
+  }; 
 
   const handleMySettings = () => { setShowDropdown(false); navigate('/my-settings'); };
   const handleAdminSettings = () => { navigate('/admin'); };
