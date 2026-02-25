@@ -40,10 +40,12 @@ export default function Dashboard() {
 
   // 1. 권한 체크 — orgIds 문자열이 변경될 때만 실행
   useEffect(() => {
-    // 중복 실행 방지
-    if (permCheckRef.current) return;
-
     const checkPermissions = async () => {
+      // ★ FIX: 가드를 함수 안으로 이동 — useEffect 레벨에서 return하면 else 분기도 못 탐
+      if (permCheckRef.current) {
+        console.log('⏭️ permCheck 이미 진행 중 — 건너뜀');
+        return;
+      }
       try {
         permCheckRef.current = true;
         setPermissionsLoading(true);
@@ -59,7 +61,6 @@ export default function Dashboard() {
           }
         }
         
-        // ★ FIX: 이전 값과 비교하여 실제 변경 시에만 state 업데이트
         setManagableOrgs(prev => {
           const prevKey = prev.join(',');
           const newKey = managable.join(',');
