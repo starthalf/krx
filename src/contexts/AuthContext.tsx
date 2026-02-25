@@ -38,6 +38,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // ★ 초기 세션 처리 완료 여부 — onAuthStateChange 중복 방지용
   const initialSessionDoneRef = useRef(false);
 
+  // ★ FIX: 현재 profile을 ref로도 추적 → 값 비교에 사용
+  const profileRef = useRef<Profile | null>(null);
+
   // 프로필 조회 (maybeSingle 사용 → 0 rows여도 에러 안 남)
   const fetchProfile = async (userId: string): Promise<Profile | null> => {
     try {
@@ -72,8 +75,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const currentUser = user || (await supabase.auth.getUser()).data.user;
     if (currentUser) {
       const profileData = await fetchProfile(currentUser.id);
+      profileRef.current = profileData;
       setProfile(profileData);
     }
+  };
+
+  // ★ FIX: profile을 set할 때 이전 값과 비교 → 같으면 참조 변경 안 함
+  const setProfileSafe = (newProfile: Profile | null) => {
+    const prev = profileRef.current;
+    // 둘 다 null이면 스킵
+    if (!prev && !newProfile) return;
+    // 핵심 값이 같으면 스킵 (불필요한 re-render 방지)
+    if (prev && newProfile && 
+        prev.id === newProfile.id && 
+        prev.company_id === newProfile.company_id &&
+        prev.full_name === newProfile.full_name &&
+        prev.role === newProfile.role) {
+      console.log('⏭️ 프로필 변경 없음 — setProfile 건너뜀');
+      return;
+    }
+    profileRef.current = newProfile;
+    setProfile(newProfile);
   };
 
   // 초기 세션 확인 및 Auth 상태 리스너
@@ -99,7 +121,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           console.log('✅ 세션 있음. 프로필 조회 중...');
           const profileData = await fetchProfile(currentSession.user.id);
           if (mounted) {
-            setProfile(profileData);
+            setProfileSafe(profileData);
           }
         } else {
           console.log('ℹ️ 세션 없음 (로그아웃 상태)');
@@ -166,10 +188,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             // ★ setTimeout 300ms 제거 — 불필요한 지연 없이 즉시 조회
             const profileData = await fetchProfile(newSession.user.id);
             if (mounted) {
-              setProfile(profileData);
+              setProfileSafe(profileData);
             }
           }
         } else {
+          profileRef.current = null;
           setProfile(null);
         }
 
@@ -252,6 +275,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signOut = async () => {
     console.log('👋 로그아웃 시도');
     await supabase.auth.signOut();
+    profileRef.current = null;
     setUser(null);
     setSession(null);
     setProfile(null);
