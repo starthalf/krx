@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   ChevronRight, ChevronDown, Download, Upload, Bot, Loader2, Save,
-  AlertCircle, Plus, Trash2, X, Building2, FolderPlus, Sparkles, Edit3
+  AlertCircle, Plus, Trash2, X, Building2, FolderPlus, Sparkles, Edit3, Users
 } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 import { getOrgTypeColor } from '../../utils/helpers';
@@ -30,6 +30,9 @@ export default function OrgStructureManager() {
   const [expandedOrgs, setExpandedOrgs] = useState<Set<string>>(new Set());
   const [isUploading, setIsUploading] = useState(false);
   const [editMode, setEditMode] = useState(false);
+
+  // ★ 실제 배정 인원수 (user_roles 기반)
+  const [memberCounts, setMemberCounts] = useState<Map<string, number>>(new Map());
 
   // 동적 레벨 목록
   const [orgLevels, setOrgLevels] = useState<string[]>([...DEFAULT_LEVELS]);
@@ -80,6 +83,37 @@ export default function OrgStructureManager() {
     }
   };
 
+  // ★ 실제 배정 인원수 조회 (user_roles 기반)
+  useEffect(() => {
+    const fetchMemberCounts = async () => {
+      if (organizations.length === 0) return;
+
+      try {
+        const { data, error } = await supabase
+          .from('user_roles')
+          .select('org_id')
+          .not('org_id', 'is', null);
+
+        if (error) throw error;
+
+        // org_id별로 카운트
+        const counts = new Map<string, number>();
+        (data || []).forEach((row: any) => {
+          const orgId = row.org_id;
+          if (orgId) {
+            counts.set(orgId, (counts.get(orgId) || 0) + 1);
+          }
+        });
+
+        setMemberCounts(counts);
+      } catch (err) {
+        console.error('Failed to fetch member counts:', err);
+      }
+    };
+
+    fetchMemberCounts();
+  }, [organizations]);
+
   // 초기 선택
   useEffect(() => {
     if (organizations.length > 0 && !selectedOrgId) {
@@ -109,6 +143,7 @@ export default function OrgStructureManager() {
     const hasChildren = children.length > 0;
     const isExpanded = expandedOrgs.has(org.id);
     const isSelected = selectedOrgId === org.id;
+    const actualMemberCount = memberCounts.get(org.id) || 0; // ★ 실제 인원수
 
     return (
       <div key={org.id}>
@@ -132,7 +167,8 @@ export default function OrgStructureManager() {
               <span className={`px-1.5 py-0.5 text-xs rounded border ${getOrgTypeColor(org.orgType)}`}>
                 {org.orgType}
               </span>
-              <span className="text-xs text-slate-500">{org.headcount}명</span>
+              {/* ★ 수정: headcount 대신 실제 배정 인원수 */}
+              <span className="text-xs text-slate-500">{actualMemberCount}명</span>
             </div>
           </div>
           <button
@@ -594,13 +630,14 @@ ${existingOrgs || '(없음 - 전사 조직만 있음)'}
                 />
               </div>
 
+              {/* ★ 수정: 인원수를 실제 배정 인원으로 표시 (읽기 전용) */}
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-1">인원수</label>
-                <input type="number" value={selectedOrg.headcount || 0}
-                  onChange={(e) => editMode && updateOrganization(selectedOrg.id, { headcount: parseInt(e.target.value) || 0 })}
-                  disabled={!editMode}
-                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm disabled:bg-white disabled:cursor-default"
-                />
+                <div className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-slate-50 flex items-center gap-2">
+                  <Users className="w-4 h-4 text-slate-400" />
+                  <span className="font-medium text-slate-900">{memberCounts.get(selectedOrg.id) || 0}명</span>
+                  <span className="text-xs text-slate-400">(역할 배정 기준)</span>
+                </div>
               </div>
 
               {editMode && (
@@ -630,6 +667,14 @@ ${existingOrgs || '(없음 - 전사 조직만 있음)'}
             </div>
           )}
         </div>
+      </div>
+
+      {/* 도움말 */}
+      <div className="mt-4 p-3 bg-blue-50 border border-blue-100 rounded-lg">
+        <p className="text-xs text-blue-700">
+          <span className="font-medium">💡 도움말</span>{' '}
+          조직을 추가, 수정, 삭제하거나 AI로 자동 생성할 수 있습니다.
+        </p>
       </div>
 
       {/* 하위 조직 추가 모달 */}
