@@ -150,12 +150,12 @@ const { profile, user, signOut } = useAuth();
 
   const handleLogout = async () => {
     try {
-      await supabase.auth.signOut();
+      await signOut();
       navigate('/login');
     } catch (error) {
       console.error('Logout failed:', error);
     }
-  }; 
+  };
 
   const handleMySettings = () => { setShowDropdown(false); navigate('/my-settings'); };
   const handleAdminSettings = () => { navigate('/admin'); };
