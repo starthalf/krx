@@ -59,17 +59,35 @@ export default function AdminSettings() {
       const { supabase } = await import('../lib/supabase');
       const { data: { user } } = await supabase.auth.getUser();
       
-      if (!user) return;
+      // ★ FIX: user가 null이면 loading을 false로 세팅 후 return
+      //   (토큰 갱신 중일 수 있어 무한 로딩 방지)
+      if (!user) {
+        console.warn('⚠️ AdminSettings: user가 null (토큰 갱신 중일 수 있음)');
+        setLoading(false);
+        return;
+      }
 
       // 사용자의 최고 레벨 역할 가져오기
-      const { data: roles } = await supabase
+      const { data: roles, error } = await supabase
         .from('user_roles')
         .select(`
           role:roles(level)
         `)
         .eq('profile_id', user.id);
 
-      const maxLevel = Math.max(...(roles?.map(r => r.role?.level || 0) || [0]));
+      // ★ FIX: 에러 시에도 로깅 후 계속 진행
+      if (error) {
+        console.error('역할 조회 실패:', error);
+      }
+
+      // ★ FIX: 안전한 maxLevel 계산
+      //   - roles가 null/undefined일 때 빈 배열로 처리
+      //   - r.role이 null일 수 있으므로 optional chaining + 타입 가드
+      const levels = (roles || [])
+        .map(r => (r.role as any)?.level ?? 0)
+        .filter((l): l is number => typeof l === 'number' && l > 0);
+      const maxLevel = levels.length > 0 ? Math.max(...levels) : 0;
+      
       setUserLevel(maxLevel);
 
       // ✅ 기본 탭 설정 — company_admin(80)도 반영
@@ -85,6 +103,7 @@ export default function AdminSettings() {
     } catch (error) {
       console.error('Failed to check permissions:', error);
     } finally {
+      // ★ FIX: 모든 경로(정상/에러/early return)에서 loading = false 보장
       setLoading(false);
     }
   };
