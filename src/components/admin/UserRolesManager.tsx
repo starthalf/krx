@@ -45,7 +45,6 @@ interface RoleEntry {
   roleLevel: number;
   orgId?: string;
   orgName?: string;
-  isTopLevelOrg?: boolean; // ★ 최상위 조직 여부
 }
 
 interface UserWithRoles {
@@ -71,9 +70,6 @@ export default function UserRolesManager() {
   const [showEditModal, setShowEditModal] = useState(false);
   const [targetUserId, setTargetUserId] = useState<string | null>(null);
   const [editingUserRole, setEditingUserRole] = useState<RoleEntry | null>(null);
-
-  // ★ 최상위 조직 찾기 헬퍼
-  const topLevelOrg = organizations.find(org => !org.parent_id);
 
   useEffect(() => { loadAll(); }, []);
 
@@ -127,7 +123,7 @@ export default function UserRolesManager() {
         .select(`
           id, profile_id, role_id, org_id,
           roles ( name, display_name, level ),
-          organizations ( id, name, parent_id )
+          organizations ( id, name )
         `)
         .in('profile_id', profileIds);
 
@@ -151,7 +147,6 @@ export default function UserRolesManager() {
           roleLevel: ur.roles?.level || 0,
           orgId: ur.org_id || undefined,
           orgName: ur.organizations?.name || undefined,
-          isTopLevelOrg: ur.organizations ? !ur.organizations.parent_id : false, // ★ 최상위 조직 여부
         }));
 
         return {
@@ -262,7 +257,6 @@ export default function UserRolesManager() {
                 key={user.id}
                 user={user}
                 organizations={organizations}
-                topLevelOrg={topLevelOrg}
                 onAddRole={() => { setTargetUserId(user.id); setShowAssignModal(true); }}
                 onRevokeRole={handleRevokeRole}
                 onChangeOrg={handleChangeOrg}
@@ -276,7 +270,6 @@ export default function UserRolesManager() {
       {showAssignModal && targetUserId && (
         <AssignRoleModal
           roles={allRoles} organizations={organizations} myRoleLevel={myRoleLevel}
-          topLevelOrg={topLevelOrg}
           userName={usersWithRoles.find(u => u.id === targetUserId)?.full_name || ''}
           onAssign={handleAssignRole}
           onClose={() => { setShowAssignModal(false); setTargetUserId(null); }}
@@ -286,7 +279,6 @@ export default function UserRolesManager() {
       {showEditModal && editingUserRole && targetUserId && (
         <EditRoleModal
           currentRole={editingUserRole} roles={allRoles} organizations={organizations} myRoleLevel={myRoleLevel}
-          topLevelOrg={topLevelOrg}
           userName={usersWithRoles.find(u => u.id === targetUserId)?.full_name || ''}
           onSave={handleEditRole}
           onClose={() => { setShowEditModal(false); setEditingUserRole(null); setTargetUserId(null); }}
@@ -299,8 +291,8 @@ export default function UserRolesManager() {
 // ============================================
 // 사용자 행
 // ============================================
-function UserRow({ user, organizations, topLevelOrg, onAddRole, onRevokeRole, onChangeOrg, onEditRole }: {
-  user: UserWithRoles; organizations: any[]; topLevelOrg: any;
+function UserRow({ user, organizations, onAddRole, onRevokeRole, onChangeOrg, onEditRole }: {
+  user: UserWithRoles; organizations: any[];
   onAddRole: () => void; onRevokeRole: (id: string) => void;
   onChangeOrg: (urId: string, userId: string, roleId: string, newOrgId: string) => void;
   onEditRole: (r: RoleEntry) => void;
@@ -372,21 +364,8 @@ function UserRow({ user, organizations, topLevelOrg, onAddRole, onRevokeRole, on
                   className="w-full px-2 py-1.5 border border-blue-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-500 outline-none"
                   autoFocus onBlur={() => setShowOrgSelect(null)}
                 >
-                  {/* ★ CEO/회사관리자는 최상위 조직(전사)만 선택 가능 */}
-                  {role.roleLevel >= 80 ? (
-                    topLevelOrg ? (
-                      <option value={topLevelOrg.id}>{topLevelOrg.name} (전사)</option>
-                    ) : (
-                      <option value="">전사</option>
-                    )
-                  ) : (
-                    <>
-                      <option value="">미지정</option>
-                      {organizations.map((org) => (
-                        <option key={org.id} value={org.id}>{org.name}</option>
-                      ))}
-                    </>
-                  )}
+                  <option value="">전체 (미지정)</option>
+                  {organizations.map((org) => (<option key={org.id} value={org.id}>{org.name}</option>))}
                 </select>
               ) : (
                 <button
@@ -395,14 +374,13 @@ function UserRow({ user, organizations, topLevelOrg, onAddRole, onRevokeRole, on
                   title="클릭하여 조직 변경"
                 >
                   <Building2 className="w-3.5 h-3.5 text-slate-400 group-hover:text-blue-500" />
-                  {/* ★ 최상위 조직이면서 CEO/회사관리자인 경우 "(전사)" 표시 */}
+                  {/* ★ FIX: CEO/Admin은 org_id가 null이므로 역할 레벨에 맞게 표시 */}
                   {role.orgName ? (
-                    <>
-                      <span>{role.orgName}</span>
-                      {role.roleLevel >= 80 && role.isTopLevelOrg && (
-                        <span className="text-red-600 font-semibold text-xs ml-1">(전사)</span>
-                      )}
-                    </>
+                    <span>{role.orgName}</span>
+                  ) : role.roleLevel >= 90 ? (
+                    <span className="text-red-600 font-medium text-xs">전사</span>
+                  ) : role.roleLevel >= 80 ? (
+                    <span className="text-orange-600 font-medium text-xs">전사 관리</span>
                   ) : (
                     <span className="text-slate-400 italic text-xs">미지정</span>
                   )}
@@ -434,8 +412,8 @@ function UserRow({ user, organizations, topLevelOrg, onAddRole, onRevokeRole, on
 // ============================================
 // 역할 할당 모달
 // ============================================
-function AssignRoleModal({ roles, organizations, myRoleLevel, topLevelOrg, userName, onAssign, onClose }: {
-  roles: Role[]; organizations: any[]; myRoleLevel: number; topLevelOrg: any; userName: string;
+function AssignRoleModal({ roles, organizations, myRoleLevel, userName, onAssign, onClose }: {
+  roles: Role[]; organizations: any[]; myRoleLevel: number; userName: string;
   onAssign: (roleId: string, orgId?: string) => void; onClose: () => void;
 }) {
   const [selectedRoleId, setSelectedRoleId] = useState('');
@@ -443,13 +421,6 @@ function AssignRoleModal({ roles, organizations, myRoleLevel, topLevelOrg, userN
   const assignableRoles = getAssignableRoles(roles, myRoleLevel);
   const selectedRole = roles.find(r => r.id === selectedRoleId);
   const needsOrgSelection = selectedRole && selectedRole.level <= ROLE_LEVELS.ORG_LEADER;
-
-  // ★ CEO/회사관리자는 자동으로 최상위 조직 선택
-  useEffect(() => {
-    if (selectedRole && selectedRole.level >= 80 && topLevelOrg) {
-      setSelectedOrgId(topLevelOrg.id);
-    }
-  }, [selectedRole, topLevelOrg]);
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -475,7 +446,7 @@ function AssignRoleModal({ roles, organizations, myRoleLevel, topLevelOrg, userN
                   const isSelected = selectedRoleId === role.id;
                   return (
                     <button key={role.id}
-                      onClick={() => setSelectedRoleId(role.id)}
+                      onClick={() => { setSelectedRoleId(role.id); if (role.level >= ROLE_LEVELS.COMPANY_ADMIN) setSelectedOrgId(''); }}
                       className={`w-full text-left rounded-xl border-2 p-4 transition-all ${isSelected ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-200' : 'border-slate-200 bg-white hover:border-slate-300'}`}>
                       <div className="flex items-start gap-3">
                         <div className={`p-2 rounded-lg ${isSelected ? 'bg-blue-100' : 'bg-slate-100'} flex-shrink-0`}>
@@ -505,27 +476,15 @@ function AssignRoleModal({ roles, organizations, myRoleLevel, topLevelOrg, userN
             <div>
               <label className="block text-sm font-semibold text-slate-800 mb-2">
                 적용 조직
-                {selectedRole?.level >= 80 ? (
-                  <span className="font-normal text-red-500 ml-1">(전사 고정)</span>
-                ) : selectedRole?.level === ROLE_LEVELS.ORG_LEADER ? (
-                  <span className="font-normal text-red-500 ml-1">(필수)</span>
-                ) : (
-                  <span className="font-normal text-slate-400 ml-1">(선택)</span>
-                )}
+                {selectedRole?.level === ROLE_LEVELS.ORG_LEADER
+                  ? <span className="font-normal text-red-500 ml-1">(필수)</span>
+                  : <span className="font-normal text-slate-400 ml-1">(선택)</span>}
               </label>
-              
-              {/* ★ CEO/회사관리자는 최상위 조직만 표시 */}
-              {selectedRole?.level >= 80 ? (
-                <div className="px-4 py-2.5 border border-slate-300 rounded-lg bg-slate-50 text-sm text-slate-700">
-                  {topLevelOrg ? `${topLevelOrg.name} (전사)` : '전사'}
-                </div>
-              ) : (
-                <select value={selectedOrgId} onChange={(e) => setSelectedOrgId(e.target.value)}
-                  className="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
-                  <option value="">{selectedRole?.level === ROLE_LEVELS.ORG_LEADER ? '-- 조직을 선택하세요 --' : '전체 (미지정)'}</option>
-                  {organizations.map((org) => (<option key={org.id} value={org.id}>{org.name}</option>))}
-                </select>
-              )}
+              <select value={selectedOrgId} onChange={(e) => setSelectedOrgId(e.target.value)}
+                className="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+                <option value="">{selectedRole?.level === ROLE_LEVELS.ORG_LEADER ? '-- 조직을 선택하세요 --' : '전체 (미지정)'}</option>
+                {organizations.map((org) => (<option key={org.id} value={org.id}>{org.name}</option>))}
+              </select>
             </div>
           )}
         </div>
@@ -546,8 +505,8 @@ function AssignRoleModal({ roles, organizations, myRoleLevel, topLevelOrg, userN
 // ============================================
 // 역할 수정 모달
 // ============================================
-function EditRoleModal({ currentRole, roles, organizations, myRoleLevel, topLevelOrg, userName, onSave, onClose }: {
-  currentRole: RoleEntry; roles: Role[]; organizations: any[]; myRoleLevel: number; topLevelOrg: any; userName: string;
+function EditRoleModal({ currentRole, roles, organizations, myRoleLevel, userName, onSave, onClose }: {
+  currentRole: RoleEntry; roles: Role[]; organizations: any[]; myRoleLevel: number; userName: string;
   onSave: (urId: string, newRoleId: string, newOrgId?: string) => void; onClose: () => void;
 }) {
   const [selectedRoleId, setSelectedRoleId] = useState(currentRole.roleId);
@@ -556,13 +515,6 @@ function EditRoleModal({ currentRole, roles, organizations, myRoleLevel, topLeve
   const selectedRole = roles.find(r => r.id === selectedRoleId);
   const needsOrgSelection = selectedRole && selectedRole.level <= ROLE_LEVELS.ORG_LEADER;
   const hasChanged = selectedRoleId !== currentRole.roleId || selectedOrgId !== (currentRole.orgId || '');
-
-  // ★ CEO/회사관리자는 자동으로 최상위 조직 선택
-  useEffect(() => {
-    if (selectedRole && selectedRole.level >= 80 && topLevelOrg) {
-      setSelectedOrgId(topLevelOrg.id);
-    }
-  }, [selectedRole, topLevelOrg]);
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -581,14 +533,7 @@ function EditRoleModal({ currentRole, roles, organizations, myRoleLevel, topLeve
             <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${getRoleBadge(currentRole.roleLevel).bg} ${getRoleBadge(currentRole.roleLevel).text}`}>
               {currentRole.roleDisplayName}
             </span>
-            {currentRole.orgName && (
-              <>
-                <span className="text-xs text-slate-500">@ {currentRole.orgName}</span>
-                {currentRole.isTopLevelOrg && currentRole.roleLevel >= 80 && (
-                  <span className="text-xs text-red-600 font-semibold">(전사)</span>
-                )}
-              </>
-            )}
+            {currentRole.orgName && <span className="text-xs text-slate-500">@ {currentRole.orgName}</span>}
           </div>
         </div>
 
@@ -596,39 +541,24 @@ function EditRoleModal({ currentRole, roles, organizations, myRoleLevel, topLeve
           <div>
             <label className="block text-sm font-semibold text-slate-800 mb-2">새 역할</label>
             <select value={selectedRoleId}
-              onChange={(e) => setSelectedRoleId(e.target.value)}
+              onChange={(e) => { setSelectedRoleId(e.target.value); const r = roles.find(r => r.id === e.target.value); if (r && r.level >= ROLE_LEVELS.COMPANY_ADMIN) setSelectedOrgId(''); }}
               className="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
               {assignableRoles.map((role) => (
                 <option key={role.id} value={role.id}>{role.display_name} (Lv.{role.level})</option>
               ))}
             </select>
           </div>
-          
           {needsOrgSelection && (
             <div>
               <label className="block text-sm font-semibold text-slate-800 mb-2">
                 적용 조직
-                {selectedRole?.level >= 80 ? (
-                  <span className="font-normal text-red-500 ml-1">(전사 고정)</span>
-                ) : selectedRole?.level === ROLE_LEVELS.ORG_LEADER ? (
-                  <span className="font-normal text-red-500 ml-1">(필수)</span>
-                ) : (
-                  <span className="font-normal text-slate-400 ml-1">(선택)</span>
-                )}
+                {selectedRole?.level === ROLE_LEVELS.ORG_LEADER ? <span className="font-normal text-red-500 ml-1">(필수)</span> : <span className="font-normal text-slate-400 ml-1">(선택)</span>}
               </label>
-              
-              {/* ★ CEO/회사관리자는 최상위 조직만 표시 */}
-              {selectedRole?.level >= 80 ? (
-                <div className="px-4 py-2.5 border border-slate-300 rounded-lg bg-slate-50 text-sm text-slate-700">
-                  {topLevelOrg ? `${topLevelOrg.name} (전사)` : '전사'}
-                </div>
-              ) : (
-                <select value={selectedOrgId} onChange={(e) => setSelectedOrgId(e.target.value)}
-                  className="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
-                  <option value="">{selectedRole?.level === ROLE_LEVELS.ORG_LEADER ? '-- 조직을 선택하세요 --' : '전체 (미지정)'}</option>
-                  {organizations.map((org) => (<option key={org.id} value={org.id}>{org.name}</option>))}
-                </select>
-              )}
+              <select value={selectedOrgId} onChange={(e) => setSelectedOrgId(e.target.value)}
+                className="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+                <option value="">{selectedRole?.level === ROLE_LEVELS.ORG_LEADER ? '-- 조직을 선택하세요 --' : '전체 (미지정)'}</option>
+                {organizations.map((org) => (<option key={org.id} value={org.id}>{org.name}</option>))}
+              </select>
             </div>
           )}
         </div>
@@ -644,4 +574,4 @@ function EditRoleModal({ currentRole, roles, organizations, myRoleLevel, topLeve
       </div>
     </div>
   );
-}
+} 
