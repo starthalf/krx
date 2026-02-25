@@ -374,7 +374,16 @@ function UserRow({ user, organizations, onAddRole, onRevokeRole, onChangeOrg, on
                   title="클릭하여 조직 변경"
                 >
                   <Building2 className="w-3.5 h-3.5 text-slate-400 group-hover:text-blue-500" />
-                  <span className={role.orgName ? '' : 'text-slate-400 italic text-xs'}>{role.orgName || '전체'}</span>
+                  {/* ★ FIX: CEO/Admin은 org_id가 null이므로 역할 레벨에 맞게 표시 */}
+                  {role.orgName ? (
+                    <span>{role.orgName}</span>
+                  ) : role.roleLevel >= 90 ? (
+                    <span className="text-red-600 font-medium text-xs">전사</span>
+                  ) : role.roleLevel >= 80 ? (
+                    <span className="text-orange-600 font-medium text-xs">전사 관리</span>
+                  ) : (
+                    <span className="text-slate-400 italic text-xs">미지정</span>
+                  )}
                   <Pencil className="w-3 h-3 text-slate-300 opacity-0 group-hover:opacity-100" />
                 </button>
               )}
