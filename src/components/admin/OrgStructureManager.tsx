@@ -19,6 +19,16 @@ function getChildLevel(parentLevel: string, levels: string[]): string {
   return levels[idx + 1];
 }
 
+// ★ FIX: 편집용 로컬 폼 타입 정의
+interface EditFormData {
+  name: string;
+  level: string;
+  orgType: string;
+  mission: string;
+  functionTags: string[];
+  headcount: number;
+}
+
 export default function OrgStructureManager() {
   const {
     organizations, fetchOrganizations, addOrganization, updateOrganization,
@@ -30,6 +40,9 @@ export default function OrgStructureManager() {
   const [expandedOrgs, setExpandedOrgs] = useState<Set<string>>(new Set());
   const [isUploading, setIsUploading] = useState(false);
   const [editMode, setEditMode] = useState(false);
+
+  // ★ FIX: 편집용 로컬 state — Supabase 직접 호출 대신 로컬에서 수정 후 저장 시 1회 호출
+  const [editForm, setEditForm] = useState<EditFormData | null>(null);
 
   // 동적 레벨 목록
   const [orgLevels, setOrgLevels] = useState<string[]>([...DEFAULT_LEVELS]);
@@ -93,6 +106,34 @@ export default function OrgStructureManager() {
 
   const selectedOrg = organizations.find(org => org.id === selectedOrgId);
 
+  // ★ FIX: 조직 선택이 변경되면 편집 모드 해제
+  useEffect(() => {
+    if (editMode) {
+      setEditMode(false);
+      setEditForm(null);
+    }
+  }, [selectedOrgId]);
+
+  // ★ FIX: 편집 모드 진입 — 현재 조직 데이터를 로컬 폼에 복사
+  const enterEditMode = () => {
+    if (!selectedOrg) return;
+    setEditForm({
+      name: selectedOrg.name,
+      level: selectedOrg.level,
+      orgType: selectedOrg.orgType,
+      mission: selectedOrg.mission || '',
+      functionTags: selectedOrg.functionTags || [],
+      headcount: selectedOrg.headcount || 0,
+    });
+    setEditMode(true);
+  };
+
+  // ★ FIX: 편집 모드 취소 — 로컬 폼 데이터 버리기
+  const cancelEditMode = () => {
+    setEditForm(null);
+    setEditMode(false);
+  };
+
   // 트리
   const toggleExpand = (orgId: string) => {
     const newExpanded = new Set(expandedOrgs);
@@ -152,19 +193,24 @@ export default function OrgStructureManager() {
 
   const rootOrgs = organizations.filter(org => org.parentOrgId === null);
 
-  // 저장
+  // ★ FIX: 저장 — editForm 로컬 데이터를 한 번에 Supabase로 전송
   const handleSave = async () => {
-    if (!selectedOrg) return;
-    await updateOrganization(selectedOrg.id, {
-      name: selectedOrg.name,
-      mission: selectedOrg.mission,
-      level: selectedOrg.level,
-      orgType: selectedOrg.orgType,
-      functionTags: selectedOrg.functionTags,
-      headcount: selectedOrg.headcount
-    });
-    setEditMode(false);
-    alert('✅ 조직 정보가 저장되었습니다');
+    if (!selectedOrg || !editForm) return;
+    try {
+      await updateOrganization(selectedOrg.id, {
+        name: editForm.name,
+        mission: editForm.mission,
+        level: editForm.level,
+        orgType: editForm.orgType,
+        functionTags: editForm.functionTags,
+        headcount: editForm.headcount,
+      });
+      setEditMode(false);
+      setEditForm(null);
+      alert('✅ 조직 정보가 저장되었습니다');
+    } catch (err: any) {
+      alert('저장 실패: ' + err.message);
+    }
   };
 
   // 조직 삭제
@@ -185,6 +231,8 @@ export default function OrgStructureManager() {
       const root = organizations.find(o => !o.parentOrgId && o.id !== orgId);
       setSelectedOrgId(root?.id || null);
     }
+    setEditMode(false);
+    setEditForm(null);
     alert('✅ 조직이 삭제되었습니다');
   };
 
@@ -532,19 +580,22 @@ ${existingOrgs || '(없음 - 전사 조직만 있음)'}
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <h3 className="font-semibold text-slate-900">조직 정보</h3>
+                {/* ★ FIX: 편집 버튼이 enterEditMode / cancelEditMode 호출 */}
                 <button
-                  onClick={() => setEditMode(!editMode)}
+                  onClick={() => editMode ? cancelEditMode() : enterEditMode()}
                   className={`px-2 py-1 text-xs rounded ${editMode ? 'bg-blue-100 text-blue-700' : 'bg-slate-200 text-slate-600'}`}
                 >
                   <Edit3 className="w-3 h-3 inline mr-1" />
-                  {editMode ? '편집 중' : '편집'}
+                  {editMode ? '취소' : '편집'}
                 </button>
               </div>
 
+              {/* ★ FIX: 편집 시 editForm 로컬 state 사용, 비편집 시 selectedOrg 직접 표시 */}
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-1">조직명</label>
-                <input type="text" value={selectedOrg.name}
-                  onChange={(e) => editMode && updateOrganization(selectedOrg.id, { name: e.target.value })}
+                <input type="text"
+                  value={editMode && editForm ? editForm.name : selectedOrg.name}
+                  onChange={(e) => editForm && setEditForm({ ...editForm, name: e.target.value })}
                   disabled={!editMode}
                   className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm disabled:bg-white disabled:cursor-default"
                 />
@@ -553,8 +604,9 @@ ${existingOrgs || '(없음 - 전사 조직만 있음)'}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-slate-600 mb-1">레벨</label>
-                  <select value={selectedOrg.level}
-                    onChange={(e) => editMode && updateOrganization(selectedOrg.id, { level: e.target.value as any })}
+                  <select
+                    value={editMode && editForm ? editForm.level : selectedOrg.level}
+                    onChange={(e) => editForm && setEditForm({ ...editForm, level: e.target.value })}
                     disabled={!editMode}
                     className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm disabled:bg-white disabled:cursor-default">
                     {orgLevels.map(l => <option key={l} value={l}>{l}</option>)}
@@ -562,8 +614,9 @@ ${existingOrgs || '(없음 - 전사 조직만 있음)'}
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-slate-600 mb-1">유형</label>
-                  <select value={selectedOrg.orgType}
-                    onChange={(e) => editMode && updateOrganization(selectedOrg.id, { orgType: e.target.value as any })}
+                  <select
+                    value={editMode && editForm ? editForm.orgType : selectedOrg.orgType}
+                    onChange={(e) => editForm && setEditForm({ ...editForm, orgType: e.target.value })}
                     disabled={!editMode}
                     className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm disabled:bg-white disabled:cursor-default">
                     <option value="Front">Front</option>
@@ -575,8 +628,10 @@ ${existingOrgs || '(없음 - 전사 조직만 있음)'}
 
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-1">미션</label>
-                <textarea value={selectedOrg.mission || ''} rows={2}
-                  onChange={(e) => editMode && updateOrganization(selectedOrg.id, { mission: e.target.value })}
+                <textarea
+                  value={editMode && editForm ? editForm.mission : (selectedOrg.mission || '')}
+                  onChange={(e) => editForm && setEditForm({ ...editForm, mission: e.target.value })}
+                  rows={2}
                   disabled={!editMode}
                   className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm resize-none disabled:bg-white disabled:cursor-default"
                 />
@@ -585,8 +640,9 @@ ${existingOrgs || '(없음 - 전사 조직만 있음)'}
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-1">기능 태그</label>
                 <input type="text" placeholder="쉼표로 구분"
-                  value={(selectedOrg.functionTags || []).join(', ')}
-                  onChange={(e) => editMode && updateOrganization(selectedOrg.id, {
+                  value={editMode && editForm ? editForm.functionTags.join(', ') : (selectedOrg.functionTags || []).join(', ')}
+                  onChange={(e) => editForm && setEditForm({
+                    ...editForm,
                     functionTags: e.target.value.split(',').map(t => t.trim()).filter(Boolean)
                   })}
                   disabled={!editMode}
@@ -596,8 +652,9 @@ ${existingOrgs || '(없음 - 전사 조직만 있음)'}
 
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-1">인원수</label>
-                <input type="number" value={selectedOrg.headcount || 0}
-                  onChange={(e) => editMode && updateOrganization(selectedOrg.id, { headcount: parseInt(e.target.value) || 0 })}
+                <input type="number"
+                  value={editMode && editForm ? editForm.headcount : (selectedOrg.headcount || 0)}
+                  onChange={(e) => editForm && setEditForm({ ...editForm, headcount: parseInt(e.target.value) || 0 })}
                   disabled={!editMode}
                   className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm disabled:bg-white disabled:cursor-default"
                 />
