@@ -1,5 +1,5 @@
 // src/pages/AdminSettings.tsx
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { 
   Shield, Users, Layers, Lock, Settings as SettingsIcon, ChevronRight, 
@@ -11,10 +11,11 @@ import OrgStructureManager from '../components/admin/OrgStructureManager';
 import RolePermissionsManager from '../components/admin/RolePermissionsManager';
 import CompanyManagement from '../components/admin/CompanyManagement';
 import UserInvitation from '../components/admin/UserInvitation';
-// ✅ 통합된 기간 & 수립 관리 컴포넌트
 import UnifiedPeriodManager from '../components/admin/UnifiedPeriodManager';
-// [NEW] 성과 히스토리
 import PeriodHistoryViewer from '../components/admin/PeriodHistoryViewer';
+// ★ FIX: dynamic import 제거 → 정적 import
+import { supabase } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
 
 type TabType = 'companies' | 'invite' | 'users' | 'roles' | 'structure' | 'levels' | 'permissions' | 'periods' | 'history';
 
@@ -36,12 +37,14 @@ const TAB_ALIASES: Record<string, TabType> = {
 export default function AdminSettings() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const { user } = useAuth();  // ★ FIX: AuthContext에서 user 가져오기
   const tabParam = searchParams.get('tab');
   const initialTab: TabType = (tabParam && TAB_ALIASES[tabParam]) || 'companies';
 
   const [activeTab, setActiveTab] = useState<TabType>(initialTab);
   const [userLevel, setUserLevel] = useState<number>(0);
   const [loading, setLoading] = useState(true);
+  const mountedRef = useRef(true);
 
   // URL 파라미터 변경 시 탭 동기화
   useEffect(() => {
@@ -50,47 +53,60 @@ export default function AdminSettings() {
     }
   }, [tabParam]);
 
+  // ★ FIX: user가 준비되면 권한 체크 실행
+  //   이전: useEffect([], []) → 마운트 시 1회, 이때 user null이면 영영 안 됨
+  //   이후: user?.id 의존성 → user 준비되면 실행, re-mount 시에도 정상 동작
   useEffect(() => {
-    checkUserPermissions();
-  }, []);
+    mountedRef.current = true;
+    
+    console.log('🔍 AdminSettings: useEffect, user =', user?.id || 'NULL');
+    
+    if (!user) {
+      // user 아직 없으면 5초 안전장치
+      const timeout = setTimeout(() => {
+        if (mountedRef.current) {
+          console.warn('⚠️ AdminSettings: 5초 타임아웃 — loading 해제');
+          setLoading(false);
+        }
+      }, 5000);
+      return () => { clearTimeout(timeout); mountedRef.current = false; };
+    }
 
-  const checkUserPermissions = async () => {
+    checkUserPermissions(user.id);
+    
+    return () => { mountedRef.current = false; };
+  }, [user?.id]);
+
+  const checkUserPermissions = async (userId: string) => {
+    console.log('🔍 AdminSettings: checkUserPermissions 시작');
+    
     try {
-      const { supabase } = await import('../lib/supabase');
-      const { data: { user } } = await supabase.auth.getUser();
-      
-      // ★ FIX: user가 null이면 loading을 false로 세팅 후 return
-      //   (토큰 갱신 중일 수 있어 무한 로딩 방지)
-      if (!user) {
-        console.warn('⚠️ AdminSettings: user가 null (토큰 갱신 중일 수 있음)');
-        setLoading(false);
-        return;
-      }
+      setLoading(true);
 
-      // 사용자의 최고 레벨 역할 가져오기
       const { data: roles, error } = await supabase
         .from('user_roles')
         .select(`
           role:roles(level)
         `)
-        .eq('profile_id', user.id);
+        .eq('profile_id', userId);
 
-      // ★ FIX: 에러 시에도 로깅 후 계속 진행
+      console.log('🔍 AdminSettings: roles =', roles, 'error =', error);
+
+      if (!mountedRef.current) return;
+
       if (error) {
         console.error('역할 조회 실패:', error);
       }
 
-      // ★ FIX: 안전한 maxLevel 계산
-      //   - roles가 null/undefined일 때 빈 배열로 처리
-      //   - r.role이 null일 수 있으므로 optional chaining + 타입 가드
       const levels = (roles || [])
         .map(r => (r.role as any)?.level ?? 0)
         .filter((l): l is number => typeof l === 'number' && l > 0);
       const maxLevel = levels.length > 0 ? Math.max(...levels) : 0;
       
+      console.log('🔍 AdminSettings: maxLevel =', maxLevel);
+      
       setUserLevel(maxLevel);
 
-      // ✅ 기본 탭 설정 — company_admin(80)도 반영
       if (!tabParam) {
         if (maxLevel >= 100) {
           setActiveTab('companies');
@@ -103,12 +119,13 @@ export default function AdminSettings() {
     } catch (error) {
       console.error('Failed to check permissions:', error);
     } finally {
-      // ★ FIX: 모든 경로(정상/에러/early return)에서 loading = false 보장
-      setLoading(false);
+      if (mountedRef.current) {
+        console.log('🔍 AdminSettings: loading = false');
+        setLoading(false);
+      }
     }
   };
 
-  // ✅ minLevel: 관리 탭은 80 (company_admin), 회사 관리만 100 (super_admin)
   const tabs = [
     { id: 'companies' as TabType, name: '회사 관리', icon: Building2, description: '등록된 회사 목록 및 관리 (Super Admin)', minLevel: 100 },
     { id: 'invite' as TabType, name: '사용자 초대', icon: Mail, description: '새로운 팀원 초대 및 초대 관리', minLevel: 80 },
@@ -121,13 +138,15 @@ export default function AdminSettings() {
     { id: 'permissions' as TabType, name: '권한 목록', icon: Lock, description: '전체 권한 목록 조회', minLevel: 80 },
   ];
 
-  // 권한에 맞는 탭만 필터링
   const visibleTabs = tabs.filter(tab => userLevel >= tab.minLevel);
 
   if (loading) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-3"></div>
+          <p className="text-sm text-slate-500">권한 확인 중...</p>
+        </div>
       </div>
     );
   }
@@ -139,7 +158,6 @@ export default function AdminSettings() {
         <div className="max-w-7xl mx-auto px-6 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
-              {/* 뒤로가기 버튼 */}
               <button
                 onClick={() => navigate('/')}
                 className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
@@ -159,7 +177,6 @@ export default function AdminSettings() {
               </div>
             </div>
             
-            {/* 닫기 버튼 */}
             <button
               onClick={() => navigate('/')}
               className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
@@ -174,7 +191,6 @@ export default function AdminSettings() {
       {/* 메인 컨텐츠 */}
       <div className="max-w-7xl mx-auto px-6 py-8">
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-          {/* 왼쪽 사이드바 - 탭 메뉴 */}
           <div className="lg:col-span-1">
             <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-2">
               {visibleTabs.map((tab) => (
@@ -194,7 +210,6 @@ export default function AdminSettings() {
               ))}
             </div>
 
-            {/* 도움말 카드 */}
             <div className="mt-6 bg-gradient-to-br from-purple-50 to-blue-50 rounded-xl border border-purple-100 p-4">
               <h3 className="text-sm font-semibold text-purple-900 mb-2">💡 도움말</h3>
               <p className="text-xs text-purple-700 leading-relaxed">
@@ -211,7 +226,6 @@ export default function AdminSettings() {
             </div>
           </div>
 
-          {/* 오른쪽 컨텐츠 영역 */}
           <div className="lg:col-span-3">
             <div className="bg-white rounded-xl border border-slate-200 p-6">
               {activeTab === 'companies' && <CompanyManagement />}
@@ -231,37 +245,22 @@ export default function AdminSettings() {
   );
 }
 
-// ============================================
-// 1. 사용자 관리 컴포넌트
-// ============================================
 function UserManagement() {
   return <UserRolesManager />;
 }
 
-// ============================================
-// 2. 역할 관리 컴포넌트
-// ============================================
 function RoleManagement() {
   return <RolePermissionsManager />;
 }
 
-// ============================================
-// 3. 조직 구조 관리 컴포넌트 (조직 추가/수정/삭제)
-// ============================================
 function StructureManagement() {
   return <OrgStructureManager />;
 }
 
-// ============================================
-// 3-1. 조직 계층 설정 컴포넌트 (계층 템플릿)
-// ============================================
 function LevelSettings() {
   return <OrgStructureSettings />;
 }
 
-// ============================================
-// 4. 권한 목록 컴포넌트
-// ============================================
 function PermissionsList() {
   return (
     <div>
