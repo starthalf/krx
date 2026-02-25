@@ -1,5 +1,5 @@
 // src/pages/Dashboard.tsx
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useStore } from '../store/useStore';
 import { getBIIColor } from '../utils/helpers';
 import { 
@@ -32,10 +32,20 @@ export default function Dashboard() {
   const [managableOrgs, setManagableOrgs] = useState<string[]>([]);
   const [permissionsLoading, setPermissionsLoading] = useState(true);
 
-  // 1. 권한 체크
+  // ★ FIX: organizations 배열의 ID를 문자열로 안정화하여 참조 비교 대신 값 비교
+  const orgIds = organizations.map(o => o.id).join(',');
+
+  // ★ FIX: 권한 체크 중복 실행 방지
+  const permCheckRef = useRef(false);
+
+  // 1. 권한 체크 — orgIds 문자열이 변경될 때만 실행
   useEffect(() => {
+    // 중복 실행 방지
+    if (permCheckRef.current) return;
+
     const checkPermissions = async () => {
       try {
+        permCheckRef.current = true;
         setPermissionsLoading(true);
         
         const level = await getMyRoleLevel();
@@ -48,39 +58,57 @@ export default function Dashboard() {
             managable.push(org.id);
           }
         }
-        setManagableOrgs(managable);
+        
+        // ★ FIX: 이전 값과 비교하여 실제 변경 시에만 state 업데이트
+        setManagableOrgs(prev => {
+          const prevKey = prev.join(',');
+          const newKey = managable.join(',');
+          return prevKey === newKey ? prev : managable;
+        });
       } catch (error) {
         console.error('Failed to check permissions:', error);
       } finally {
         setPermissionsLoading(false);
+        permCheckRef.current = false;
       }
     };
 
     if (organizations.length > 0) {
       checkPermissions();
+    } else {
+      setPermissionsLoading(false);
     }
-  }, [organizations]);
+  }, [orgIds]); // ★ FIX: organizations 배열 참조 대신 orgIds 문자열 비교
 
-  // 2. 초기 데이터 로딩 및 조직 선택
+  // ★ FIX: managableOrgs도 문자열로 안정화
+  const managableOrgsKey = managableOrgs.join(',');
+
+  // 2-a. 초기 조직 선택 (한 번만)
+  useEffect(() => {
+    if (organizations.length > 0 && !permissionsLoading && !selectedOrgId) {
+      let defaultOrg;
+      if (managableOrgs.length > 0) {
+        defaultOrg = organizations.find(o => o.id === managableOrgs[0]);
+      }
+      if (!defaultOrg) {
+        defaultOrg = organizations.find(o => !o.parentOrgId) || organizations[0];
+      }
+      if (defaultOrg) setSelectedOrgId(defaultOrg.id);
+    }
+  }, [orgIds, managableOrgsKey, permissionsLoading]);
+  // ★ FIX: selectedOrgId를 의존성에서 제거 — 이미 선택된 상태면 재실행 불필요
+
+  // 2-b. 대시보드 통계 로딩 (조직 목록 확정 후 1회)
   useEffect(() => {
     if (organizations.length > 0 && !permissionsLoading) {
-      if (!selectedOrgId) {
-        let defaultOrg;
-        if (managableOrgs.length > 0) {
-          defaultOrg = organizations.find(o => o.id === managableOrgs[0]);
-        }
-        if (!defaultOrg) {
-          defaultOrg = organizations.find(o => !o.parentOrgId) || organizations[0];
-        }
-        if (defaultOrg) setSelectedOrgId(defaultOrg.id);
-      }
-
-      const companyId = organizations[0].companyId;
+      const companyId = organizations[0]?.companyId;
       if (companyId) {
         fetchDashboardStats(companyId);
       }
     }
-  }, [organizations, selectedOrgId, managableOrgs, permissionsLoading, fetchDashboardStats]);
+  }, [orgIds, permissionsLoading]);
+  // ★ FIX: managableOrgs, selectedOrgId, fetchDashboardStats를 의존성에서 제거
+  //   → 무한 루프의 핵심 원인이었음
 
   // 3. 선택된 조직의 상세 데이터 로딩
   useEffect(() => {
@@ -88,7 +116,7 @@ export default function Dashboard() {
       fetchObjectives(selectedOrgId);
       fetchKRs(selectedOrgId);
     }
-  }, [selectedOrgId, fetchObjectives, fetchKRs]);
+  }, [selectedOrgId]); // ★ FIX: fetchObjectives, fetchKRs 의존성 제거 (Zustand 함수 참조 안정성 불확실)
 
   // 데이터 집계
   const currentOrg = organizations.find(o => o.id === selectedOrgId);
@@ -249,16 +277,17 @@ export default function Dashboard() {
           <div>
             <div className="text-3xl font-bold text-slate-900">{activeObjectives.length}</div>
             <div className="flex gap-2 mt-3">
-              {Object.entries(biiStats).map(([key, count]) => (
-                count > 0 && (
+              {/* ★ FIX: .filter() 후 .map()으로 변경 — false 반환 방지 */}
+              {Object.entries(biiStats)
+                .filter(([_, count]) => count > 0)
+                .map(([key, count]) => (
                   <span
                     key={key}
                     className={`px-2 py-1 rounded text-xs font-medium ${getBIIColor(key as any)}`}
                   >
                     {key}: {count}
                   </span>
-                )
-              ))}
+                ))}
             </div>
           </div>
         </div>
@@ -319,8 +348,9 @@ export default function Dashboard() {
             <div className="text-center py-10 text-slate-500">데이터를 불러오는 중...</div>
           ) : (
             <div className="space-y-5">
-              {orgProgressList.map((org: any) => (
-                <div key={org.name}>
+              {/* ★ FIX: key에 index 결합 — org.name 중복 가능성 대비 */}
+              {orgProgressList.map((org: any, index: number) => (
+                <div key={`org-progress-${org.name}-${index}`}>
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-3">
                       <span className="text-sm font-semibold text-slate-900">{org.name}</span>
