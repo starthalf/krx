@@ -239,13 +239,14 @@ if (!found) {
 
   // ==================== AI 초안 자동 로딩 ====================
 
-  useEffect(() => {
+useEffect(() => {
     const targetOrgId = selectedOrgId || urlOrgId;
     if (!targetOrgId) return;
+    if (!selectedPeriodCode) return;  // ← 기간 로드 완료 전까지 대기
 
     loadDraftFromDB(targetOrgId);
     loadParentOKRs(targetOrgId);
-  }, [selectedOrgId, urlOrgId]);
+}, [selectedOrgId, urlOrgId, selectedPeriodCode]);  // ← selectedPeriodCode 추가
 
   // DB에서 AI 초안 로딩
   const loadDraftFromDB = async (targetOrgId: string) => {
