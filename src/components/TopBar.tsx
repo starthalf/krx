@@ -48,7 +48,7 @@ interface NotifItem {
 
 export default function TopBar() {
   const navigate = useNavigate();
-  const { profile, user } = useAuth();
+const { profile, user, signOut } = useAuth();
   const company = useStore(state => state.company);
   const currentPeriod = useStore(state => state.currentPeriod);
   const setCurrentPeriod = useStore(state => state.setCurrentPeriod);
