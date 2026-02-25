@@ -32,35 +32,50 @@ export default function Dashboard() {
   const [managableOrgs, setManagableOrgs] = useState<string[]>([]);
   const [permissionsLoading, setPermissionsLoading] = useState(true);
 
-  // ★ FIX: organizations 배열의 ID를 문자열로 안정화하여 참조 비교 대신 값 비교
+  // ★ FIX: organizations 배열의 ID를 문자열로 안정화
   const orgIds = organizations.map(o => o.id).join(',');
 
-  // ★ FIX: 권한 체크 중복 실행 방지
-  const permCheckRef = useRef(false);
+  // ★ FIX: 버전 카운터 방식 — 이전 실행 결과를 무시하여 deadlock 방지
+  const permCheckVersionRef = useRef(0);
 
-  // 1. 권한 체크 — orgIds 문자열이 변경될 때만 실행
+  // 1. 권한 체크
   useEffect(() => {
+    if (organizations.length === 0) {
+      console.log('🔍 Dashboard: organizations 비어있음 → permissionsLoading = false');
+      setPermissionsLoading(false);
+      return;
+    }
+
+    const thisVersion = ++permCheckVersionRef.current;
+    console.log('🔍 Dashboard: 권한 체크 시작 v' + thisVersion, 'orgs:', organizations.length);
+
     const checkPermissions = async () => {
-      // ★ FIX: 가드를 함수 안으로 이동 — useEffect 레벨에서 return하면 else 분기도 못 탐
-      if (permCheckRef.current) {
-        console.log('⏭️ permCheck 이미 진행 중 — 건너뜀');
-        return;
-      }
       try {
-        permCheckRef.current = true;
         setPermissionsLoading(true);
         
         const level = await getMyRoleLevel();
+        
+        if (thisVersion !== permCheckVersionRef.current) {
+          console.log('🔍 Dashboard: 구버전 v' + thisVersion + ' — 무시');
+          return;
+        }
+        
         setRoleLevel(level);
+        console.log('🔍 Dashboard: roleLevel =', level);
 
         const managable: string[] = [];
         for (const org of organizations) {
           const canManage = await checkCanManageOrg(org.id);
-          if (canManage) {
-            managable.push(org.id);
-          }
+          if (canManage) managable.push(org.id);
         }
         
+        if (thisVersion !== permCheckVersionRef.current) {
+          console.log('🔍 Dashboard: 구버전 v' + thisVersion + ' — 무시');
+          return;
+        }
+
+        console.log('🔍 Dashboard: managableOrgs =', managable.length);
+
         setManagableOrgs(prev => {
           const prevKey = prev.join(',');
           const newKey = managable.join(',');
@@ -69,19 +84,16 @@ export default function Dashboard() {
       } catch (error) {
         console.error('Failed to check permissions:', error);
       } finally {
-        setPermissionsLoading(false);
-        permCheckRef.current = false;
+        if (thisVersion === permCheckVersionRef.current) {
+          console.log('🔍 Dashboard: permissionsLoading = false (v' + thisVersion + ')');
+          setPermissionsLoading(false);
+        }
       }
     };
 
-    if (organizations.length > 0) {
-      checkPermissions();
-    } else {
-      setPermissionsLoading(false);
-    }
-  }, [orgIds]); // ★ FIX: organizations 배열 참조 대신 orgIds 문자열 비교
+    checkPermissions();
+  }, [orgIds]);
 
-  // ★ FIX: managableOrgs도 문자열로 안정화
   const managableOrgsKey = managableOrgs.join(',');
 
   // 2-a. 초기 조직 선택 (한 번만)
@@ -94,12 +106,14 @@ export default function Dashboard() {
       if (!defaultOrg) {
         defaultOrg = organizations.find(o => !o.parentOrgId) || organizations[0];
       }
-      if (defaultOrg) setSelectedOrgId(defaultOrg.id);
+      if (defaultOrg) {
+        console.log('🔍 Dashboard: 초기 조직 선택:', defaultOrg.name);
+        setSelectedOrgId(defaultOrg.id);
+      }
     }
   }, [orgIds, managableOrgsKey, permissionsLoading]);
-  // ★ FIX: selectedOrgId를 의존성에서 제거 — 이미 선택된 상태면 재실행 불필요
 
-  // 2-b. 대시보드 통계 로딩 (조직 목록 확정 후 1회)
+  // 2-b. 대시보드 통계 로딩
   useEffect(() => {
     if (organizations.length > 0 && !permissionsLoading) {
       const companyId = organizations[0]?.companyId;
@@ -108,8 +122,6 @@ export default function Dashboard() {
       }
     }
   }, [orgIds, permissionsLoading]);
-  // ★ FIX: managableOrgs, selectedOrgId, fetchDashboardStats를 의존성에서 제거
-  //   → 무한 루프의 핵심 원인이었음
 
   // 3. 선택된 조직의 상세 데이터 로딩
   useEffect(() => {
@@ -117,7 +129,7 @@ export default function Dashboard() {
       fetchObjectives(selectedOrgId);
       fetchKRs(selectedOrgId);
     }
-  }, [selectedOrgId]); // ★ FIX: fetchObjectives, fetchKRs 의존성 제거 (Zustand 함수 참조 안정성 불확실)
+  }, [selectedOrgId]);
 
   // 데이터 집계
   const currentOrg = organizations.find(o => o.id === selectedOrgId);
@@ -179,7 +191,6 @@ export default function Dashboard() {
     { id: 3, user: '박민수', message: '마케팅 캠페인 결과 리포트 업로드', timestamp: '2시간 전' },
   ];
 
-  // ✅ v2: company_admin(80)도 전사 조직 볼 수 있도록
   const selectableOrgs = roleLevel >= 80 
     ? organizations 
     : organizations.filter(o => managableOrgs.includes(o.id) || managableOrgs.length === 0);
@@ -202,18 +213,14 @@ export default function Dashboard() {
         <div>
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-bold text-slate-900">대시보드</h1>
-            
-            {/* ✅ v2 역할 배지 */}
             {roleLevel >= 90 && (
               <span className="px-3 py-1 bg-red-100 text-red-700 text-xs font-semibold rounded-full flex items-center gap-1">
-                <Crown className="w-3 h-3" />
-                CEO
+                <Crown className="w-3 h-3" /> CEO
               </span>
             )}
             {roleLevel >= 80 && roleLevel < 90 && (
               <span className="px-3 py-1 bg-orange-100 text-orange-700 text-xs font-semibold rounded-full flex items-center gap-1">
-                <Shield className="w-3 h-3" />
-                관리자
+                <Shield className="w-3 h-3" /> 관리자
               </span>
             )}
             {roleLevel >= 70 && roleLevel < 80 && (
@@ -240,7 +247,6 @@ export default function Dashboard() {
 
       {/* 기간 현황 + 상단 카드 */}
       <div className="grid grid-cols-5 gap-6">
-        {/* 기간 현황 위젯 */}
         <div className="col-span-1">
           <PeriodStatusWidget variant="compact" />
         </div>
@@ -278,7 +284,6 @@ export default function Dashboard() {
           <div>
             <div className="text-3xl font-bold text-slate-900">{activeObjectives.length}</div>
             <div className="flex gap-2 mt-3">
-              {/* ★ FIX: .filter() 후 .map()으로 변경 — false 반환 방지 */}
               {Object.entries(biiStats)
                 .filter(([_, count]) => count > 0)
                 .map(([key, count]) => (
@@ -349,7 +354,6 @@ export default function Dashboard() {
             <div className="text-center py-10 text-slate-500">데이터를 불러오는 중...</div>
           ) : (
             <div className="space-y-5">
-              {/* ★ FIX: key에 index 결합 — org.name 중복 가능성 대비 */}
               {orgProgressList.map((org: any, index: number) => (
                 <div key={`org-progress-${org.name}-${index}`}>
                   <div className="flex items-center justify-between mb-2">
@@ -431,7 +435,6 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* AI 인사이트 - 조직장(70) 이상만 */}
         {roleLevel >= 70 ? (
           <div className="bg-gradient-to-br from-indigo-50 to-blue-50 rounded-xl border border-indigo-100 p-6 shadow-sm">
             <div className="flex items-center gap-2 mb-4">
@@ -482,4 +485,4 @@ export default function Dashboard() {
       </div> 
     </div>
   );
-} 
+}
