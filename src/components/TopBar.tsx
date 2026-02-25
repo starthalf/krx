@@ -148,9 +148,12 @@ export default function TopBar() {
 
   // ==================== 기존 핸들러 ====================
 
-  const handleLogout = async () => {
+  const { profile, user, signOut } = useAuth();
+
+// 2) handleLogout 수정
+const handleLogout = async () => {
     try {
-      await supabase.auth.signOut();
+      await signOut();
       navigate('/login');
     } catch (error) {
       console.error('Logout failed:', error);
