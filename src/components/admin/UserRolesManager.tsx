@@ -364,7 +364,12 @@ function UserRow({ user, organizations, onAddRole, onRevokeRole, onChangeOrg, on
                   className="w-full px-2 py-1.5 border border-blue-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-500 outline-none"
                   autoFocus onBlur={() => setShowOrgSelect(null)}
                 >
-                  <option value="">전체 (미지정)</option>
+                  {/* CEO/회사관리자(level >= 80)는 "전사" 옵션, 그 외는 "미지정" */}
+                  {role.roleLevel >= 80 ? (
+                    <option value="">전사</option>
+                  ) : (
+                    <option value="">미지정</option>
+                  )}
                   {organizations.map((org) => (<option key={org.id} value={org.id}>{org.name}</option>))}
                 </select>
               ) : (
@@ -374,13 +379,13 @@ function UserRow({ user, organizations, onAddRole, onRevokeRole, onChangeOrg, on
                   title="클릭하여 조직 변경"
                 >
                   <Building2 className="w-3.5 h-3.5 text-slate-400 group-hover:text-blue-500" />
-                  {/* ★ FIX: CEO/Admin은 org_id가 null이므로 역할 레벨에 맞게 표시 */}
+                  {/* CEO/회사관리자(level >= 80)는 org_id가 null이면 "전사"로 표시 */}
                   {role.orgName ? (
                     <span>{role.orgName}</span>
-                  ) : role.roleLevel >= 90 ? (
-                    <span className="text-red-600 font-medium text-xs">전사</span>
                   ) : role.roleLevel >= 80 ? (
-                    <span className="text-orange-600 font-medium text-xs">전사 관리</span>
+                    <span className="text-slate-700 font-medium text-xs flex items-center gap-1">
+                      <Crown className="w-3 h-3 text-amber-500" />전사
+                    </span>
                   ) : (
                     <span className="text-slate-400 italic text-xs">미지정</span>
                   )}
@@ -574,4 +579,4 @@ function EditRoleModal({ currentRole, roles, organizations, myRoleLevel, userNam
       </div>
     </div>
   );
-}     
+}
