@@ -144,6 +144,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return;
         }
 
+        // ★ FIX: TOKEN_REFRESHED 이벤트 — 세션만 갱신, 프로필 재조회 불필요
+        //   토큰 갱신은 사용자 프로필이 변경된 게 아니므로 재조회하면
+        //   profile 참조가 변경되어 하위 컴포넌트(Layout→Dashboard)가 전부 re-render됨
+        if (event === 'TOKEN_REFRESHED') {
+          console.log('🔄 TOKEN_REFRESHED — 세션만 갱신 (프로필 재조회 건너뜀)');
+          setSession(newSession);
+          setUser(newSession?.user ?? null);
+          return;
+        }
+
         setSession(newSession);
         setUser(newSession?.user ?? null);
 
