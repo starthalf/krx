@@ -2106,17 +2106,19 @@ period: selectedPeriodCode,
                               ))}
                             </div>
 
-                            {/* 등급 비례 컬러 바 */}
+                             {/* 등급 비례 컬러 바 */}
                             <div className="flex h-1.5 rounded-full overflow-hidden mt-2.5 bg-slate-100">
                               {(() => {
                                 const { S, A, B, C, D } = kr.gradeCriteria;
-                                const max = Math.max(S, A, B, 100) + 10;
+                                const max = Math.max(S, 120);
+                                // 각 등급의 구간을 해당 등급 색으로 표시
                                 const segments = [
-                                  { value: max - S, color: 'bg-blue-500' },
-                                  { value: S - A, color: 'bg-emerald-500' },
-                                  { value: A - B, color: 'bg-slate-400' },
-                                  { value: B - C, color: 'bg-amber-400' },
-                                  { value: C - (D || 0), color: 'bg-red-400' },
+                                  { value: D,     color: 'bg-red-400' },      // 0 ~ D
+                                  { value: C - D,  color: 'bg-amber-400' },   // D ~ C
+                                  { value: B - C,  color: 'bg-slate-400' },   // C ~ B
+                                  { value: A - B,  color: 'bg-emerald-500' }, // B ~ A
+                                  { value: S - A,  color: 'bg-blue-400' },    // A ~ S
+                                  { value: max - S, color: 'bg-blue-600' },   // S ~
                                 ].filter(s => s.value > 0);
                                 const total = segments.reduce((s, seg) => s + seg.value, 0);
                                 return segments.map((seg, i) => (
