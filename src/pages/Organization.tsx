@@ -5,7 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   ChevronRight, ChevronDown, Building2, Users, Target,
   Settings, Loader2, Search, Filter, LayoutGrid, List,
-  Crown, User, Mail
+  Crown, User, Mail, Star
 } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { useAuth } from '../contexts/AuthContext';
@@ -35,34 +35,84 @@ export default function OrganizationPage() {
   const [membersLoading, setMembersLoading] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
 
-  // 사용자 관리자 여부 확인
+  // ★ 내가 속한 조직 ID 목록
+  const [myOrgIds, setMyOrgIds] = useState<Set<string>>(new Set());
+
+  // 사용자 관리자 여부 확인 + 내 조직 조회
   useEffect(() => {
     if (!user?.id) return;
-    const checkAdmin = async () => {
+    const checkAdminAndMyOrgs = async () => {
       const { data } = await supabase
         .from('user_roles')
-        .select('roles!inner(level)')
+        .select('org_id, roles!inner(level)')
         .eq('profile_id', user.id);
+      
       if (data) {
         const max = Math.max(...data.map((r: any) => r.roles?.level || 0));
         setIsAdmin(max >= 90);
+        
+        // ★ 내가 속한 조직 ID 수집
+        const orgIds = new Set<string>();
+        data.forEach((r: any) => {
+          if (r.org_id) orgIds.add(r.org_id);
+        });
+        setMyOrgIds(orgIds);
       }
     };
-    checkAdmin();
+    checkAdminAndMyOrgs();
   }, [user?.id]);
 
-  // 초기 선택 및 확장
+  // ★ 초기 선택: 내 조직 우선, 없으면 루트 조직
   useEffect(() => {
-    if (organizations.length > 0 && !selectedOrgId) {
-      const rootOrg = organizations.find(o => !o.parentOrgId) || organizations[0];
-      if (rootOrg) {
-        setSelectedOrgId(rootOrg.id);
-        const toExpand = new Set([rootOrg.id]);
-        organizations.filter(o => o.parentOrgId === rootOrg.id).forEach(o => toExpand.add(o.id));
-        setExpandedOrgs(toExpand);
+    if (organizations.length === 0 || selectedOrgId) return;
+    
+    // 1. 내가 속한 조직이 있으면 그 중 첫 번째 선택
+    let initialOrgId: string | null = null;
+    
+    if (myOrgIds.size > 0) {
+      // 내 조직 중 가장 상위 레벨 찾기 (전사 → 본부 → 팀 순)
+      const myOrgs = organizations.filter(o => myOrgIds.has(o.id));
+      if (myOrgs.length > 0) {
+        // level 우선순위: 전사 > 사업부 > 본부 > 실 > 팀
+        const levelPriority: Record<string, number> = {
+          '전사': 0, '사업부': 1, '본부': 2, '실': 3, '팀': 4
+        };
+        myOrgs.sort((a, b) => 
+          (levelPriority[a.level] ?? 99) - (levelPriority[b.level] ?? 99)
+        );
+        initialOrgId = myOrgs[0].id;
       }
     }
-  }, [organizations, selectedOrgId]);
+    
+    // 2. 내 조직이 없으면 루트 조직 선택
+    if (!initialOrgId) {
+      const rootOrg = organizations.find(o => !o.parentOrgId) || organizations[0];
+      initialOrgId = rootOrg?.id || null;
+    }
+    
+    if (initialOrgId) {
+      setSelectedOrgId(initialOrgId);
+      
+      // 선택된 조직과 그 상위 조직들을 모두 펼침
+      const toExpand = new Set<string>();
+      let currentOrg = organizations.find(o => o.id === initialOrgId);
+      while (currentOrg) {
+        toExpand.add(currentOrg.id);
+        if (currentOrg.parentOrgId) {
+          currentOrg = organizations.find(o => o.id === currentOrg!.parentOrgId);
+        } else {
+          break;
+        }
+      }
+      // 루트 조직의 직계 하위도 펼침
+      const rootOrg = organizations.find(o => !o.parentOrgId);
+      if (rootOrg) {
+        toExpand.add(rootOrg.id);
+        organizations.filter(o => o.parentOrgId === rootOrg.id).forEach(o => toExpand.add(o.id));
+      }
+      setExpandedOrgs(toExpand);
+    }
+  }, [organizations, myOrgIds, selectedOrgId]);
 
   // 선택한 조직의 구성원 로딩
   useEffect(() => {
@@ -140,6 +190,9 @@ export default function OrganizationPage() {
     return <User className="w-4 h-4 text-slate-400" />;
   };
 
+  // ★ 내 조직인지 확인
+  const isMyOrg = (orgId: string) => myOrgIds.has(orgId);
+
   // 트리 렌더링
   const renderOrgTree = (org: Organization, level: number = 0) => {
     if (searchQuery && !filteredOrganizations.some(fo => fo.id === org.id)) {
@@ -150,6 +203,7 @@ export default function OrganizationPage() {
     const hasChildren = children.length > 0;
     const isExpanded = expandedOrgs.has(org.id);
     const isSelected = selectedOrgId === org.id;
+    const isMine = isMyOrg(org.id); // ★ 내 조직 여부
 
     return (
       <div key={org.id}>
@@ -158,7 +212,9 @@ export default function OrganizationPage() {
           className={`flex items-center gap-2 px-3 py-2.5 rounded-lg cursor-pointer transition-all ${
             isSelected 
               ? 'bg-blue-50 text-blue-700 border border-blue-200' 
-              : 'hover:bg-slate-50 border border-transparent'
+              : isMine 
+                ? 'bg-amber-50/50 hover:bg-amber-50 border border-amber-200/50'
+                : 'hover:bg-slate-50 border border-transparent'
           }`}
           style={{ paddingLeft: `${level * 20 + 12}px` }}
         >
@@ -174,7 +230,16 @@ export default function OrganizationPage() {
           )}
           
           <div className="flex-1 min-w-0">
-            <div className="font-medium text-sm truncate">{org.name}</div>
+            <div className="flex items-center gap-1.5">
+              <span className="font-medium text-sm truncate">{org.name}</span>
+              {/* ★ 내 조직 표시 */}
+              {isMine && (
+                <span className="flex items-center gap-0.5 px-1.5 py-0.5 bg-amber-100 text-amber-700 text-[10px] font-medium rounded-full">
+                  <Star className="w-2.5 h-2.5 fill-amber-500" />
+                  내 조직
+                </span>
+              )}
+            </div>
             <div className="flex items-center gap-2 mt-0.5">
               <span className={`px-1.5 py-0.5 text-xs rounded border ${getOrgTypeColor(org.orgType)}`}>
                 {org.orgType}
@@ -238,6 +303,44 @@ export default function OrganizationPage() {
           </button>
         )}
       </div>
+
+      {/* ★ 내 조직 바로가기 (내 조직이 있을 때만) */}
+      {myOrgIds.size > 0 && (
+        <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+          <div className="flex items-center gap-2 text-sm">
+            <Star className="w-4 h-4 text-amber-500 fill-amber-500" />
+            <span className="font-medium text-amber-800">내 조직:</span>
+            <div className="flex flex-wrap gap-2">
+              {organizations
+                .filter(o => myOrgIds.has(o.id))
+                .map(org => (
+                  <button
+                    key={org.id}
+                    onClick={() => {
+                      setSelectedOrgId(org.id);
+                      // 해당 조직까지의 경로를 펼침
+                      const toExpand = new Set(expandedOrgs);
+                      let current = organizations.find(o => o.id === org.parentOrgId);
+                      while (current) {
+                        toExpand.add(current.id);
+                        current = organizations.find(o => o.id === current!.parentOrgId);
+                      }
+                      setExpandedOrgs(toExpand);
+                    }}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
+                      selectedOrgId === org.id
+                        ? 'bg-amber-500 text-white'
+                        : 'bg-white text-amber-700 hover:bg-amber-100 border border-amber-300'
+                    }`}
+                  >
+                    {org.name}
+                  </button>
+                ))
+              }
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 통계 */}
       <div className="grid grid-cols-5 gap-3 mb-4">
@@ -333,11 +436,18 @@ export default function OrganizationPage() {
                   className={`p-4 rounded-xl border-2 cursor-pointer transition-all hover:shadow-md ${
                     selectedOrgId === org.id
                       ? 'border-blue-500 bg-blue-50'
-                      : 'border-slate-200 hover:border-slate-300'
+                      : isMyOrg(org.id)
+                        ? 'border-amber-300 bg-amber-50/50'
+                        : 'border-slate-200 hover:border-slate-300'
                   }`}
                 >
                   <div className="flex items-start justify-between mb-2">
-                    <h3 className="font-semibold text-slate-900 truncate">{org.name}</h3>
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-semibold text-slate-900 truncate">{org.name}</h3>
+                      {isMyOrg(org.id) && (
+                        <Star className="w-3.5 h-3.5 text-amber-500 fill-amber-500" />
+                      )}
+                    </div>
                     <span className={`px-2 py-0.5 text-xs rounded-full border ${getOrgTypeColor(org.orgType)}`}>
                       {org.orgType}
                     </span>
@@ -356,7 +466,16 @@ export default function OrganizationPage() {
               {/* 헤더 - 컴팩트 */}
               <div className="flex items-start justify-between">
                 <div>
-                  <h2 className="text-xl font-bold text-slate-900">{selectedOrg.name}</h2>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-xl font-bold text-slate-900">{selectedOrg.name}</h2>
+                    {/* ★ 내 조직 배지 */}
+                    {isMyOrg(selectedOrg.id) && (
+                      <span className="flex items-center gap-1 px-2 py-0.5 bg-amber-100 text-amber-700 text-xs font-medium rounded-full">
+                        <Star className="w-3 h-3 fill-amber-500" />
+                        내 조직
+                      </span>
+                    )}
+                  </div>
                   <div className="flex items-center gap-2 mt-2">
                     <span className={`px-2 py-1 text-sm rounded-lg border ${getOrgTypeColor(selectedOrg.orgType)}`}>
                       {selectedOrg.orgType}
@@ -402,9 +521,16 @@ export default function OrganizationPage() {
                             setSelectedOrgId(child.id);
                             setExpandedOrgs(prev => new Set([...prev, selectedOrg.id]));
                           }}
-                          className="flex items-center gap-2 px-3 py-2 bg-slate-50 rounded-lg hover:bg-slate-100 transition-colors text-sm"
+                          className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors text-sm ${
+                            isMyOrg(child.id)
+                              ? 'bg-amber-50 hover:bg-amber-100 border border-amber-200'
+                              : 'bg-slate-50 hover:bg-slate-100'
+                          }`}
                         >
                           <span className="font-medium text-slate-900">{child.name}</span>
+                          {isMyOrg(child.id) && (
+                            <Star className="w-3 h-3 text-amber-500 fill-amber-500" />
+                          )}
                           <span className={`px-1.5 py-0.5 text-xs rounded border ${getOrgTypeColor(child.orgType)}`}>
                             {child.orgType}
                           </span>
@@ -444,25 +570,39 @@ export default function OrganizationPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {members.map((m, idx) => (
-                          <tr key={m.profileId} className={`border-b border-slate-100 last:border-0 ${idx % 2 === 0 ? '' : 'bg-slate-50/50'}`}>
-                            <td className="px-4 py-3">
-                              <div className="flex items-center gap-2">
-                                {getRoleIcon(m.roleLevel)}
-                                <span className="text-sm font-medium text-slate-900">{m.fullName}</span>
-                              </div>
-                            </td>
-                            <td className="px-4 py-3">
-                              <span className={`px-2 py-0.5 text-xs rounded-full ${
-                                m.roleLevel >= 90 ? 'bg-amber-100 text-amber-800' :
-                                m.roleLevel >= 50 ? 'bg-blue-100 text-blue-800' :
-                                'bg-slate-100 text-slate-700'
-                              }`}>
-                                {m.roleName}
-                              </span>
-                            </td>
-                          </tr>
-                        ))}
+                        {members.map((m, idx) => {
+                          const isMe = m.profileId === user?.id;
+                          return (
+                            <tr 
+                              key={m.profileId} 
+                              className={`border-b border-slate-100 last:border-0 ${
+                                isMe ? 'bg-amber-50/50' : idx % 2 === 0 ? '' : 'bg-slate-50/50'
+                              }`}
+                            >
+                              <td className="px-4 py-3">
+                                <div className="flex items-center gap-2">
+                                  {getRoleIcon(m.roleLevel)}
+                                  <span className="text-sm font-medium text-slate-900">{m.fullName}</span>
+                                  {/* ★ 나 표시 */}
+                                  {isMe && (
+                                    <span className="px-1.5 py-0.5 bg-amber-100 text-amber-700 text-[10px] font-medium rounded">
+                                      나
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="px-4 py-3">
+                                <span className={`px-2 py-0.5 text-xs rounded-full ${
+                                  m.roleLevel >= 90 ? 'bg-amber-100 text-amber-800' :
+                                  m.roleLevel >= 50 ? 'bg-blue-100 text-blue-800' :
+                                  'bg-slate-100 text-slate-700'
+                                }`}>
+                                  {m.roleName}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
