@@ -2106,30 +2106,6 @@ period: selectedPeriodCode,
                               ))}
                             </div>
 
-                        {/* 등급 비례 컬러 바 */}
-                            <div className="flex h-1.5 rounded-full overflow-hidden mt-2.5 bg-slate-100">
-                              {(() => {
-                                const { S, A, B, C } = kr.gradeCriteria;
-                                const max = Math.max(S, 120);
-                                // 각 등급이 차지하는 "자기 영역"을 자기 색으로 표시
-                                // 낮은값→높은값: D(0~C미만) → C(C~B미만) → B(B~A미만) → A(A~S미만) → S(S~max)
-                                const segments = [
-                                  { value: C,       color: 'bg-red-400' },      // D 영역: 0 ~ C
-                                  { value: B - C,   color: 'bg-amber-400' },    // C 영역: C ~ B  
-                                  { value: A - B,   color: 'bg-slate-300' },    // B 영역: B ~ A
-                                  { value: S - A,   color: 'bg-emerald-500' },  // A 영역: A ~ S
-                                  { value: max - S,  color: 'bg-blue-500' },    // S 영역: S ~ max
-                                ].filter(s => s.value > 0);
-                                const total = segments.reduce((s, seg) => s + seg.value, 0);
-                                return segments.map((seg, i) => (
-                                  <div
-                                    key={i}
-                                    className={`${seg.color} transition-all`}
-                                    style={{ width: `${(seg.value / total) * 100}%` }}
-                                  />
-                                ));
-                              })()}
-                            </div>
                           </div>
                         </div>
                       </div>
