@@ -76,7 +76,7 @@ const [periodLoading, setPeriodLoading] = useState(true);
 
   // 위저드 진행 관련
   const [currentStep, setCurrentStep] = useState(0);
-  const [showOneClickModal, setShowOneClickModal] = useState(!urlOrgId); // 조직 선택 후 모달 표시
+const [showOneClickModal, setShowOneClickModal] = useState(false);
   const [isAIGenerating, setIsAIGenerating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   
@@ -181,11 +181,11 @@ if (!found) {
   
   // 조직 선택이 완료되면 초기 모달 띄우기
   useEffect(() => {
-    if (selectedOrgId && showOrgSelector) {
-      setShowOrgSelector(false);
-      setShowOneClickModal(true);
-    }
-  }, [selectedOrgId, showOrgSelector]);
+  if (selectedOrgId && showOrgSelector) {
+    setShowOrgSelector(false);
+    // showOneClickModal은 loadDraftFromDB 완료 후 결정
+  }
+}, [selectedOrgId, showOrgSelector]);
 
   // [New] 회사 industry 가져오기
   useEffect(() => {
@@ -357,7 +357,7 @@ useEffect(() => {
           isCeoPreparing = true;
           setCeoDraftInProgress(true);
         }
-        if (!urlOrgId && !isCeoPreparing) setShowOneClickModal(true);
+if (!isCeoPreparing) setShowOneClickModal(true);
       }
     } catch (err) {
       console.error('AI 초안 로딩 실패:', err);
@@ -715,11 +715,11 @@ useEffect(() => {
         alert('✨ AI가 OKR 전체 세트를 생성했습니다! 내용을 확인해주세요.');
       }
 
-    } catch (error: any) {
-      console.error('AI Error:', error);
-      alert(`생성 실패: ${error.message}`);
-      setShowOneClickModal(true); 
-    } finally {
+  } catch (error: any) {
+  console.error('AI Error:', error);
+  alert(`생성 실패: ${error.message}`);
+  setShowOneClickModal(true); // 초안 없이 직접 수립할 때만 해당되므로 유지 OK
+} finally {
       setIsAIGenerating(false);
     }
   };
