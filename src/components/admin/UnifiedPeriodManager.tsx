@@ -176,18 +176,71 @@ export default function UnifiedPeriodManager() {
   // ─── Planning: Reset (사이클 초기화) ───────────────────
 
   const handleResetPlanning = async (p: FiscalPeriod) => {
-    if (!user?.id) return;
+    if (!user?.id || !companyId) return;
     
     const confirmMsg = `수립 사이클을 초기화하시겠습니까?\n\n` +
       `기간: ${p.period_code}\n` +
       `현재 상태: ${PLAN_CFG[p.planning_status].label}\n\n` +
-      `⚠️ 주의: 수립 관련 설정이 초기화됩니다.\n` +
-      `(전사 OKR, 조직 초안 등은 유지됩니다)`;
+      `⚠️ 주의: 다음 항목이 초기화/삭제됩니다:\n` +
+      `• 수립 관련 설정 (마감일, 메시지 등)\n` +
+      `• okr_planning_cycles 레코드\n\n` +
+      `※ 전사 OKR, 조직 초안은 유지됩니다.\n` +
+      `※ 전사 OKR도 삭제하려면 "전체 초기화"를 선택하세요.`;
     
     if (!confirm(confirmMsg)) return;
     
+    // 추가 옵션: 전체 초기화 여부
+    const fullReset = confirm(
+      '전사 OKR 및 조직 초안도 함께 삭제하시겠습니까?\n\n' +
+      '[확인] → 전체 초기화 (모든 OKR 삭제)\n' +
+      '[취소] → 사이클 설정만 초기화 (OKR 유지)'
+    );
+    
     setLoading(true);
     try {
+      // 1. okr_planning_cycles 삭제
+      const { error: cycleError } = await supabase
+        .from('okr_planning_cycles')
+        .delete()
+        .eq('company_id', companyId)
+        .eq('period', p.period_code);
+      
+      if (cycleError) {
+        console.warn('okr_planning_cycles 삭제 실패 (무시):', cycleError);
+      }
+      
+      // 2. 전체 초기화인 경우 objectives/key_results 삭제
+      if (fullReset) {
+        // 해당 기간의 모든 objectives 조회
+        const { data: objs } = await supabase
+          .from('objectives')
+          .select('id')
+          .eq('period', p.period_code);
+        
+        if (objs && objs.length > 0) {
+          const objIds = objs.map(o => o.id);
+          
+          // key_results 먼저 삭제
+          await supabase
+            .from('key_results')
+            .delete()
+            .in('objective_id', objIds);
+          
+          // objectives 삭제
+          await supabase
+            .from('objectives')
+            .delete()
+            .in('id', objIds);
+        }
+        
+        // company_okr_contexts 상태 리셋
+        await supabase
+          .from('company_okr_contexts')
+          .update({ status: 'draft', finalized_at: null, finalized_by: null })
+          .eq('company_id', companyId);
+      }
+      
+      // 3. fiscal_periods 상태 초기화
       const { error } = await supabase
         .from('fiscal_periods')
         .update({
@@ -199,12 +252,20 @@ export default function UnifiedPeriodManager() {
           planning_started_at: null,
           planning_closed_at: null,
           planning_completed_at: null,
+          company_okr_finalized: fullReset ? false : p.company_okr_finalized,
+          company_okr_finalized_at: fullReset ? null : p.company_okr_finalized_at,
+          all_orgs_draft_generated: fullReset ? false : p.all_orgs_draft_generated,
+          all_orgs_draft_generated_at: fullReset ? null : p.all_orgs_draft_generated_at,
           status: 'upcoming',
         })
         .eq('id', p.id);
       
       if (error) throw error;
-      alert('수립 사이클이 초기화되었습니다.');
+      
+      alert(fullReset 
+        ? '수립 사이클이 전체 초기화되었습니다. (OKR 포함 삭제)'
+        : '수립 사이클 설정이 초기화되었습니다. (OKR 유지)'
+      );
       fetchPeriods();
     } catch (err: any) {
       alert(`초기화 실패: ${err.message}`);
@@ -975,4 +1036,4 @@ function ClosingCard({ period: p, onStartClosing, onFinalizeClosing }: ClosingCa
       </div>
     </div>
   );
-} 
+}
