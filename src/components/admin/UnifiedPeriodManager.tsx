@@ -975,4 +975,4 @@ function ClosingCard({ period: p, onStartClosing, onFinalizeClosing }: ClosingCa
       </div>
     </div>
   );
-}
+} 
