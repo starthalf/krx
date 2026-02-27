@@ -8,7 +8,7 @@ import {
   Calendar, Plus, Play, Square, CheckCircle2, Clock, Edit3, Trash2,
   ChevronDown, ChevronRight, AlertCircle, Info, Users, FileText,
   Timer, Target, TrendingUp, Archive,
-  MessageSquare, RefreshCw, X, ExternalLink, Rocket
+  MessageSquare, RefreshCw, X, ExternalLink, Rocket, RotateCcw
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
@@ -79,13 +79,13 @@ const STATUS_CFG: Record<string, { label: string; color: string; icon: any; bg: 
   archived:  { label: '보관',   color: 'text-purple-600', icon: Archive,  bg: 'bg-purple-100' },
 };
 
-const PLAN_CFG: Record<string, { label: string; color: string }> = {
-  not_started: { label: '미시작',   color: 'text-slate-500' },
-  setup:       { label: '설정중',   color: 'text-blue-500' },
-  drafting:    { label: '초안작성', color: 'text-indigo-500' },
-  in_progress: { label: '진행중',   color: 'text-green-600' },
-  closing:     { label: '마감중',   color: 'text-orange-600' },
-  completed:   { label: '완료',     color: 'text-gray-600' },
+const PLAN_CFG: Record<string, { label: string; color: string; bg: string }> = {
+  not_started: { label: '미시작',   color: 'text-slate-500', bg: 'bg-slate-100' },
+  setup:       { label: '설정중',   color: 'text-blue-500', bg: 'bg-blue-100' },
+  drafting:    { label: '초안작성', color: 'text-indigo-500', bg: 'bg-indigo-100' },
+  in_progress: { label: '진행중',   color: 'text-green-600', bg: 'bg-green-100' },
+  closing:     { label: '마감중',   color: 'text-orange-600', bg: 'bg-orange-100' },
+  completed:   { label: '완료',     color: 'text-gray-600', bg: 'bg-gray-100' },
 };
 
 // ═════════════════════════════════════════════════════════
@@ -173,6 +173,46 @@ export default function UnifiedPeriodManager() {
     finally { setLoading(false); }
   };
 
+  // ─── Planning: Reset (사이클 초기화) ───────────────────
+
+  const handleResetPlanning = async (p: FiscalPeriod) => {
+    if (!user?.id) return;
+    
+    const confirmMsg = `수립 사이클을 초기화하시겠습니까?\n\n` +
+      `기간: ${p.period_code}\n` +
+      `현재 상태: ${PLAN_CFG[p.planning_status].label}\n\n` +
+      `⚠️ 주의: 수립 관련 설정이 초기화됩니다.\n` +
+      `(전사 OKR, 조직 초안 등은 유지됩니다)`;
+    
+    if (!confirm(confirmMsg)) return;
+    
+    setLoading(true);
+    try {
+      const { error } = await supabase
+        .from('fiscal_periods')
+        .update({
+          planning_status: 'not_started',
+          planning_starts_at: null,
+          planning_deadline_at: null,
+          planning_grace_deadline_at: null,
+          planning_message: null,
+          planning_started_at: null,
+          planning_closed_at: null,
+          planning_completed_at: null,
+          status: 'upcoming',
+        })
+        .eq('id', p.id);
+      
+      if (error) throw error;
+      alert('수립 사이클이 초기화되었습니다.');
+      fetchPeriods();
+    } catch (err: any) {
+      alert(`초기화 실패: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // ─── Closing: Start / Finalize ─────────────────────────
 
   const handleStartClosing = async (p: FiscalPeriod) => {
@@ -217,6 +257,22 @@ export default function UnifiedPeriodManager() {
     finally { setLoading(false); }
   };
 
+  // ─── 삭제 가능 여부 판단 ────────────────────────────────
+  const canDeletePeriod = (p: FiscalPeriod): boolean => {
+    // 실행 시작 전(upcoming)이고, 수립이 진행중이 아닌 경우 삭제 가능
+    // not_started, setup, drafting 상태에서는 삭제 가능
+    return p.status === 'upcoming' && 
+      ['not_started', 'setup', 'drafting'].includes(p.planning_status);
+  };
+
+  // ─── 초기화 가능 여부 판단 ──────────────────────────────
+  const canResetPlanning = (p: FiscalPeriod): boolean => {
+    // 수립이 시작되었지만 아직 완전히 실행 중이 아닌 경우
+    // 또는 수립이 완료되었지만 다시 시작하고 싶은 경우
+    return ['setup', 'drafting', 'completed'].includes(p.planning_status) &&
+      ['upcoming', 'planning'].includes(p.status);
+  };
+
   // ─── Hierarchy ─────────────────────────────────────────
 
   const toggleYear = (y: number) => {
@@ -236,6 +292,16 @@ export default function UnifiedPeriodManager() {
   })();
 
   const goSetup = () => navigate('/ceo-okr-setup');
+
+  // ─── 수립 현황 필터링 (완료 포함) ──────────────────────
+  const activePlanningPeriods = periods.filter(p => 
+    ['setup', 'drafting', 'in_progress', 'closing'].includes(p.planning_status)
+  );
+  
+  const completedPlanningPeriods = periods.filter(p => 
+    p.planning_status === 'completed' && 
+    ['active', 'closing'].includes(p.status) // 실행 중이면서 수립 완료
+  );
 
   // ═════════════════════════════════════════════════════════
   // Render
@@ -274,15 +340,21 @@ export default function UnifiedPeriodManager() {
       <div className="border-b border-slate-200">
         <div className="flex gap-6">
           {([
-            { id: 'periods' as TabType, label: '기간 목록', icon: Calendar },
-            { id: 'planning' as TabType, label: '수립 현황', icon: Edit3 },
-            { id: 'closing' as TabType, label: '마감 관리', icon: Archive },
+            { id: 'periods' as TabType, label: '기간 목록', icon: Calendar, count: periods.length },
+            { id: 'planning' as TabType, label: '수립 현황', icon: Edit3, count: activePlanningPeriods.length + completedPlanningPeriods.length },
+            { id: 'closing' as TabType, label: '마감 관리', icon: Archive, count: periods.filter(p => ['active', 'closing'].includes(p.status)).length },
           ]).map(tab => {
             const Icon = tab.icon;
             return (
               <button key={tab.id} onClick={() => setActiveTab(tab.id)}
                 className={`pb-3 px-1 flex items-center gap-2 border-b-2 transition ${activeTab === tab.id ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-600 hover:text-slate-900'}`}>
-                <Icon className="w-4 h-4" />{tab.label}
+                <Icon className="w-4 h-4" />
+                {tab.label}
+                {tab.count > 0 && (
+                  <span className={`px-1.5 py-0.5 text-xs rounded-full ${activeTab === tab.id ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-600'}`}>
+                    {tab.count}
+                  </span>
+                )}
               </button>
             );
           })}
@@ -338,7 +410,7 @@ export default function UnifiedPeriodManager() {
                         </button>
                         <div className="flex items-center gap-2">
                           {yearPeriod && <span className="text-sm text-slate-600">{formatDate(yearPeriod.starts_at)} ~ {formatDate(yearPeriod.ends_at)}</span>}
-                          {yearPeriod?.status === 'upcoming' && (
+                          {yearPeriod && canDeletePeriod(yearPeriod) && (
                             <button onClick={() => handleDeletePeriod(yearPeriod)} className="p-2 text-red-600 hover:bg-red-50 rounded" title="삭제"><Trash2 className="w-4 h-4" /></button>
                           )}
                         </div>
@@ -347,11 +419,34 @@ export default function UnifiedPeriodManager() {
                         <div className="p-4 space-y-3">
                           {cycleUnit === 'year' && yearPeriod ? (
                             // 연도 단위: 연도 카드 직접 표시
-                            <PeriodCard period={yearPeriod} onClosePlanning={handleClosePlanning} onFinalizePlanning={handleFinalizePlanning} onStartClosing={handleStartClosing} onFinalizeClosing={handleFinalizeClosing} onDelete={handleDeletePeriod} onGoSetup={goSetup} />
+                            <PeriodCard 
+                              period={yearPeriod} 
+                              onClosePlanning={handleClosePlanning} 
+                              onFinalizePlanning={handleFinalizePlanning} 
+                              onStartClosing={handleStartClosing} 
+                              onFinalizeClosing={handleFinalizeClosing} 
+                              onDelete={handleDeletePeriod} 
+                              onReset={handleResetPlanning}
+                              canDelete={canDeletePeriod(yearPeriod)}
+                              canReset={canResetPlanning(yearPeriod)}
+                              onGoSetup={goSetup} 
+                            />
                           ) : cycleUnit === 'half' ? (
                             // 반기 단위: 반기 카드만 표시 (분기 숨김)
                             halves.map(half => (
-                              <PeriodCard key={half.id} period={half} onClosePlanning={handleClosePlanning} onFinalizePlanning={handleFinalizePlanning} onStartClosing={handleStartClosing} onFinalizeClosing={handleFinalizeClosing} onDelete={handleDeletePeriod} onGoSetup={goSetup} />
+                              <PeriodCard 
+                                key={half.id} 
+                                period={half} 
+                                onClosePlanning={handleClosePlanning} 
+                                onFinalizePlanning={handleFinalizePlanning} 
+                                onStartClosing={handleStartClosing} 
+                                onFinalizeClosing={handleFinalizeClosing} 
+                                onDelete={handleDeletePeriod} 
+                                onReset={handleResetPlanning}
+                                canDelete={canDeletePeriod(half)}
+                                canReset={canResetPlanning(half)}
+                                onGoSetup={goSetup} 
+                              />
                             ))
                           ) : (
                             // 분기 단위: 반기 > 분기 계층 표시
@@ -361,7 +456,21 @@ export default function UnifiedPeriodManager() {
                                 <div key={half.id} className="space-y-2">
                                   <div className="text-sm font-medium text-slate-500 pl-2">{half.period_name}</div>
                                   <div className="ml-4 space-y-2">
-                                    {hq.map(q => <PeriodCard key={q.id} period={q} onClosePlanning={handleClosePlanning} onFinalizePlanning={handleFinalizePlanning} onStartClosing={handleStartClosing} onFinalizeClosing={handleFinalizeClosing} onDelete={handleDeletePeriod} onGoSetup={goSetup} />)}
+                                    {hq.map(q => (
+                                      <PeriodCard 
+                                        key={q.id} 
+                                        period={q} 
+                                        onClosePlanning={handleClosePlanning} 
+                                        onFinalizePlanning={handleFinalizePlanning} 
+                                        onStartClosing={handleStartClosing} 
+                                        onFinalizeClosing={handleFinalizeClosing} 
+                                        onDelete={handleDeletePeriod}
+                                        onReset={handleResetPlanning}
+                                        canDelete={canDeletePeriod(q)}
+                                        canReset={canResetPlanning(q)}
+                                        onGoSetup={goSetup} 
+                                      />
+                                    ))}
                                   </div>
                                 </div>
                               );
@@ -381,7 +490,7 @@ export default function UnifiedPeriodManager() {
 
           {/* ═══ 수립 현황 ═══ */}
           {activeTab === 'planning' && (
-            <div className="space-y-4">
+            <div className="space-y-6">
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex items-start gap-3">
                 <Info className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
                 <div className="text-sm text-blue-900">
@@ -389,10 +498,43 @@ export default function UnifiedPeriodManager() {
                   <p className="text-blue-700">진행 중인 수립의 현황을 확인하고, 마감/확정 작업을 수행할 수 있습니다.</p>
                 </div>
               </div>
-              {periods.filter(p => ['setup', 'drafting', 'in_progress', 'closing'].includes(p.planning_status)).map(p => (
-                <PlanningStatusCard key={p.id} period={p} onClosePlanning={handleClosePlanning} onFinalizePlanning={handleFinalizePlanning} onGoSetup={goSetup} />
-              ))}
-              {periods.filter(p => ['setup', 'drafting', 'in_progress', 'closing'].includes(p.planning_status)).length === 0 && (
+
+              {/* 진행 중인 수립 */}
+              {activePlanningPeriods.length > 0 && (
+                <div className="space-y-3">
+                  <h3 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
+                    <Play className="w-4 h-4 text-green-600" />
+                    진행 중인 수립 ({activePlanningPeriods.length})
+                  </h3>
+                  {activePlanningPeriods.map(p => (
+                    <PlanningStatusCard 
+                      key={p.id} 
+                      period={p} 
+                      onClosePlanning={handleClosePlanning} 
+                      onFinalizePlanning={handleFinalizePlanning} 
+                      onReset={handleResetPlanning}
+                      canReset={canResetPlanning(p)}
+                      onGoSetup={goSetup} 
+                    />
+                  ))}
+                </div>
+              )}
+
+              {/* 완료된 수립 (실행 중) */}
+              {completedPlanningPeriods.length > 0 && (
+                <div className="space-y-3">
+                  <h3 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-gray-500" />
+                    수립 완료 (실행 중) ({completedPlanningPeriods.length})
+                  </h3>
+                  {completedPlanningPeriods.map(p => (
+                    <CompletedPlanningCard key={p.id} period={p} />
+                  ))}
+                </div>
+              )}
+
+              {/* 둘 다 없을 때 */}
+              {activePlanningPeriods.length === 0 && completedPlanningPeriods.length === 0 && (
                 <div className="text-center py-12 text-slate-500">
                   <FileText className="w-12 h-12 mx-auto mb-4 opacity-50" />
                   <p>수립 진행 중인 기간이 없습니다.</p>
@@ -464,60 +606,163 @@ interface PeriodCardProps {
   onStartClosing: (p: FiscalPeriod) => void;
   onFinalizeClosing: (p: FiscalPeriod) => void;
   onDelete: (p: FiscalPeriod) => void;
+  onReset: (p: FiscalPeriod) => void;
+  canDelete: boolean;
+  canReset: boolean;
   onGoSetup: () => void;
 }
 
-function PeriodCard({ period: p, onClosePlanning, onFinalizePlanning, onStartClosing, onFinalizeClosing, onDelete, onGoSetup }: PeriodCardProps) {
+function PeriodCard({ period: p, onClosePlanning, onFinalizePlanning, onStartClosing, onFinalizeClosing, onDelete, onReset, canDelete, canReset, onGoSetup }: PeriodCardProps) {
   const dl = daysUntil(p.planning_deadline_at);
+  
+  // 기간 종료 여부 확인
+  const isPeriodEnded = new Date(p.ends_at) < new Date();
+  const isPeriodActive = new Date(p.starts_at) <= new Date() && new Date(p.ends_at) >= new Date();
+  
   return (
-    <div className="border border-slate-200 rounded-lg p-4 hover:shadow-sm transition">
+    <div className={`border rounded-lg p-4 hover:shadow-sm transition ${
+      p.planning_status === 'completed' ? 'border-green-200 bg-green-50/30' :
+      p.planning_status === 'in_progress' ? 'border-blue-200 bg-blue-50/30' :
+      ['setup', 'drafting'].includes(p.planning_status) ? 'border-yellow-200 bg-yellow-50/30' :
+      'border-slate-200'
+    }`}>
       <div className="flex items-start justify-between">
         <div className="flex-1">
-          <div className="flex items-center gap-3 mb-2">
+          <div className="flex items-center gap-3 mb-2 flex-wrap">
             <h4 className="font-semibold text-slate-900">{p.period_name}</h4>
-            <span className={`px-2 py-1 rounded-full text-xs font-medium ${STATUS_CFG[p.status].bg} ${STATUS_CFG[p.status].color}`}>{STATUS_CFG[p.status].label}</span>
+            <span className={`px-2 py-1 rounded-full text-xs font-medium ${STATUS_CFG[p.status].bg} ${STATUS_CFG[p.status].color}`}>
+              {STATUS_CFG[p.status].label}
+            </span>
             {p.planning_status !== 'not_started' && (
-              <span className={`px-2 py-1 rounded-full text-xs font-medium bg-slate-100 ${PLAN_CFG[p.planning_status].color}`}>수립: {PLAN_CFG[p.planning_status].label}</span>
+              <span className={`px-2 py-1 rounded-full text-xs font-medium ${PLAN_CFG[p.planning_status].bg} ${PLAN_CFG[p.planning_status].color}`}>
+                수립: {PLAN_CFG[p.planning_status].label}
+              </span>
+            )}
+            {isPeriodEnded && p.status !== 'closed' && p.status !== 'archived' && (
+              <span className="px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-600">
+                기간 종료됨
+              </span>
+            )}
+            {isPeriodActive && (
+              <span className="px-2 py-1 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">
+                현재 기간
+              </span>
             )}
           </div>
           <div className="text-sm text-slate-600 space-y-1">
-            <div className="flex items-center gap-2"><Calendar className="w-4 h-4" /><span>{formatDate(p.starts_at)} ~ {formatDate(p.ends_at)}</span></div>
-            {p.planning_deadline_at && (
-              <div className="flex items-center gap-2"><Timer className="w-4 h-4" /><span>수립 마감: {formatDate(p.planning_deadline_at)}{dl !== null && dl >= 0 && <span className="ml-2 text-orange-600 font-medium">(D-{dl})</span>}</span></div>
+            <div className="flex items-center gap-2">
+              <Calendar className="w-4 h-4" />
+              <span>{formatDate(p.starts_at)} ~ {formatDate(p.ends_at)}</span>
+            </div>
+            {p.planning_starts_at && p.planning_deadline_at && (
+              <div className="flex items-center gap-2">
+                <Timer className="w-4 h-4" />
+                <span>수립 기간: {formatDate(p.planning_starts_at)} ~ {formatDate(p.planning_deadline_at)}</span>
+                {dl !== null && dl >= 0 && p.planning_status !== 'completed' && (
+                  <span className="ml-2 text-orange-600 font-medium">(D-{dl})</span>
+                )}
+                {dl !== null && dl < 0 && p.planning_status !== 'completed' && (
+                  <span className="ml-2 text-red-600 font-medium">(D+{Math.abs(dl)} 초과)</span>
+                )}
+              </div>
+            )}
+            {p.planning_started_at && (
+              <div className="flex items-center gap-2 text-blue-600">
+                <Play className="w-4 h-4" />
+                <span>수립 시작: {formatDateTime(p.planning_started_at)}</span>
+              </div>
             )}
             {p.company_okr_finalized && (
-              <div className="flex items-center gap-2 text-green-600"><CheckCircle2 className="w-4 h-4" /><span>전사 OKR 확정 ({formatDateTime(p.company_okr_finalized_at)})</span></div>
+              <div className="flex items-center gap-2 text-green-600">
+                <CheckCircle2 className="w-4 h-4" />
+                <span>전사 OKR 확정 ({formatDateTime(p.company_okr_finalized_at)})</span>
+              </div>
             )}
             {p.all_orgs_draft_generated && (
-              <div className="flex items-center gap-2 text-indigo-600"><CheckCircle2 className="w-4 h-4" /><span>전체 조직 초안 완료 ({formatDateTime(p.all_orgs_draft_generated_at)})</span></div>
+              <div className="flex items-center gap-2 text-indigo-600">
+                <CheckCircle2 className="w-4 h-4" />
+                <span>전체 조직 초안 완료 ({formatDateTime(p.all_orgs_draft_generated_at)})</span>
+              </div>
+            )}
+            {p.planning_completed_at && (
+              <div className="flex items-center gap-2 text-gray-600">
+                <CheckCircle2 className="w-4 h-4" />
+                <span>수립 완료: {formatDateTime(p.planning_completed_at)}</span>
+              </div>
             )}
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          {/* 수립 미시작/설정중/초안 → CEO 수립 플로우 안내 */}
-          {['not_started', 'setup', 'drafting'].includes(p.planning_status) && !['closed', 'archived'].includes(p.status) && (
-            <button onClick={onGoSetup} className="px-3 py-1.5 text-sm border border-blue-600 text-blue-600 rounded hover:bg-blue-50 flex items-center gap-1"><Rocket className="w-4 h-4" />OKR 수립</button>
+        <div className="flex items-center gap-2 flex-wrap justify-end">
+          {/* 수립 미시작 → CEO 수립 플로우 안내 */}
+          {p.planning_status === 'not_started' && !['closed', 'archived'].includes(p.status) && (
+            <button onClick={onGoSetup} className="px-3 py-1.5 text-sm border border-blue-600 text-blue-600 rounded hover:bg-blue-50 flex items-center gap-1">
+              <Rocket className="w-4 h-4" />OKR 수립 시작
+            </button>
           )}
+          
+          {/* 설정중/초안작성 → 계속하기 + 초기화 */}
+          {['setup', 'drafting'].includes(p.planning_status) && !['closed', 'archived'].includes(p.status) && (
+            <>
+              <button onClick={onGoSetup} className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center gap-1">
+                <Rocket className="w-4 h-4" />수립 계속
+              </button>
+              {canReset && (
+                <button onClick={() => onReset(p)} className="px-3 py-1.5 text-sm border border-slate-300 text-slate-600 rounded hover:bg-slate-50 flex items-center gap-1" title="사이클 초기화">
+                  <RotateCcw className="w-4 h-4" />
+                </button>
+              )}
+            </>
+          )}
+          
+          {/* 진행중 → 마감 */}
           {p.planning_status === 'in_progress' && (
-            <button onClick={() => onClosePlanning(p)} className="px-3 py-1.5 text-sm bg-orange-600 text-white rounded hover:bg-orange-700 flex items-center gap-1"><Square className="w-4 h-4" />수립 마감</button>
+            <button onClick={() => onClosePlanning(p)} className="px-3 py-1.5 text-sm bg-orange-600 text-white rounded hover:bg-orange-700 flex items-center gap-1">
+              <Square className="w-4 h-4" />수립 마감
+            </button>
           )}
+          
+          {/* 마감중 → 확정 */}
           {p.planning_status === 'closing' && (
-            <button onClick={() => onFinalizePlanning(p)} className="px-3 py-1.5 text-sm bg-green-600 text-white rounded hover:bg-green-700 flex items-center gap-1"><CheckCircle2 className="w-4 h-4" />수립 확정</button>
+            <button onClick={() => onFinalizePlanning(p)} className="px-3 py-1.5 text-sm bg-green-600 text-white rounded hover:bg-green-700 flex items-center gap-1">
+              <CheckCircle2 className="w-4 h-4" />수립 확정
+            </button>
           )}
-          {p.status === 'active' && (
-            <button onClick={() => onStartClosing(p)} className="px-3 py-1.5 text-sm border border-orange-600 text-orange-600 rounded hover:bg-orange-50 flex items-center gap-1"><Archive className="w-4 h-4" />성과 마감</button>
+          
+          {/* 수립 완료 상태 표시 */}
+          {p.planning_status === 'completed' && p.status === 'active' && (
+            <button onClick={() => onStartClosing(p)} className="px-3 py-1.5 text-sm border border-orange-600 text-orange-600 rounded hover:bg-orange-50 flex items-center gap-1">
+              <Archive className="w-4 h-4" />성과 마감
+            </button>
           )}
+          
+          {/* 실행중 → 성과 마감 시작 */}
+          {p.status === 'active' && p.planning_status !== 'completed' && !['setup', 'drafting', 'in_progress', 'closing'].includes(p.planning_status) && (
+            <button onClick={() => onStartClosing(p)} className="px-3 py-1.5 text-sm border border-orange-600 text-orange-600 rounded hover:bg-orange-50 flex items-center gap-1">
+              <Archive className="w-4 h-4" />성과 마감
+            </button>
+          )}
+          
+          {/* 마감중 → 마감 완료 */}
           {p.status === 'closing' && (
-            <button onClick={() => onFinalizeClosing(p)} className="px-3 py-1.5 text-sm bg-gray-600 text-white rounded hover:bg-gray-700 flex items-center gap-1"><CheckCircle2 className="w-4 h-4" />마감 완료</button>
+            <button onClick={() => onFinalizeClosing(p)} className="px-3 py-1.5 text-sm bg-gray-600 text-white rounded hover:bg-gray-700 flex items-center gap-1">
+              <CheckCircle2 className="w-4 h-4" />마감 완료
+            </button>
           )}
-          {p.status === 'upcoming' && p.planning_status === 'not_started' && (
-            <button onClick={() => onDelete(p)} className="p-2 text-red-600 hover:bg-red-50 rounded" title="삭제"><Trash2 className="w-4 h-4" /></button>
+          
+          {/* 삭제 버튼 */}
+          {canDelete && (
+            <button onClick={() => onDelete(p)} className="p-2 text-red-600 hover:bg-red-50 rounded" title="삭제">
+              <Trash2 className="w-4 h-4" />
+            </button>
           )}
         </div>
       </div>
       {p.planning_message && (
         <div className="mt-3 pt-3 border-t border-slate-100">
-          <div className="flex items-start gap-2 text-sm"><MessageSquare className="w-4 h-4 text-slate-400 flex-shrink-0 mt-0.5" /><p className="text-slate-600 italic">{p.planning_message}</p></div>
+          <div className="flex items-start gap-2 text-sm">
+            <MessageSquare className="w-4 h-4 text-slate-400 flex-shrink-0 mt-0.5" />
+            <p className="text-slate-600 italic">{p.planning_message}</p>
+          </div>
         </div>
       )}
     </div>
@@ -530,10 +775,12 @@ interface PlanningStatusCardProps {
   period: FiscalPeriod;
   onClosePlanning: (p: FiscalPeriod) => void;
   onFinalizePlanning: (p: FiscalPeriod) => void;
+  onReset: (p: FiscalPeriod) => void;
+  canReset: boolean;
   onGoSetup: () => void;
 }
 
-function PlanningStatusCard({ period: p, onClosePlanning, onFinalizePlanning, onGoSetup }: PlanningStatusCardProps) {
+function PlanningStatusCard({ period: p, onClosePlanning, onFinalizePlanning, onReset, canReset, onGoSetup }: PlanningStatusCardProps) {
   const dl = daysUntil(p.planning_deadline_at);
 
   const steps = [
@@ -547,9 +794,27 @@ function PlanningStatusCard({ period: p, onClosePlanning, onFinalizePlanning, on
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-3">
           <h4 className="font-bold text-slate-900">{p.period_name}</h4>
-          <span className={`px-2 py-1 rounded-full text-xs font-medium bg-white ${PLAN_CFG[p.planning_status].color}`}>{PLAN_CFG[p.planning_status].label}</span>
+          <span className={`px-2 py-1 rounded-full text-xs font-medium bg-white ${PLAN_CFG[p.planning_status].color}`}>
+            {PLAN_CFG[p.planning_status].label}
+          </span>
         </div>
-        {dl !== null && dl >= 0 && <div className="text-sm text-orange-600 font-semibold">마감까지 D-{dl}</div>}
+        <div className="flex items-center gap-2">
+          {dl !== null && dl >= 0 && (
+            <span className="text-sm text-orange-600 font-semibold">마감까지 D-{dl}</span>
+          )}
+          {dl !== null && dl < 0 && (
+            <span className="text-sm text-red-600 font-semibold">마감 D+{Math.abs(dl)} 초과</span>
+          )}
+          {canReset && (
+            <button 
+              onClick={() => onReset(p)} 
+              className="p-1.5 text-slate-500 hover:bg-white rounded" 
+              title="사이클 초기화"
+            >
+              <RotateCcw className="w-4 h-4" />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* 진행 단계 인디케이터 */}
@@ -569,8 +834,19 @@ function PlanningStatusCard({ period: p, onClosePlanning, onFinalizePlanning, on
       </div>
 
       <div className="grid grid-cols-2 gap-4 text-sm mb-3">
-        <div><div className="text-slate-600">수립 기간</div><div className="font-medium text-slate-900">{formatDate(p.planning_starts_at)} ~ {formatDate(p.planning_deadline_at)}</div></div>
-        <div><div className="text-slate-600">수립 시작</div><div className="font-medium text-slate-900">{formatDateTime(p.planning_started_at)}</div></div>
+        <div>
+          <div className="text-slate-600">수립 기간</div>
+          <div className="font-medium text-slate-900">
+            {p.planning_starts_at || p.planning_deadline_at 
+              ? `${formatDate(p.planning_starts_at)} ~ ${formatDate(p.planning_deadline_at)}`
+              : '미설정'
+            }
+          </div>
+        </div>
+        <div>
+          <div className="text-slate-600">수립 시작</div>
+          <div className="font-medium text-slate-900">{formatDateTime(p.planning_started_at)}</div>
+        </div>
       </div>
 
       <div className="flex items-center gap-2 pt-3 border-t border-blue-200">
@@ -581,16 +857,66 @@ function PlanningStatusCard({ period: p, onClosePlanning, onFinalizePlanning, on
         )}
         {p.planning_status === 'in_progress' && (
           <>
-            <button className="flex-1 px-3 py-2 bg-white border border-slate-300 text-slate-700 rounded hover:bg-slate-50 text-sm"><Users className="w-4 h-4 inline mr-1" />수립 현황 보기</button>
-            <button onClick={() => onClosePlanning(p)} className="px-4 py-2 bg-orange-600 text-white rounded hover:bg-orange-700 text-sm">수립 마감</button>
+            <button className="flex-1 px-3 py-2 bg-white border border-slate-300 text-slate-700 rounded hover:bg-slate-50 text-sm">
+              <Users className="w-4 h-4 inline mr-1" />수립 현황 보기
+            </button>
+            <button onClick={() => onClosePlanning(p)} className="px-4 py-2 bg-orange-600 text-white rounded hover:bg-orange-700 text-sm">
+              수립 마감
+            </button>
           </>
         )}
         {p.planning_status === 'closing' && (
           <>
-            <button className="flex-1 px-3 py-2 bg-white border border-slate-300 text-slate-700 rounded hover:bg-slate-50 text-sm"><Users className="w-4 h-4 inline mr-1" />수립 현황 보기</button>
-            <button onClick={() => onFinalizePlanning(p)} className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 text-sm">수립 확정</button>
+            <button className="flex-1 px-3 py-2 bg-white border border-slate-300 text-slate-700 rounded hover:bg-slate-50 text-sm">
+              <Users className="w-4 h-4 inline mr-1" />수립 현황 보기
+            </button>
+            <button onClick={() => onFinalizePlanning(p)} className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 text-sm">
+              수립 확정
+            </button>
           </>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Completed Planning Card ─────────────────────────────
+
+interface CompletedPlanningCardProps {
+  period: FiscalPeriod;
+}
+
+function CompletedPlanningCard({ period: p }: CompletedPlanningCardProps) {
+  return (
+    <div className="border border-gray-200 bg-gray-50 rounded-lg p-4">
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-3">
+          <h4 className="font-bold text-slate-900">{p.period_name}</h4>
+          <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700">
+            수립 완료
+          </span>
+          <span className={`px-2 py-1 rounded-full text-xs font-medium ${STATUS_CFG[p.status].bg} ${STATUS_CFG[p.status].color}`}>
+            {STATUS_CFG[p.status].label}
+          </span>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-3 gap-4 text-sm">
+        <div>
+          <div className="text-slate-600">기간</div>
+          <div className="font-medium text-slate-900">{formatDate(p.starts_at)} ~ {formatDate(p.ends_at)}</div>
+        </div>
+        <div>
+          <div className="text-slate-600">수립 완료일</div>
+          <div className="font-medium text-slate-900">{formatDateTime(p.planning_completed_at)}</div>
+        </div>
+        <div>
+          <div className="text-slate-600">전사 OKR</div>
+          <div className="font-medium text-green-600 flex items-center gap-1">
+            <CheckCircle2 className="w-4 h-4" />
+            확정됨
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -610,17 +936,42 @@ function ClosingCard({ period: p, onStartClosing, onFinalizeClosing }: ClosingCa
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-3">
           <h4 className="font-bold text-slate-900">{p.period_name}</h4>
-          <span className={`px-2 py-1 rounded-full text-xs font-medium ${STATUS_CFG[p.status].bg} ${STATUS_CFG[p.status].color}`}>{STATUS_CFG[p.status].label}</span>
+          <span className={`px-2 py-1 rounded-full text-xs font-medium ${STATUS_CFG[p.status].bg} ${STATUS_CFG[p.status].color}`}>
+            {STATUS_CFG[p.status].label}
+          </span>
+          {p.planning_status === 'completed' && (
+            <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700">
+              수립 완료
+            </span>
+          )}
         </div>
       </div>
       <div className="grid grid-cols-2 gap-4 text-sm mb-3">
-        <div><div className="text-slate-600">기간</div><div className="font-medium text-slate-900">{formatDate(p.starts_at)} ~ {formatDate(p.ends_at)}</div></div>
-        {p.closing_started_at && <div><div className="text-slate-600">마감 시작</div><div className="font-medium text-slate-900">{formatDateTime(p.closing_started_at)}</div></div>}
+        <div>
+          <div className="text-slate-600">기간</div>
+          <div className="font-medium text-slate-900">{formatDate(p.starts_at)} ~ {formatDate(p.ends_at)}</div>
+        </div>
+        {p.closing_started_at && (
+          <div>
+            <div className="text-slate-600">마감 시작</div>
+            <div className="font-medium text-slate-900">{formatDateTime(p.closing_started_at)}</div>
+          </div>
+        )}
       </div>
       <div className="flex items-center gap-2 pt-3 border-t border-orange-200">
-        <button className="flex-1 px-3 py-2 bg-white border border-slate-300 text-slate-700 rounded hover:bg-slate-50 text-sm"><TrendingUp className="w-4 h-4 inline mr-1" />성과 현황 보기</button>
-        {p.status === 'active' && <button onClick={() => onStartClosing(p)} className="px-4 py-2 bg-orange-600 text-white rounded hover:bg-orange-700 text-sm">마감 시작</button>}
-        {p.status === 'closing' && <button onClick={() => onFinalizeClosing(p)} className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 text-sm">마감 완료</button>}
+        <button className="flex-1 px-3 py-2 bg-white border border-slate-300 text-slate-700 rounded hover:bg-slate-50 text-sm">
+          <TrendingUp className="w-4 h-4 inline mr-1" />성과 현황 보기
+        </button>
+        {p.status === 'active' && (
+          <button onClick={() => onStartClosing(p)} className="px-4 py-2 bg-orange-600 text-white rounded hover:bg-orange-700 text-sm">
+            마감 시작
+          </button>
+        )}
+        {p.status === 'closing' && (
+          <button onClick={() => onFinalizeClosing(p)} className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 text-sm">
+            마감 완료
+          </button>
+        )}
       </div>
     </div>
   );
