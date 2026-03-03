@@ -414,6 +414,7 @@ export default function CEOOKRSetup() {
     } catch (err) {
       console.error('진행 상태 복원 실패:', err);
     }
+  }; // 👈👈👈 여기에 함수를 닫는 중괄호를 꼭 추가해 줘!!!
 
   const loadExistingContext = async () => {
     if (!company?.id) return;
