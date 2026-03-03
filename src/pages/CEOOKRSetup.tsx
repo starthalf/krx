@@ -413,7 +413,7 @@ export default function CEOOKRSetup() {
 
     } catch (err) {
       console.error('진행 상태 복원 실패:', err);
-    };
+    }
 
   const loadExistingContext = async () => {
     if (!company?.id) return;
