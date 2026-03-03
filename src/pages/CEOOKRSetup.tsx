@@ -949,9 +949,16 @@ export default function CEOOKRSetup() {
         }
       }
 
-      if (notifications.length > 0) {
+     if (notifications.length > 0) {
         await supabase.from('notifications').insert(notifications);
       }
+
+      // 🚨 [여기에 추가!] 사이클이 배포되면 무조건 fiscal_periods도 '수립중'으로 강제 동기화
+      await supabase
+        .from('fiscal_periods')
+        .update({ status: 'planning', planning_status: 'in_progress' })
+        .eq('company_id', company.id)
+        .eq('period_code', selectedPeriodCode);
 
       setCycleStarted(true);
       alert(`✅ 사이클이 시작되었습니다! ${notifications.length}명에게 알림이 발송되었습니다.`);
