@@ -4,8 +4,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { 
   ChevronLeft, ChevronRight, Bot, Target, RefreshCw, Pencil, Trash2, 
   ChevronDown, BookOpen, Plus, X, ArrowLeft, Loader2, Check, Search, Star, Database,
-  GitBranch, Link2, AlertCircle, FileCheck, Clock, MessageSquare, Send, Users, Sparkles,
-  Calendar
+  GitBranch, Link2, AlertCircle, FileCheck, Clock, MessageSquare, Send, Users, Sparkles
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useStore } from '../store/useStore';
@@ -13,6 +12,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { getBIIColor, getKPICategoryColor } from '../utils/helpers';
 import type { BIIType } from '../types';
 import OKRCommentPanel from '../components/OKRCommentPanel';
+import PeriodSelector, { useActivePeriod } from '../components/period/PeriodSelector';
+import { fetchActivePeriod } from '../lib/period-api';
 
 // Wizard 전용 타입
 type ApprovalStatus = 'draft' | 'submitted' | 'under_review' | 'approved' | 'rejected' | 'revision_requested';
@@ -65,20 +66,17 @@ export default function Wizard() {
 
   // ==================== State 관리 ====================
 
+  // 기간 관련 state 추가
+const [selectedPeriodId, setSelectedPeriodId] = useState<string | null>(null);
+const [selectedPeriodCode, setSelectedPeriodCode] = useState<string>('');
+const [periodLoading, setPeriodLoading] = useState(true);
   // 조직 선택 관련
   const [selectedOrgId, setSelectedOrgId] = useState<string | null>(urlOrgId || null);
-  const [showOrgSelector, setShowOrgSelector] = useState(!urlOrgId);
-
-  // 기간 선택 관련 (NEW)
-  const [showPeriodSelector, setShowPeriodSelector] = useState(false);
-  const [availablePeriods, setAvailablePeriods] = useState<any[]>([]);
-  const [selectedPeriodId, setSelectedPeriodId] = useState<string | null>(null);
-  const [selectedPeriodCode, setSelectedPeriodCode] = useState<string>('');
-  const [periodLoading, setPeriodLoading] = useState(false);
+  const [showOrgSelector, setShowOrgSelector] = useState(!urlOrgId); // URL에 ID가 없으면 선택창 표시
 
   // 위저드 진행 관련
   const [currentStep, setCurrentStep] = useState(0);
-  const [showOneClickModal, setShowOneClickModal] = useState(false);
+const [showOneClickModal, setShowOneClickModal] = useState(false);
   const [isAIGenerating, setIsAIGenerating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   
@@ -87,16 +85,21 @@ export default function Wizard() {
   const [selectedObjectiveTab, setSelectedObjectiveTab] = useState('1');
   const [expandedKR, setExpandedKR] = useState<string | null>(null);
   
+  // [New] KR 편집 모드 (수정 중인 KR의 ID)
   const [editingKRId, setEditingKRId] = useState<string | null>(null);
   const [editingObjId, setEditingObjId] = useState<string | null>(null);
 
+  // [New] 회사 업종 (DB에서 가져옴 → Edge Function에 전달)
   const [companyIndustry, setCompanyIndustry] = useState<string>('SaaS/클라우드');
 
-  const [aiRegenObjId, setAiRegenObjId] = useState<string | null>(null);
+  // [New] Objective별 AI KR 재생성
+  const [aiRegenObjId, setAiRegenObjId] = useState<string | null>(null); // 현재 컨텍스트 입력 중인 Obj
   const [aiRegenContext, setAiRegenContext] = useState('');
-  const [aiRegeneratingObjId, setAiRegeneratingObjId] = useState<string | null>(null);
+  const [aiRegeneratingObjId, setAiRegeneratingObjId] = useState<string | null>(null); // 실제 생성 중인 Obj
+  // Pool 모달이 어떤 Objective용인지
   const [poolTargetObjId, setPoolTargetObjId] = useState<string | null>(null);
 
+  // [New] Pool에서 선택 모달
   const [showPoolModal, setShowPoolModal] = useState(false);
   const [poolKPIs, setPoolKPIs] = useState<any[]>([]);
   const [poolSearch, setPoolSearch] = useState('');
@@ -104,11 +107,14 @@ export default function Wizard() {
   const [poolSelectedIds, setPoolSelectedIds] = useState<Set<string>>(new Set());
   const [poolFunctionFilter, setPoolFunctionFilter] = useState('');
 
+  // [New] Cascading 관련
   const [parentOKRs, setParentOKRs] = useState<ParentOKR[]>([]);
   const [parentOrgName, setParentOrgName] = useState<string>('');
   const [parentOrgLevel, setParentOrgLevel] = useState<string>('');
+  const [isLoadingParent, setIsLoadingParent] = useState(false);
   const [cascadingLinked, setCascadingLinked] = useState<Record<string, string>>({});
 
+  // [New] 승인 워크플로우
   const [approvalStatus, setApprovalStatus] = useState<ApprovalStatus>('draft');
   const [approvalComment, setApprovalComment] = useState('');
   const [reviewComment, setReviewComment] = useState('');
@@ -117,89 +123,71 @@ export default function Wizard() {
   const [reviewRequestOrgs, setReviewRequestOrgs] = useState<string[]>([]);
   const [reviewRequestMessage, setReviewRequestMessage] = useState('');
 
+  // 현재 선택된 조직 정보 계산
   const orgId = selectedOrgId;
   const currentOrg = organizations.find(o => o.id === orgId);
   const currentOrgName = currentOrg?.name || '우리 조직';
 
   // ==================== Effects ====================
 
-  // 1. 조직이 선택되면 기간 목록 로드
-  useEffect(() => {
-    const loadPeriods = async () => {
-      const targetOrgId = selectedOrgId || urlOrgId;
-      if (!targetOrgId || showOrgSelector) return;
-      
-      const targetOrg = organizations.find(o => o.id === targetOrgId);
-      if (!targetOrg?.companyId) return;
-
-      setPeriodLoading(true);
-      try {
-        const { data } = await supabase
-          .from('fiscal_periods')
-          .select('*')
-          .eq('company_id', targetOrg.companyId)
-          .in('status', ['upcoming', 'planning', 'active'])
-          .order('period_code', { ascending: false });
-        
-        if (data) {
-          setAvailablePeriods(data);
-          // 아직 선택된 기간이 없다면 기간 선택 화면 노출
-          if (!selectedPeriodCode) {
-            setShowPeriodSelector(true);
-          }
-        }
-      } catch (err) {
-        console.error('기간 로딩 실패:', err);
-      } finally {
-        setPeriodLoading(false);
-      }
-    };
+useEffect(() => {
+  const loadActivePeriod = async () => {
+    const targetOrgId = selectedOrgId || urlOrgId;
+    if (!targetOrgId) return;
     
-    loadPeriods();
-  }, [selectedOrgId, showOrgSelector, organizations]);
+    const targetOrg = organizations.find(o => o.id === targetOrgId);
+    if (!targetOrg?.companyId) return;
+    
+    setPeriodLoading(true);
+    try {
+      // 분기 기준 활성 기간 가져오기
+     // quarter → half → year 순서로 활성 기간 찾기
+const periodTypes = ['quarter', 'half', 'year'] as const;
+let found = false;
 
-  // 2. 기간이 선택되면 -> 🚨 [수문장] 배포 확인 & 초안 로드
+for (const pType of periodTypes) {
+  const activePeriod = await fetchActivePeriod(targetOrg.companyId, pType);
+  if (activePeriod) {
+    setSelectedPeriodId(activePeriod.id);
+    setSelectedPeriodCode(activePeriod.periodCode);
+    found = true;
+    break;
+  }
+}
+
+// 그래도 못 찾으면 okr_planning_cycles에서 직접 가져오기
+if (!found) {
+  const { data: cycles } = await supabase
+    .from('okr_planning_cycles')
+    .select('period')
+    .eq('company_id', targetOrg.companyId)
+    .eq('status', 'in_progress')
+    .order('created_at', { ascending: false })
+    .limit(1);
+  
+  if (cycles && cycles.length > 0) {
+    setSelectedPeriodCode(cycles[0].period);
+  }
+}
+    } catch (err) {
+      console.error('활성 기간 로드 실패:', err);
+    } finally {
+      setPeriodLoading(false);
+    }
+  };
+
+    loadActivePeriod();
+}, [selectedOrgId, urlOrgId, organizations]);
+  
+  // 조직 선택이 완료되면 초기 모달 띄우기
   useEffect(() => {
-    const validateCycleAndLoadData = async () => {
-      const targetOrgId = selectedOrgId || urlOrgId;
-      const targetOrg = organizations.find(o => o.id === targetOrgId);
-      const companyId = targetOrg?.companyId;
+  if (selectedOrgId && showOrgSelector) {
+    setShowOrgSelector(false);
+    // showOneClickModal은 loadDraftFromDB 완료 후 결정
+  }
+}, [selectedOrgId, showOrgSelector]);
 
-      if (!companyId || !targetOrgId || !selectedPeriodCode || showPeriodSelector) return;
-
-      setIsLoadingDraft(true);
-      try {
-        // [수문장] 해당 기간에 CEO가 배포한 활성 사이클이 있는지 확인
-        const { data: cycles } = await supabase
-          .from('okr_planning_cycles')
-          .select('status')
-          .eq('company_id', companyId)
-          .eq('period', selectedPeriodCode)
-          .eq('status', 'in_progress')
-          .limit(1);
-
-        if (!cycles || cycles.length === 0) {
-          // 배포 전이면 화면 막음
-          setCeoDraftInProgress(true);
-          setIsLoadingDraft(false);
-          return;
-        }
-
-        // 배포 완료 상태: 초안 로드
-        setCeoDraftInProgress(false);
-        await loadDraftFromDB(targetOrgId);
-        await loadParentOKRs(targetOrgId);
-
-      } catch (err) {
-        console.error('검증 및 초안 로드 실패:', err);
-        setIsLoadingDraft(false);
-      }
-    };
-
-    validateCycleAndLoadData();
-  }, [selectedPeriodCode, showPeriodSelector]);
-
-  // 회사 업종 가져오기
+  // [New] 회사 industry 가져오기
   useEffect(() => {
     const fetchCompanyIndustry = async () => {
       const targetOrgId = selectedOrgId || urlOrgId;
@@ -219,7 +207,7 @@ export default function Wizard() {
           setCompanyIndustry(data.industry);
         }
       } catch (err) {
-        console.warn('업종 조회 실패:', err);
+        console.warn('회사 업종 조회 실패, 기본값 사용:', err);
       }
     };
     fetchCompanyIndustry();
@@ -227,25 +215,62 @@ export default function Wizard() {
 
   // ==================== Data States ====================
 
+  // AI 초안 로딩 상태
   const [isLoadingDraft, setIsLoadingDraft] = useState(false);
   const [hasDraft, setHasDraft] = useState(false);
+
+  // CEO 초안 작업 상태 (사이클 미시작 or 일시중지 → 편집 불가)
   const [ceoDraftInProgress, setCeoDraftInProgress] = useState(false);
 
+  // 상위 조직 OKR (Cascading 시각화용)
   interface ParentObjective {
     id: string;
     name: string;
     biiType: string;
     orgName: string;
-    orgLevel: string; 
+    orgLevel: string; // 전사, 부문, 본부, 팀
     orgId: string;
   }
   const [parentObjectives, setParentObjectives] = useState<ParentObjective[]>([]);
+
   const [objectives, setObjectives] = useState<ObjectiveCandidate[]>([]);
+
   const [krs, setKrs] = useState<(KRCandidate & { selected?: boolean; parentObjId?: string | null })[]>([]);
 
-  // DB 초안 로드 함수
+  // ==================== AI 초안 자동 로딩 ====================
+
+useEffect(() => {
+    const targetOrgId = selectedOrgId || urlOrgId;
+    if (!targetOrgId) return;
+    if (!selectedPeriodCode) return;  // ← 기간 로드 완료 전까지 대기
+
+    loadDraftFromDB(targetOrgId);
+    loadParentOKRs(targetOrgId);
+}, [selectedOrgId, urlOrgId, selectedPeriodCode]);  // ← selectedPeriodCode 추가
+
+  // DB에서 AI 초안 로딩
   const loadDraftFromDB = async (targetOrgId: string) => {
+    setIsLoadingDraft(true);
+    setCeoDraftInProgress(false);
     try {
+      // 0. 사이클 상태 확인 — in_progress가 아니면 CEO 작업 중으로 간주
+      const targetOrg = organizations.find(o => o.id === targetOrgId);
+      const companyId = targetOrg?.companyId;
+      let cycleActive = false;
+
+      if (companyId) {
+        const { data: cycles } = await supabase
+          .from('okr_planning_cycles')
+          .select('status')
+          .eq('company_id', companyId)
+ .eq('period', selectedPeriodCode)
+          .order('created_at', { ascending: false })
+          .limit(1);
+
+        cycleActive = cycles && cycles.length > 0 && cycles[0].status === 'in_progress';
+      }
+
+      // 해당 조직의 objectives 조회 (최신 버전만)
       const { data: objs, error: objErr } = await supabase
         .from('objectives')
         .select(`
@@ -254,7 +279,7 @@ export default function Wizard() {
           version, is_latest, original_obj_id
         `)
         .eq('org_id', targetOrgId)
-        .eq('period', selectedPeriodCode)
+   .eq('period', selectedPeriodCode)
         .eq('is_latest', true)
         .in('source', ['ai_draft', 'manual'])
         .order('sort_order');
@@ -264,6 +289,7 @@ export default function Wizard() {
       if (objs && objs.length > 0) {
         setHasDraft(true);
 
+        // Objectives 변환
         const loadedObjectives: ObjectiveCandidate[] = objs.map((obj: any) => ({
           id: obj.id,
           name: obj.name,
@@ -279,6 +305,7 @@ export default function Wizard() {
         setObjectives(loadedObjectives);
         setSelectedObjectiveTab(loadedObjectives[0]?.id || '');
 
+        // 각 objective의 KR 조회 (최신 버전만)
         const objIds = objs.map((o: any) => o.id);
         const { data: allKRs } = await supabase
           .from('key_results')
@@ -314,11 +341,23 @@ export default function Wizard() {
           setKrs(loadedKRs);
         }
 
+        // 초안이 있으면 목표수립 단계부터 시작
         setShowOneClickModal(false);
         setCurrentStep(1);
+
+        // 사이클이 in_progress가 아니면 CEO 작업 중 → 읽기 전용
+        if (!cycleActive) {
+          setCeoDraftInProgress(true);
+        }
       } else {
         setHasDraft(false);
-        setShowOneClickModal(true);
+        let isCeoPreparing = false;
+        // 초안 없으면: 사이클이 in_progress가 아니면 무조건 차단 (CEO 배포 전)
+        if (companyId && !cycleActive) {
+          isCeoPreparing = true;
+          setCeoDraftInProgress(true);
+        }
+if (!isCeoPreparing) setShowOneClickModal(true);
       }
     } catch (err) {
       console.error('AI 초안 로딩 실패:', err);
@@ -327,11 +366,13 @@ export default function Wizard() {
     }
   };
 
+  // 상위 조직 OKR 로딩 (Cascading 시각화용)
   const loadParentOKRs = async (targetOrgId: string) => {
     try {
       const currentOrg = organizations.find(o => o.id === targetOrgId);
       if (!currentOrg?.parentOrgId) return;
 
+      // 상위 조직 찾기 (전사까지)
       const parentIds: string[] = [];
       let cursor = currentOrg.parentOrgId;
       while (cursor) {
@@ -342,11 +383,12 @@ export default function Wizard() {
 
       if (parentIds.length === 0) return;
 
+      // 상위 조직들의 확정된 objectives
       const { data: parentObjs } = await supabase
         .from('objectives')
         .select('id, name, bii_type, org_id, status')
         .in('org_id', parentIds)
-        .eq('period', selectedPeriodCode)
+.eq('period', selectedPeriodCode)
         .in('status', ['finalized', 'active', 'draft']);
 
       if (parentObjs) {
@@ -370,29 +412,34 @@ export default function Wizard() {
 
   // ==================== Handlers ====================
 
+  // 조직 선택 핸들러
   const handleSelectOrg = (selectOrgId: string) => {
     setSelectedOrgId(selectOrgId);
     navigate(`/wizard/${selectOrgId}`, { replace: true });
   };
 
+  // KR 체크박스 토글
   const toggleKR = (krId: string) => {
     setKrs(krs.map(kr => 
       kr.id === krId ? { ...kr, selected: !kr.selected } : kr
     ));
   };
 
+  // KR 값 변경 핸들러 (편집 모드용)
   const handleKRChange = (krId: string, field: string, value: any) => {
     setKrs(prev => prev.map(kr => 
       kr.id === krId ? { ...kr, [field]: value } : kr
     ));
   };
 
+  // 목표 선택 토글
   const toggleObjective = (id: string) => {
     setObjectives(objectives.map(obj =>
       obj.id === id ? { ...obj, selected: !obj.selected } : obj
     ));
   };
 
+  // KR 수동 추가
   const handleAddKR = () => {
     const newKR: KRCandidate & { selected: boolean } = {
       id: `kr-new-${Date.now()}`,
@@ -416,9 +463,10 @@ export default function Wizard() {
     };
     setKrs([...krs, newKR]);
     setExpandedKR(newKR.id);
-    setEditingKRId(newKR.id);
+    setEditingKRId(newKR.id); // 추가하자마자 편집 모드
   };
 
+  // [New] Pool 모달 열기 - DB에서 KPI 검색
   const handleOpenPoolModal = async (targetObjId?: string) => {
     if (targetObjId) {
       setPoolTargetObjId(targetObjId);
@@ -431,6 +479,7 @@ export default function Wizard() {
     await fetchPoolKPIs('', '');
   };
 
+  // [New] Pool KPI 검색
   const fetchPoolKPIs = async (search: string, fnFilter: string) => {
     setPoolLoading(true);
     try {
@@ -440,9 +489,20 @@ export default function Wizard() {
         .order('relevance_score', { ascending: false })
         .limit(50);
 
-      if (companyIndustry) query = query.contains('industry_tags', [companyIndustry]);
-      if (search) query = query.or(`name.ilike.%${search}%,definition.ilike.%${search}%`);
-      if (fnFilter) query = query.contains('function_tags', [fnFilter]);
+      // 업종 필터 (현재 회사 업종)
+      if (companyIndustry) {
+        query = query.contains('industry_tags', [companyIndustry]);
+      }
+
+      // 텍스트 검색
+      if (search) {
+        query = query.or(`name.ilike.%${search}%,definition.ilike.%${search}%`);
+      }
+
+      // 기능 필터
+      if (fnFilter) {
+        query = query.contains('function_tags', [fnFilter]);
+      }
 
       const { data, error } = await query;
       if (error) throw error;
@@ -454,6 +514,7 @@ export default function Wizard() {
     }
   };
 
+  // [New] Pool 검색 디바운스
   useEffect(() => {
     if (!showPoolModal) return;
     const timer = setTimeout(() => {
@@ -462,6 +523,7 @@ export default function Wizard() {
     return () => clearTimeout(timer);
   }, [poolSearch, poolFunctionFilter, showPoolModal]);
 
+  // [New] Pool 체크박스 토글
   const togglePoolSelection = (id: string) => {
     setPoolSelectedIds(prev => {
       const next = new Set(prev);
@@ -471,6 +533,7 @@ export default function Wizard() {
     });
   };
 
+  // [New] Pool에서 선택한 KPI를 KR로 추가
   const handleAddFromPool = () => {
     const targetId = poolTargetObjId || selectedObjectiveTab;
     const currentObj = objectives.find(o => o.id === targetId);
@@ -503,6 +566,7 @@ export default function Wizard() {
     setPoolTargetObjId(null);
   };
 
+  // AI KR 추천 (v2: industry, orgType 추가)
   const handleAIRegenerateKRs = async (targetObjId?: string, userContext?: string) => {
     const objId = targetObjId || selectedObjectiveTab;
     const currentObj = objectives.find(o => o.id === objId);
@@ -511,6 +575,7 @@ export default function Wizard() {
     setAiRegeneratingObjId(objId);
     
     try {
+      // 상위 목표 정보
       const parentObj = parentObjectives.find(po => po.id === currentObj.parentObjId);
 
       const { data, error } = await supabase.functions.invoke('generate-krs', {
@@ -521,6 +586,7 @@ export default function Wizard() {
           orgType: currentOrg?.orgType || 'Front',
           functionTags: currentOrg?.functionTags || [],
           industry: companyIndustry,
+          // 새 파라미터: 상위 목표 + 사용자 컨텍스트
           parentObjectiveName: parentObj?.name || '',
           userContext: userContext || ''
         }
@@ -566,11 +632,13 @@ export default function Wizard() {
     }
   };
 
+  // AI 원클릭 전체 생성
   const handleOneClickGenerate = async () => {
     setIsAIGenerating(true);
     setShowOneClickModal(false);
 
     try {
+      // v2: generate-objectives 사용 (one-click-generate 없음)
       const { data, error } = await supabase.functions.invoke('generate-objectives', {
         body: {
           orgName: currentOrgName,
@@ -593,6 +661,7 @@ export default function Wizard() {
         }));
         setObjectives(newObjectives);
 
+        // 목표 생성 후 각 목표에 대해 KR도 자동 생성
         const allNewKRs: (KRCandidate & { selected: boolean })[] = [];
         
         for (const obj of data.objectives) {
@@ -646,25 +715,28 @@ export default function Wizard() {
         alert('✨ AI가 OKR 전체 세트를 생성했습니다! 내용을 확인해주세요.');
       }
 
-    } catch (error: any) {
-      console.error('AI Error:', error);
-      alert(`생성 실패: ${error.message}`);
-      setShowOneClickModal(true);
-    } finally {
+  } catch (error: any) {
+  console.error('AI Error:', error);
+  alert(`생성 실패: ${error.message}`);
+  setShowOneClickModal(true); // 초안 없이 직접 수립할 때만 해당되므로 유지 OK
+} finally {
       setIsAIGenerating(false);
     }
   };
 
+  // 위저드 시작 (수동)
   const handleStartWizard = () => {
     setShowOneClickModal(false);
     setCurrentStep(0);
   };
 
+  // 상위 조직에 제출
   const handleSubmitForApproval = async () => {
     if (!orgId) return;
     if (!confirm('목표를 상위 조직에 제출하시겠습니까?')) return;
 
     try {
+      // 모든 objectives의 approval_status를 submitted로 업데이트
       const selectedIds = objectives.filter(o => o.selected && o.source).map(o => o.id);
       if (selectedIds.length > 0) {
         await supabase
@@ -680,9 +752,11 @@ export default function Wizard() {
     }
   };
 
+  // 유관부서 검토 요청 발송
   const handleSendReviewRequest = async () => {
     if (reviewRequestOrgs.length === 0) return;
     try {
+      // TODO: notifications 테이블에 검토 요청 알림 insert
       alert(`✅ ${reviewRequestOrgs.length}개 조직에 검토 요청을 발송했습니다.`);
       setShowReviewRequestModal(false);
       setReviewRequestOrgs([]);
@@ -692,6 +766,7 @@ export default function Wizard() {
     }
   };
 
+  // AI 목표 생성 핸들러 (Step 1) - v2: industry 동적
   const handleAIGenerateObjectives = async () => {
     setIsAIGenerating(true);
     try {
@@ -726,6 +801,7 @@ export default function Wizard() {
     }
   };
 
+  // 최종 저장
   const handleSave = async () => {
     if (!orgId) {
       alert('조직 ID가 없습니다. 다시 시도해주세요.');
@@ -737,15 +813,31 @@ export default function Wizard() {
     setIsSaving(true);
     try {
       const selectedObjectives = objectives.filter(o => o.selected);
+      
+      // 기존 objectives의 ID → 이전 버전 is_latest=false 처리용
       const existingObjIds = selectedObjectives
         .filter(o => o.source && o.id && !o.id.startsWith('obj-new-'))
         .map(o => o.id);
 
+      // 1) 기존 objectives를 is_latest=false로 아카이브
       if (existingObjIds.length > 0) {
-        await supabase.from('objectives').update({ is_latest: false }).in('id', existingObjIds);
-        await supabase.from('key_results').update({ is_latest: false }).in('objective_id', existingObjIds).eq('is_latest', true);
+        await supabase
+          .from('objectives')
+          .update({ is_latest: false })
+          .in('id', existingObjIds);
       }
 
+      // 2) 기존 KR도 is_latest=false로 아카이브
+      if (existingObjIds.length > 0) {
+        await supabase
+          .from('key_results')
+          .update({ is_latest: false })
+          .in('objective_id', existingObjIds)
+          .eq('is_latest', true);
+      }
+
+      // 3) 새 버전 insert (objective + KR)
+      // objective ID 매핑: 이전 ID → 새 ID (KR의 objective_id 연결용)
       const objIdMap: Record<string, string> = {};
 
       for (const obj of selectedObjectives) {
@@ -754,6 +846,7 @@ export default function Wizard() {
         const newVersion = isExisting ? prevVersion + 1 : 0;
         const originalId = isExisting ? (obj.originalObjId || obj.id) : null;
 
+        // INSERT 새 버전 objective
         const { data: savedObj, error: objError } = await supabase
           .from('objectives')
           .insert({
@@ -761,7 +854,7 @@ export default function Wizard() {
             name: obj.name,
             bii_type: obj.biiType,
             perspective: obj.perspective,
-            period: selectedPeriodCode,
+period: selectedPeriodCode,
             status: 'draft',
             source: isExisting ? 'manual' : (obj.source || 'manual'),
             approval_status: 'draft',
@@ -780,6 +873,7 @@ export default function Wizard() {
 
         objIdMap[obj.id] = savedObj.id;
 
+        // KR 처리: 해당 objective의 KR들
         const relatedKRs = krs.filter(k => k.objectiveId === obj.id && k.selected !== false);
         
         for (const kr of relatedKRs) {
@@ -817,6 +911,11 @@ export default function Wizard() {
         }
       }
 
+      // 4) 선택 해제된 Objective — 삭제하지 않고 is_latest=false 유지 (이미 아카이브됨)
+      // 신규 생성 후 선택 해제한 것은 삭제
+      const deselectedNewObjs = objectives.filter(o => !o.selected && (!o.source || o.id.startsWith('obj-new-')));
+      // 이건 DB에 없으므로 무시
+
       await fetchObjectives(orgId);
       await fetchKRs(orgId);
       
@@ -831,6 +930,7 @@ export default function Wizard() {
     }
   };
 
+  // Helper Values
   const steps = [
     { id: 0, name: '전략방향', description: '전사 전략 및 조직 미션 확인' },
     { id: 1, name: '목표수립', description: '3-5개 핵심 목표 선정' },
@@ -855,6 +955,8 @@ export default function Wizard() {
 
   // ==================== Render ====================
 
+  // [화면 1] 조직 선택 화면 (URL 파라미터 없을 때)
+  // 내가 속한 조직 필터 (user_roles 기반)
   const [myOrgIds, setMyOrgIds] = useState<string[]>([]);
   const [isAdmin, setIsAdmin] = useState(false);
 
@@ -879,20 +981,25 @@ export default function Wizard() {
     loadMyOrgs();
   }, [user?.id]);
 
-
-  // [화면 1] 조직 선택 화면
   if (showOrgSelector) {
-    const myOrgs = organizations.filter(o => o.level !== '전사' && myOrgIds.includes(o.id));
+    // 내가 속한 조직만 (전사 제외)
+    const myOrgs = organizations.filter(o => 
+      o.level !== '전사' && myOrgIds.includes(o.id)
+    );
 
     return (
       <div className="p-6 max-w-3xl mx-auto">
         <div className="flex items-center gap-4 mb-6">
-          <button onClick={() => navigate(-1)} className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-600">
+          <button 
+            onClick={() => navigate(-1)}
+            className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-600"
+          >
             <ArrowLeft className="w-6 h-6" />
           </button>
           <h1 className="text-2xl font-bold text-slate-900">조직 OKR 수립</h1>
         </div>
 
+        {/* CEO 안내 */}
         {isAdmin && (
           <div className="bg-amber-50 border border-amber-200 rounded-xl p-5 mb-6">
             <div className="flex items-start gap-3">
@@ -901,8 +1008,12 @@ export default function Wizard() {
                 <p className="text-amber-900 font-semibold text-sm">전사 OKR은 별도 메뉴에서 수립합니다</p>
                 <p className="text-amber-700 text-sm mt-1">
                   CEO는 <strong>"전사 OKR 수립"</strong> 메뉴에서 전사 OKR 초안을 먼저 수립해주세요.
+                  전사 초안이 완성되면 하위 조직 초안이 자동 배포됩니다.
                 </p>
-                <button onClick={() => navigate('/ceo-okr-setup')} className="mt-3 px-4 py-2 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700">
+                <button
+                  onClick={() => navigate('/ceo-okr-setup')}
+                  className="mt-3 px-4 py-2 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700 transition-colors"
+                >
                   전사 OKR 수립으로 이동 →
                 </button>
               </div>
@@ -910,6 +1021,7 @@ export default function Wizard() {
           </div>
         )}
 
+        {/* 내가 속한 조직 목록 */}
         {myOrgs.length > 0 ? (
           <div>
             <p className="text-slate-600 text-sm mb-4">내가 속한 조직의 OKR을 수립합니다.</p>
@@ -927,6 +1039,9 @@ export default function Wizard() {
                         <span className="text-xs text-slate-500">{org.orgType}</span>
                       </div>
                       <div className="text-lg font-semibold text-slate-900">{org.name}</div>
+                      {org.mission && (
+                        <div className="text-sm text-slate-500 mt-1">{org.mission}</div>
+                      )}
                     </div>
                     <ChevronRight className="w-5 h-5 text-slate-400" />
                   </div>
@@ -938,101 +1053,38 @@ export default function Wizard() {
           <div className="bg-slate-50 border border-slate-200 rounded-xl p-8 text-center">
             <Target className="w-10 h-10 text-slate-300 mx-auto mb-3" />
             <p className="text-slate-500 text-sm">배정된 조직이 없습니다</p>
+            <p className="text-slate-400 text-xs mt-1">관리자에게 조직 배정을 요청하세요</p>
           </div>
         )}
       </div>
     );
   }
 
-  // [화면 2] 기간 선택 화면 (NEW - 박스 UI)
-  if (!showOrgSelector && showPeriodSelector) {
-    return (
-      <div className="p-6 max-w-3xl mx-auto">
-        <div className="flex items-center gap-4 mb-6">
-          <button 
-            onClick={() => {
-              if (!urlOrgId) setShowOrgSelector(true);
-              else navigate(-1);
-            }}
-            className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-600"
-          >
-            <ArrowLeft className="w-6 h-6" />
-          </button>
-          <h1 className="text-2xl font-bold text-slate-900">기간 선택</h1>
-        </div>
-        
-        <p className="text-slate-600 text-sm mb-4">
-          <span className="font-semibold text-blue-600">{currentOrgName}</span>의 OKR을 수립할 기간을 선택해주세요.
-        </p>
-
-        {periodLoading ? (
-          <div className="flex justify-center py-12">
-            <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
-          </div>
-        ) : availablePeriods.length > 0 ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {availablePeriods.map(p => (
-              <button
-                key={p.id}
-                onClick={() => {
-                  setSelectedPeriodId(p.id);
-                  setSelectedPeriodCode(p.period_code);
-                  setShowPeriodSelector(false); // 선택 완료 후 수문장(Effect)으로 패스!
-                }}
-                className="text-left border-2 border-slate-200 rounded-xl p-5 hover:border-blue-500 hover:bg-blue-50 transition-all"
-              >
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2">
-                    <Calendar className="w-4 h-4 text-slate-400" />
-                    <span className="text-lg font-bold text-slate-900">{p.period_name}</span>
-                  </div>
-                  <ChevronRight className="w-5 h-5 text-slate-400" />
-                </div>
-                <div className="flex items-center gap-2 mt-1">
-                  <span className="text-xs text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
-                    {p.period_type === 'year' ? '연간' : p.period_type === 'half' ? '반기' : '분기'}
-                  </span>
-                  <span className={`text-xs px-2 py-0.5 rounded ${
-                    p.status === 'planning' ? 'bg-blue-100 text-blue-700' :
-                    p.status === 'active' ? 'bg-green-100 text-green-700' :
-                    'bg-slate-100 text-slate-600'
-                  }`}>
-                    {p.status === 'planning' ? '수립중' : p.status === 'active' ? '실행중' : '예정'}
-                  </span>
-                </div>
-                <p className="text-xs text-slate-400 mt-2">
-                  {new Date(p.starts_at).toLocaleDateString('ko-KR')} ~ {new Date(p.ends_at).toLocaleDateString('ko-KR')}
-                </p>
-              </button>
-            ))}
-          </div>
-        ) : (
-          <div className="bg-slate-50 border border-slate-200 rounded-xl p-8 text-center">
-            <Calendar className="w-10 h-10 text-slate-300 mx-auto mb-3" />
-            <p className="text-slate-500 text-sm">선택 가능한 기간이 없습니다</p>
-            <p className="text-slate-400 text-xs mt-1">관리자 설정에서 기간을 생성해주세요</p>
-          </div>
-        )}
-      </div>
-    );
-  }
-
+  // [예외처리] 잘못된 접근
   if (!orgId) {
     return (
       <div className="p-6 text-center">
         <div className="bg-red-50 border border-red-200 rounded-xl p-6 max-w-md mx-auto">
           <p className="text-red-800 mb-2">조직 정보를 불러올 수 없습니다</p>
+          <button
+            onClick={() => navigate(-1)}
+            className="mt-4 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+          >
+            돌아가기
+          </button>
         </div>
       </div>
     );
   }
 
+  // [로딩] AI 초안 불러오는 중
   if (isLoadingDraft) {
     return (
       <div className="p-6 max-w-6xl mx-auto">
         <div className="flex flex-col items-center justify-center py-20">
           <Loader2 className="w-12 h-12 text-blue-600 animate-spin mb-4" />
-          <h3 className="text-lg font-semibold text-slate-900 mb-2">데이터 확인 중...</h3>
+          <h3 className="text-lg font-semibold text-slate-900 mb-2">초안을 불러오는 중...</h3>
+          <p className="text-sm text-slate-500">{currentOrgName}의 OKR 데이터를 확인하고 있습니다</p>
         </div>
       </div>
     );
@@ -1044,46 +1096,42 @@ export default function Wizard() {
       {!showOneClickModal && (
         <div className="flex items-center gap-3 mb-6 flex-wrap">
           <button 
-            onClick={() => setShowPeriodSelector(true)} // 뒤로가기 누르면 기간 다시 선택
+            onClick={() => navigate(-1)}
             className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-600"
-            title="기간 다시 선택"
+            title="뒤로 가기"
           >
             <ArrowLeft className="w-6 h-6" />
           </button>
           <h1 className="text-2xl font-bold text-slate-900">목표 수립 ({currentOrgName})</h1>
-          
-          <button 
-            onClick={() => setShowPeriodSelector(true)}
-            className="text-sm text-slate-700 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors font-medium ml-2"
-          >
-            📅 {selectedPeriodCode} <ChevronDown className="w-4 h-4" />
-          </button>
-
+          <span className="text-sm text-slate-500 bg-slate-100 px-3 py-1 rounded-full">
+            {companyIndustry}
+          </span>
           {hasDraft && (
             <span className="text-xs font-medium text-blue-700 bg-blue-100 px-2.5 py-1 rounded-full flex items-center gap-1">
-              <Bot className="w-3 h-3" /> CEO 초안 기반
+              <Bot className="w-3 h-3" />
+              CEO 초안 기반
             </span>
           )}
         </div>
       )}
 
       {/* CEO 초안 작업 중 — 사이클 미시작 또는 일시중지 */}
-      {ceoDraftInProgress && !showOrgSelector && !showPeriodSelector && (
+      {ceoDraftInProgress && !showOrgSelector && (
         <div className="max-w-3xl mx-auto mt-8">
           <div className="bg-amber-50 border-2 border-amber-200 rounded-2xl p-8 text-center">
             <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-4">
               <Clock className="w-8 h-8 text-amber-600" />
             </div>
-            <h3 className="text-xl font-bold text-amber-900 mb-2">🚀 아직 OKR 수립 기간이 아닙니다.</h3>
+            <h3 className="text-xl font-bold text-amber-900 mb-2">CEO가 OKR 초안을 준비 중입니다</h3>
             <p className="text-amber-700 mb-4">
-              선택하신 <b>{selectedPeriodCode}</b> 기간은 CEO가 전사 목표를 확정하고 배포하기 전입니다.<br />
-              배포가 완료되면 알림을 통해 안내드리겠습니다.
+              전사 OKR 초안 작업이 진행 중이거나, 수립 사이클이 아직 시작되지 않았습니다.<br />
+              사이클이 시작되면 알림을 통해 안내드리겠습니다.
             </p>
             <button
-              onClick={() => setShowPeriodSelector(true)}
+              onClick={() => navigate(-1)}
               className="px-6 py-2.5 bg-amber-600 text-white rounded-lg font-medium hover:bg-amber-700 transition-colors"
             >
-              다른 기간 선택하기
+              돌아가기
             </button>
           </div>
         </div>
@@ -1093,7 +1141,10 @@ export default function Wizard() {
       {showOneClickModal && !hasDraft && !ceoDraftInProgress && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl p-8 max-w-3xl w-full mx-4 relative">
-            <button onClick={() => navigate(-1)} className="absolute top-6 right-6 text-slate-400 hover:text-slate-600">
+            <button 
+              onClick={() => navigate(-1)}
+              className="absolute top-6 right-6 text-slate-400 hover:text-slate-600 transition-colors"
+            >
               <X className="w-6 h-6" />
             </button>
 
@@ -1101,7 +1152,9 @@ export default function Wizard() {
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-6">
               <div className="flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0" />
-                <p className="text-sm text-amber-800">CEO가 배포한 초안이 아직 없습니다. 직접 수립하거나 AI를 활용해 생성하세요.</p>
+                <p className="text-sm text-amber-800">
+                  CEO가 배포한 초안이 아직 없습니다. 직접 수립하거나 AI를 활용해 생성하세요.
+                </p>
               </div>
             </div>
 
@@ -1109,15 +1162,29 @@ export default function Wizard() {
               <div className="border-2 border-slate-200 rounded-xl p-6 hover:border-blue-600 transition-all cursor-pointer">
                 <div className="text-3xl mb-3">🤖</div>
                 <h3 className="text-lg font-bold text-slate-900 mb-2">AI 전체 생성</h3>
-                <p className="text-sm text-slate-600 mb-4">AI가 조직정보를 분석하여 목표+KR을 한번에 생성합니다.</p>
-                <button onClick={handleOneClickGenerate} className="w-full bg-blue-600 text-white rounded-lg py-3 font-medium hover:bg-blue-700">🚀 전체 생성</button>
+                <p className="text-sm text-slate-600 mb-4">
+                  AI가 조직정보를 분석하여 목표+KR을 한번에 생성합니다.
+                </p>
+                <button
+                  onClick={handleOneClickGenerate}
+                  className="w-full bg-blue-600 text-white rounded-lg py-3 font-medium hover:bg-blue-700 transition-colors"
+                >
+                  🚀 전체 생성
+                </button>
               </div>
 
               <div className="border-2 border-slate-200 rounded-xl p-6 hover:border-blue-600 transition-all cursor-pointer">
                 <div className="text-3xl mb-3">📝</div>
                 <h3 className="text-lg font-bold text-slate-900 mb-2">위저드로 직접 수립</h3>
-                <p className="text-sm text-slate-600 mb-4">단계를 따라가며 직접 수립합니다. AI가 각 단계에서 보조합니다.</p>
-                <button onClick={handleStartWizard} className="w-full bg-slate-100 text-slate-700 rounded-lg py-3 font-medium hover:bg-slate-200">📝 시작하기</button>
+                <p className="text-sm text-slate-600 mb-4">
+                  단계를 따라가며 직접 수립합니다. AI가 각 단계에서 보조합니다.
+                </p>
+                <button
+                  onClick={handleStartWizard}
+                  className="w-full bg-slate-100 text-slate-700 rounded-lg py-3 font-medium hover:bg-slate-200 transition-colors"
+                >
+                  📝 시작하기
+                </button>
               </div>
             </div>
           </div>
@@ -1130,7 +1197,9 @@ export default function Wizard() {
           <div className="bg-white rounded-2xl p-8 max-w-md w-full mx-4 text-center">
             <Bot className="w-16 h-16 text-blue-600 mx-auto mb-4 animate-pulse" />
             <h3 className="text-xl font-bold text-slate-900 mb-2">AI가 분석 중입니다...</h3>
-            <p className="text-slate-600 mb-4">{companyIndustry} 업종의 KPI DB를 참조하여 최적의 목표를 생성하고 있습니다.</p>
+            <p className="text-slate-600 mb-4">
+              {companyIndustry} 업종의 KPI DB를 참조하여 최적의 목표를 생성하고 있습니다.
+            </p>
             <div className="h-2 bg-slate-200 rounded-full overflow-hidden">
               <div className="h-full bg-blue-600 rounded-full animate-pulse" style={{ width: '70%' }} />
             </div>
@@ -1143,6 +1212,7 @@ export default function Wizard() {
           <div className="bg-white rounded-2xl p-8 max-w-md w-full mx-4 text-center">
             <Loader2 className="w-16 h-16 text-blue-600 mx-auto mb-4 animate-spin" />
             <h3 className="text-xl font-bold text-slate-900 mb-2">저장 중입니다...</h3>
+            <p className="text-slate-600">DB에 데이터를 기록하고 있습니다.</p>
           </div>
         </div>
       )}
@@ -1266,6 +1336,12 @@ export default function Wizard() {
                               <span className="text-xs text-slate-400">{pk.unit}</span>
                               <span className="text-xs text-slate-400">•</span>
                               <span className="text-xs text-slate-400">{pk.indicator_type}</span>
+                              {pk.formula && (
+                                <>
+                                  <span className="text-xs text-slate-400">•</span>
+                                  <span className="text-xs text-slate-400 truncate max-w-[200px]">{pk.formula}</span>
+                                </>
+                              )}
                             </div>
                           </div>
                           <div className="text-right flex-shrink-0">
@@ -1885,8 +1961,7 @@ export default function Wizard() {
 
           </div>
         )}
-
-        {/* Step 3: 목표치 설정 */}
+{/* Step 3: 목표치 설정 */}
         {currentStep === 3 && (
           <div className="space-y-6">
             <div className="flex items-center justify-between">
@@ -1894,6 +1969,9 @@ export default function Wizard() {
                 <h2 className="text-xl font-bold text-slate-900">목표치 설정</h2>
                 <p className="text-slate-500 text-sm mt-1">각 KR의 측정 방식과 목표값, 등급 기준을 설정합니다.</p>
               </div>
+              <button className="px-4 py-2 bg-gradient-to-r from-blue-600 to-violet-600 text-white rounded-lg text-sm font-medium hover:from-blue-700 hover:to-violet-700 flex items-center gap-2 shadow-sm">
+                <Bot className="w-4 h-4" /> AI 자동 추천
+              </button>
             </div>
 
             {objectives.filter(o => o.selected).map((obj, objIdx) => {
@@ -2397,7 +2475,9 @@ export default function Wizard() {
           </div>
         )}
 
+        {/* ============================================================ */}
         {/* Step 7: 제출 & 승인 워크플로우 */}
+        {/* ============================================================ */}
         {currentStep === 7 && (
           <div className="space-y-6">
             <h2 className="text-xl font-bold text-slate-900">제출 & 승인</h2>
@@ -2590,9 +2670,10 @@ export default function Wizard() {
           {currentStep < 7 ? (
             <button
               onClick={() => {
+                // Step 4(가중치) 유효성 검증
                 if (currentStep === 4) {
                   const selObjs = objectives.filter(o => o.selected);
-                  const actKRs = krs.filter(kr => kr.selected !== false);
+                  const actKRs = krs.filter(kr => kr.selected !== false); 
                   const invalid = selObjs.filter(obj => {
                     const sum = actKRs.filter(kr => kr.objectiveId === obj.id).reduce((s, k) => s + k.weight, 0);
                     return sum !== 100;
@@ -2610,7 +2691,7 @@ export default function Wizard() {
               <ChevronRight className="w-4 h-4" />
             </button>
           ) : (
-            <div /> 
+            <div /> // Step 7에서는 다음 버튼 없음
           )}
         </div>
       </div>
