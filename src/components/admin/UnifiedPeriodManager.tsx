@@ -189,7 +189,6 @@ export default function UnifiedPeriodManager() {
     
     if (!confirm(confirmMsg)) return;
     
-    // 추가 옵션: 전체 초기화 여부
     const fullReset = confirm(
       '전사 OKR 및 조직 초안도 함께 삭제하시겠습니까?\n\n' +
       '[확인] → 전체 초기화 (모든 OKR 삭제)\n' +
@@ -198,20 +197,35 @@ export default function UnifiedPeriodManager() {
     
     setLoading(true);
     try {
-      // 1. okr_planning_cycles 삭제
-      const { error: cycleError } = await supabase
+      // ★ [수정된 부분] 1. 삭제할 사이클 ID 먼저 찾기
+      const { data: cycles } = await supabase
         .from('okr_planning_cycles')
-        .delete()
+        .select('id')
         .eq('company_id', companyId)
         .eq('period', p.period_code);
-      
-      if (cycleError) {
-        console.warn('okr_planning_cycles 삭제 실패 (무시):', cycleError);
+        
+      if (cycles && cycles.length > 0) {
+        const cycleIds = cycles.map(c => c.id);
+        
+        // 🚨 외래키(FK) 충돌을 막기 위해 알림(notifications) 먼저 삭제
+        await supabase
+          .from('notifications')
+          .delete()
+          .in('resource_id', cycleIds);
+          
+        // 🚨 알림이 정리되었으므로 이제 안전하게 사이클 삭제
+        const { error: cycleError } = await supabase
+          .from('okr_planning_cycles')
+          .delete()
+          .in('id', cycleIds);
+          
+        if (cycleError) {
+          console.warn('okr_planning_cycles 삭제 실패:', cycleError);
+        }
       }
       
       // 2. 전체 초기화인 경우 objectives/key_results 삭제
       if (fullReset) {
-        // 해당 기간의 모든 objectives 조회
         const { data: objs } = await supabase
           .from('objectives')
           .select('id')
@@ -220,20 +234,10 @@ export default function UnifiedPeriodManager() {
         if (objs && objs.length > 0) {
           const objIds = objs.map(o => o.id);
           
-          // key_results 먼저 삭제
-          await supabase
-            .from('key_results')
-            .delete()
-            .in('objective_id', objIds);
-          
-          // objectives 삭제
-          await supabase
-            .from('objectives')
-            .delete()
-            .in('id', objIds);
+          await supabase.from('key_results').delete().in('objective_id', objIds);
+          await supabase.from('objectives').delete().in('id', objIds);
         }
         
-        // company_okr_contexts 상태 리셋
         await supabase
           .from('company_okr_contexts')
           .update({ status: 'draft', finalized_at: null, finalized_by: null })
