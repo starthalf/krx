@@ -393,7 +393,7 @@ export default function CEOOKRSetup() {
         }
       }
 
-     // 3. 사이클 시작 여부 확인
+    // 3. 사이클 시작 여부 확인
       const { data: cycles } = await supabase
         .from('okr_planning_cycles')
         .select('*')
