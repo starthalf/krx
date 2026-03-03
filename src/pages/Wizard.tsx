@@ -372,6 +372,7 @@ export default function Wizard() {
 
   const handleSelectOrg = (selectOrgId: string) => {
     setSelectedOrgId(selectOrgId);
+    setShowOrgSelector(false); // 👈 이 줄을 추가해야 기간 선택 화면으로 넘어갑니다!
     navigate(`/wizard/${selectOrgId}`, { replace: true });
   };
 
