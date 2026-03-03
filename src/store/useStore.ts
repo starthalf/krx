@@ -231,6 +231,7 @@ export const useStore = create<AppState>((set, get) => ({
           orgId: obj.org_id,
           name: obj.name,
           biiType: obj.bii_type,
+          perspective: obj.perspective, // 👈 추가된 부분
           period: obj.period,
           status: obj.status,
           parentObjId: obj.parent_obj_id,
@@ -256,6 +257,7 @@ export const useStore = create<AppState>((set, get) => ({
           org_id: obj.orgId,
           name: obj.name,
           bii_type: obj.biiType,
+          perspective: obj.perspective || '재무', // 👈 추가된 부분
           period: obj.period || '2025-H1',
           status: obj.status || 'draft',
           parent_obj_id: obj.parentObjId,
@@ -272,6 +274,7 @@ export const useStore = create<AppState>((set, get) => ({
           orgId: data.org_id,
           name: data.name,
           biiType: data.bii_type,
+          perspective: data.perspective, // 👈 추가된 부분
           period: data.period,
           status: data.status,
           parentObjId: data.parent_obj_id,
@@ -298,6 +301,7 @@ export const useStore = create<AppState>((set, get) => ({
       if (updates.name !== undefined) dbUpdates.name = updates.name;
       if (updates.status !== undefined) dbUpdates.status = updates.status;
       if (updates.biiType !== undefined) dbUpdates.bii_type = updates.biiType;
+      if (updates.perspective !== undefined) dbUpdates.perspective = updates.perspective; // 👈 추가된 부분
 
       const { error } = await supabase
         .from('objectives')
@@ -618,4 +622,4 @@ function calculateGrade(progressPct: number, criteria: any): string {
   if (progressPct >= criteria.B) return 'B';
   if (progressPct >= criteria.C) return 'C';
   return 'D';
-} 
+}
