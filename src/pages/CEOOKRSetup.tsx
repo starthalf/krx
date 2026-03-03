@@ -804,6 +804,7 @@ export default function CEOOKRSetup() {
                 org_id: org.id,
                 name: obj.name,
                 bii_type: obj.biiType || 'Improve',
+                perspective: obj.perspective || '재무', // 👉 이 줄을 추가!
                 period: selectedPeriodCode,
                 status: 'draft',
                 source: 'ai_draft',
