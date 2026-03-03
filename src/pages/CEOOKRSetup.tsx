@@ -597,7 +597,7 @@ export default function CEOOKRSetup() {
             org_id: companyOrg.id,
             name: obj.name,
             bii_type: obj.biiType,
-            perspective: obj.perspective || '재무'
+            perspective: obj.perspective || '재무',
             period: selectedPeriodCode,
             status: 'active',
             source: 'ai_draft',
