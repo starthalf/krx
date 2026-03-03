@@ -393,7 +393,7 @@ export default function CEOOKRSetup() {
         }
       }
 
-      // 3. 사이클 시작 여부 확인
+     // 3. 사이클 시작 여부 확인
       const { data: cycles } = await supabase
         .from('okr_planning_cycles')
         .select('*')
@@ -402,18 +402,18 @@ export default function CEOOKRSetup() {
         .order('created_at', { ascending: false })
         .limit(1);
 
-      if (cycles && cycles.length > 0 && cycles[0].cycle_started_at) {
-        const cycleStatus = cycles[0].status;
-        if (cycleStatus === 'in_progress') {
-          setCycleStarted(true);
-          setCurrentStep(4); // Step 4: 사이클 시작
-        }
+      // 🚨 수정된 부분: 조건문을 더 직관적으로 합치고, else 처리를 추가함
+      if (cycles && cycles.length > 0 && cycles[0].cycle_started_at && cycles[0].status === 'in_progress') {
+        setCycleStarted(true);
+        setCurrentStep(4); // Step 4: 사이클 시작
+      } else {
+        // ★ 핵심: DB에 활성화된 사이클이 없다면(관리자가 삭제했다면) 무조건 false로 초기화!
+        setCycleStarted(false); 
       }
 
     } catch (err) {
       console.error('진행 상태 복원 실패:', err);
-    }
-  };
+    };
 
   const loadExistingContext = async () => {
     if (!company?.id) return;
