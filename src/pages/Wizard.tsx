@@ -1,4 +1,15 @@
 // src/pages/Wizard.tsx
+// ─── 수정 사항 요약 ───
+// [FIX-1] handleSave: okr_sets upsert + current_step 저장 + navigate 제거 (화면 유지 + toast)
+// [FIX-2] handleSubmitForApproval: okr_sets status='submitted' + 상위 조직장/CEO 알림 발송
+// [FIX-3] loadDraftFromDB: okr_sets.current_step 복원 + approvalStatus 복원
+// [FIX-4] Step 3: kpiCategory 선택 UI 추가 (전략/고유업무/공통)
+// [FIX-5] Step 6: 순수 검토 화면 (저장/리뷰 버튼 제거)
+// [FIX-6] Step 7: Alignment → /okr-map, 임시저장 화면 유지, 유관부서 검토요청 DB 연동
+// [FIX-7] 수립 방식 모달: hasDraft 조건 엄격화
+// [FIX-8] is_latest 롤백 안전장치 (insert 실패 시 원복)
+// [FIX-9] alert → toast 메시지
+// [FIX-10] OKRCommentPanel에 okrSetId 전달
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { 
@@ -65,31 +76,26 @@ export default function Wizard() {
 
   // ==================== State 관리 ====================
 
-  // 조직 선택 관련
   const [selectedOrgId, setSelectedOrgId] = useState<string | null>(urlOrgId || null);
   const [showOrgSelector, setShowOrgSelector] = useState(!urlOrgId);
 
-  // 기간 선택 관련 (NEW)
   const [showPeriodSelector, setShowPeriodSelector] = useState(false);
   const [availablePeriods, setAvailablePeriods] = useState<any[]>([]);
   const [selectedPeriodId, setSelectedPeriodId] = useState<string | null>(null);
   const [selectedPeriodCode, setSelectedPeriodCode] = useState<string>('');
   const [periodLoading, setPeriodLoading] = useState(false);
 
-  // 위저드 진행 관련
   const [currentStep, setCurrentStep] = useState(0);
   const [showOneClickModal, setShowOneClickModal] = useState(false);
   const [isAIGenerating, setIsAIGenerating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null); // [FIX-9]
   
-  // 데이터 입력 관련
   const [mission, setMission] = useState('고객 중심의 마케팅 전략을 통한 시장 점유율 확대');
   const [selectedObjectiveTab, setSelectedObjectiveTab] = useState('1');
   const [expandedKR, setExpandedKR] = useState<string | null>(null);
-  
   const [editingKRId, setEditingKRId] = useState<string | null>(null);
   const [editingObjId, setEditingObjId] = useState<string | null>(null);
-
   const [companyIndustry, setCompanyIndustry] = useState<string>('SaaS/클라우드');
 
   const [aiRegenObjId, setAiRegenObjId] = useState<string | null>(null);
@@ -107,7 +113,6 @@ export default function Wizard() {
   const [parentOKRs, setParentOKRs] = useState<ParentOKR[]>([]);
   const [parentOrgName, setParentOrgName] = useState<string>('');
   const [parentOrgLevel, setParentOrgLevel] = useState<string>('');
-  const [cascadingLinked, setCascadingLinked] = useState<Record<string, string>>({});
 
   const [approvalStatus, setApprovalStatus] = useState<ApprovalStatus>('draft');
   const [approvalComment, setApprovalComment] = useState('');
@@ -117,11 +122,21 @@ export default function Wizard() {
   const [reviewRequestOrgs, setReviewRequestOrgs] = useState<string[]>([]);
   const [reviewRequestMessage, setReviewRequestMessage] = useState('');
 
+  // [FIX-3] okr_sets 추적
+  const [okrSetId, setOkrSetId] = useState<string | null>(null);
+
   const orgId = selectedOrgId;
   const currentOrg = organizations.find(o => o.id === orgId);
   const currentOrgName = currentOrg?.name || '우리 조직';
 
   // ==================== Effects ====================
+
+  // [FIX-9] 토스트 자동 숨김
+  useEffect(() => {
+    if (!toastMessage) return;
+    const t = setTimeout(() => setToastMessage(null), 3500);
+    return () => clearTimeout(t);
+  }, [toastMessage]);
 
   // 1. 조직이 선택되면 기간 목록 로드
   useEffect(() => {
@@ -143,7 +158,6 @@ export default function Wizard() {
         
         if (data) {
           setAvailablePeriods(data);
-          // 아직 선택된 기간이 없다면 기간 선택 화면 노출
           if (!selectedPeriodCode) {
             setShowPeriodSelector(true);
           }
@@ -154,11 +168,10 @@ export default function Wizard() {
         setPeriodLoading(false);
       }
     };
-    
     loadPeriods();
   }, [selectedOrgId, showOrgSelector, organizations]);
 
-  // 2. 기간이 선택되면 -> 🚨 [수문장] 배포 확인 & 초안 로드
+  // 2. 기간 선택 → 수문장 + 초안 로드
   useEffect(() => {
     const validateCycleAndLoadData = async () => {
       const targetOrgId = selectedOrgId || urlOrgId;
@@ -169,7 +182,6 @@ export default function Wizard() {
 
       setIsLoadingDraft(true);
       try {
-        // [수문장] 해당 기간에 CEO가 배포한 활성 사이클이 있는지 확인
         const { data: cycles } = await supabase
           .from('okr_planning_cycles')
           .select('status')
@@ -179,13 +191,11 @@ export default function Wizard() {
           .limit(1);
 
         if (!cycles || cycles.length === 0) {
-          // 배포 전이면 화면 막음
           setCeoDraftInProgress(true);
           setIsLoadingDraft(false);
           return;
         }
 
-        // 배포 완료 상태: 초안 로드
         setCeoDraftInProgress(false);
         await loadDraftFromDB(targetOrgId);
         await loadParentOKRs(targetOrgId);
@@ -204,23 +214,12 @@ export default function Wizard() {
     const fetchCompanyIndustry = async () => {
       const targetOrgId = selectedOrgId || urlOrgId;
       if (!targetOrgId) return;
-      
       const targetOrg = organizations.find(o => o.id === targetOrgId);
       if (!targetOrg?.companyId) return;
-      
       try {
-        const { data } = await supabase
-          .from('companies')
-          .select('industry')
-          .eq('id', targetOrg.companyId)
-          .single();
-        
-        if (data?.industry) {
-          setCompanyIndustry(data.industry);
-        }
-      } catch (err) {
-        console.warn('업종 조회 실패:', err);
-      }
+        const { data } = await supabase.from('companies').select('industry').eq('id', targetOrg.companyId).single();
+        if (data?.industry) setCompanyIndustry(data.industry);
+      } catch (err) { console.warn('업종 조회 실패:', err); }
     };
     fetchCompanyIndustry();
   }, [selectedOrgId, urlOrgId, organizations]);
@@ -243,9 +242,27 @@ export default function Wizard() {
   const [objectives, setObjectives] = useState<ObjectiveCandidate[]>([]);
   const [krs, setKrs] = useState<(KRCandidate & { selected?: boolean; parentObjId?: string | null })[]>([]);
 
-  // DB 초안 로드 함수
+  // ★★★ [FIX-3] DB 초안 로드 — okr_sets.current_step 복원 ★★★
   const loadDraftFromDB = async (targetOrgId: string) => {
     try {
+      // 1. okr_sets 조회 → current_step, approvalStatus, okrSetId 복원
+      const { data: existingSet } = await supabase
+        .from('okr_sets')
+        .select('id, status, current_step, submitted_at, review_comment')
+        .eq('org_id', targetOrgId)
+        .eq('period', selectedPeriodCode)
+        .order('version', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (existingSet) {
+        setOkrSetId(existingSet.id);
+        setApprovalStatus((existingSet.status || 'draft') as ApprovalStatus);
+        if (existingSet.submitted_at) setSubmittedAt(existingSet.submitted_at);
+        if (existingSet.review_comment) setReviewComment(existingSet.review_comment);
+      }
+
+      // 2. objectives 조회
       const { data: objs, error: objErr } = await supabase
         .from('objectives')
         .select(`
@@ -288,7 +305,7 @@ export default function Wizard() {
           .order('created_at');
 
         if (allKRs && allKRs.length > 0) {
-          const loadedKRs = allKRs.map((kr: any) => ({
+          setKrs(allKRs.map((kr: any) => ({
             id: kr.id,
             objectiveId: kr.objective_id,
             name: kr.name,
@@ -310,12 +327,13 @@ export default function Wizard() {
             parentObjId: kr.parent_obj_id || null,
             version: kr.version || 0,
             originalKrId: kr.original_kr_id || kr.id,
-          }));
-          setKrs(loadedKRs);
+          })));
         }
 
         setShowOneClickModal(false);
-        setCurrentStep(1);
+        // [FIX-3] 저장된 단계로 복원 (기존: 항상 setCurrentStep(1))
+        const restoredStep = existingSet?.current_step ?? 1;
+        setCurrentStep(Math.max(1, Math.min(7, restoredStep)));
       } else {
         setHasDraft(false);
         setShowOneClickModal(true);
@@ -339,8 +357,11 @@ export default function Wizard() {
         const parent = organizations.find(o => o.id === cursor);
         cursor = parent?.parentOrgId || null;
       }
-
       if (parentIds.length === 0) return;
+
+      // 상위 org 이름 저장
+      const directParent = organizations.find(o => o.id === currentOrg.parentOrgId);
+      if (directParent) setParentOrgName(directParent.name);
 
       const { data: parentObjs } = await supabase
         .from('objectives')
@@ -350,48 +371,34 @@ export default function Wizard() {
         .in('status', ['finalized', 'active', 'draft']);
 
       if (parentObjs) {
-        const mapped: ParentObjective[] = parentObjs.map((po: any) => {
+        setParentObjectives(parentObjs.map((po: any) => {
           const org = organizations.find(o => o.id === po.org_id);
           return {
-            id: po.id,
-            name: po.name,
-            biiType: po.bii_type || 'Improve',
-            orgName: org?.name || '상위 조직',
-            orgLevel: org?.level || '',
-            orgId: po.org_id,
+            id: po.id, name: po.name, biiType: po.bii_type || 'Improve',
+            orgName: org?.name || '상위 조직', orgLevel: org?.level || '', orgId: po.org_id,
           };
-        });
-        setParentObjectives(mapped);
+        }));
       }
-    } catch (err) {
-      console.error('상위 OKR 로딩 실패:', err);
-    }
+    } catch (err) { console.error('상위 OKR 로딩 실패:', err); }
   };
-
   // ==================== Handlers ====================
 
   const handleSelectOrg = (selectOrgId: string) => {
     setSelectedOrgId(selectOrgId);
-    setShowOrgSelector(false); // 👈 이 줄을 추가해야 기간 선택 화면으로 넘어갑니다!
+    setShowOrgSelector(false);
     navigate(`/wizard/${selectOrgId}`, { replace: true });
   };
 
   const toggleKR = (krId: string) => {
-    setKrs(krs.map(kr => 
-      kr.id === krId ? { ...kr, selected: !kr.selected } : kr
-    ));
+    setKrs(krs.map(kr => kr.id === krId ? { ...kr, selected: !kr.selected } : kr));
   };
 
   const handleKRChange = (krId: string, field: string, value: any) => {
-    setKrs(prev => prev.map(kr => 
-      kr.id === krId ? { ...kr, [field]: value } : kr
-    ));
+    setKrs(prev => prev.map(kr => kr.id === krId ? { ...kr, [field]: value } : kr));
   };
 
   const toggleObjective = (id: string) => {
-    setObjectives(objectives.map(obj =>
-      obj.id === id ? { ...obj, selected: !obj.selected } : obj
-    ));
+    setObjectives(objectives.map(obj => obj.id === id ? { ...obj, selected: !obj.selected } : obj));
   };
 
   const handleAddKR = () => {
@@ -435,39 +442,27 @@ export default function Wizard() {
   const fetchPoolKPIs = async (search: string, fnFilter: string) => {
     setPoolLoading(true);
     try {
-      let query = supabase
-        .from('kpi_pool')
-        .select('*')
-        .order('relevance_score', { ascending: false })
-        .limit(50);
-
+      let query = supabase.from('kpi_pool').select('*').order('relevance_score', { ascending: false }).limit(50);
       if (companyIndustry) query = query.contains('industry_tags', [companyIndustry]);
       if (search) query = query.or(`name.ilike.%${search}%,definition.ilike.%${search}%`);
       if (fnFilter) query = query.contains('function_tags', [fnFilter]);
-
       const { data, error } = await query;
       if (error) throw error;
       setPoolKPIs(data || []);
-    } catch (err) {
-      console.error('Pool 조회 오류:', err);
-    } finally {
-      setPoolLoading(false);
-    }
+    } catch (err) { console.error('Pool 조회 오류:', err); }
+    finally { setPoolLoading(false); }
   };
 
   useEffect(() => {
     if (!showPoolModal) return;
-    const timer = setTimeout(() => {
-      fetchPoolKPIs(poolSearch, poolFunctionFilter);
-    }, 300);
+    const timer = setTimeout(() => fetchPoolKPIs(poolSearch, poolFunctionFilter), 300);
     return () => clearTimeout(timer);
   }, [poolSearch, poolFunctionFilter, showPoolModal]);
 
   const togglePoolSelection = (id: string) => {
     setPoolSelectedIds(prev => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      if (next.has(id)) next.delete(id); else next.add(id);
       return next;
     });
   };
@@ -477,8 +472,7 @@ export default function Wizard() {
     const currentObj = objectives.find(o => o.id === targetId);
     if (!currentObj) return;
 
-    const selectedPoolKPIs = poolKPIs.filter(k => poolSelectedIds.has(k.id));
-    const newKRs: (KRCandidate & { selected: boolean })[] = selectedPoolKPIs.map((pk, idx) => ({
+    const newKRs = poolKPIs.filter(k => poolSelectedIds.has(k.id)).map((pk, idx) => ({
       id: `kr-pool-${Date.now()}-${idx}`,
       objectiveId: targetId,
       name: pk.name,
@@ -498,7 +492,6 @@ export default function Wizard() {
       quarterlyTargets: { Q1: 0, Q2: 0, Q3: 0, Q4: 0 },
       selected: true
     }));
-
     setKrs(prev => [...prev, ...newKRs]);
     setShowPoolModal(false);
     setPoolTargetObjId(null);
@@ -508,152 +501,90 @@ export default function Wizard() {
     const objId = targetObjId || selectedObjectiveTab;
     const currentObj = objectives.find(o => o.id === objId);
     if (!currentObj) return;
-
     setAiRegeneratingObjId(objId);
-    
     try {
       const parentObj = parentObjectives.find(po => po.id === currentObj.parentObjId);
-
       const { data, error } = await supabase.functions.invoke('generate-krs', {
         body: {
-          objectiveName: currentObj.name,
-          objectiveType: currentObj.biiType,
-          perspective: currentObj.perspective,
-          orgType: currentOrg?.orgType || 'Front',
-          functionTags: currentOrg?.functionTags || [],
-          industry: companyIndustry,
-          parentObjectiveName: parentObj?.name || '',
-          userContext: userContext || ''
+          objectiveName: currentObj.name, objectiveType: currentObj.biiType,
+          perspective: currentObj.perspective, orgType: currentOrg?.orgType || 'Front',
+          functionTags: currentOrg?.functionTags || [], industry: companyIndustry,
+          parentObjectiveName: parentObj?.name || '', userContext: userContext || ''
         }
       });
-
       if (error) throw error;
-
-      if (data && data.krs) {
-        const aiKRs: (KRCandidate & { selected: boolean })[] = data.krs.map((item: any, idx: number) => ({
-          id: `kr-ai-${Date.now()}-${idx}`,
-          objectiveId: objId,
-          name: item.name,
-          definition: item.definition || '',
-          formula: item.formula || '실적 측정',
-          unit: item.unit || '건',
-          weight: item.weight || 30,
-          targetValue: item.targetValue || 100,
-          biiType: item.biiType || currentObj.biiType,
-          kpiCategory: '전략',
+      if (data?.krs) {
+        const aiKRs = data.krs.map((item: any, idx: number) => ({
+          id: `kr-ai-${Date.now()}-${idx}`, objectiveId: objId,
+          name: item.name, definition: item.definition || '', formula: item.formula || '실적 측정',
+          unit: item.unit || '건', weight: item.weight || 30, targetValue: item.targetValue || 100,
+          biiType: item.biiType || currentObj.biiType, kpiCategory: item.kpiCategory || '전략',
           perspective: item.perspective || currentObj.perspective,
-          indicatorType: item.indicatorType || (item.type === '결과' ? '결과' : '과정'),
-          measurementCycle: item.measurementCycle || '월',
-          previousYear: 0,
-          poolMatch: item.poolMatch || 0,
+          indicatorType: item.indicatorType || '결과', measurementCycle: item.measurementCycle || '월',
+          previousYear: 0, poolMatch: item.poolMatch || 0,
           gradeCriteria: item.gradeCriteria || { S: 120, A: 110, B: 100, C: 90, D: 0 },
-          quarterlyTargets: { Q1: 0, Q2: 0, Q3: 0, Q4: 0 },
-          selected: true
+          quarterlyTargets: { Q1: 0, Q2: 0, Q3: 0, Q4: 0 }, selected: true
         }));
-        
-        setKrs(prev => [
-          ...prev.filter(kr => kr.objectiveId !== objId),
-          ...aiKRs
-        ]);
+        setKrs(prev => [...prev.filter(kr => kr.objectiveId !== objId), ...aiKRs]);
       }
-      
-    } catch (error: any) {
-      console.error('AI KR Error:', error);
-      alert(`AI 생성 실패: ${error.message}`);
-    } finally {
-      setAiRegeneratingObjId(null);
-      setAiRegenObjId(null);
-      setAiRegenContext('');
-    }
+    } catch (error: any) { setToastMessage(`❌ AI 생성 실패: ${error.message}`); }
+    finally { setAiRegeneratingObjId(null); setAiRegenObjId(null); setAiRegenContext(''); }
   };
 
   const handleOneClickGenerate = async () => {
     setIsAIGenerating(true);
     setShowOneClickModal(false);
-
     try {
       const { data, error } = await supabase.functions.invoke('generate-objectives', {
         body: {
-          orgName: currentOrgName,
-          orgMission: mission,
-          orgType: currentOrg?.orgType || 'Front',
-          functionTags: currentOrg?.functionTags || [],
+          orgName: currentOrgName, orgMission: mission,
+          orgType: currentOrg?.orgType || 'Front', functionTags: currentOrg?.functionTags || [],
           industry: companyIndustry
         }
       });
-
       if (error) throw error;
-
-      if (data && data.objectives) {
+      if (data?.objectives) {
         const newObjectives = data.objectives.map((obj: any, idx: number) => ({
-          id: String(idx + 1),
-          name: obj.name,
-          biiType: obj.biiType || 'Improve',
-          perspective: obj.perspective || '재무',
-          selected: true 
+          id: String(idx + 1), name: obj.name, biiType: obj.biiType || 'Improve',
+          perspective: obj.perspective || '재무', selected: true
         }));
         setObjectives(newObjectives);
-
         const allNewKRs: (KRCandidate & { selected: boolean })[] = [];
-        
         for (const obj of data.objectives) {
           const objIdx = data.objectives.indexOf(obj);
           try {
             const { data: krData } = await supabase.functions.invoke('generate-krs', {
               body: {
-                objectiveName: obj.name,
-                objectiveType: obj.biiType || 'Improve',
-                perspective: obj.perspective || '재무',
-                orgType: currentOrg?.orgType || 'Front',
-                functionTags: currentOrg?.functionTags || [],
-                industry: companyIndustry
+                objectiveName: obj.name, objectiveType: obj.biiType || 'Improve',
+                perspective: obj.perspective || '재무', orgType: currentOrg?.orgType || 'Front',
+                functionTags: currentOrg?.functionTags || [], industry: companyIndustry
               }
             });
-
             if (krData?.krs) {
               krData.krs.forEach((kr: any, krIdx: number) => {
                 allNewKRs.push({
-                  id: `kr-${objIdx}-${krIdx}`,
-                  objectiveId: String(objIdx + 1),
-                  name: kr.name,
-                  definition: kr.definition || kr.name,
-                  formula: kr.formula || '실적 측정',
-                  unit: kr.unit || '건',
-                  weight: kr.weight || 20,
-                  targetValue: kr.targetValue || 100,
-                  biiType: kr.biiType || obj.biiType || 'Improve',
-                  kpiCategory: kr.kpiCategory || '전략',
+                  id: `kr-${objIdx}-${krIdx}`, objectiveId: String(objIdx + 1),
+                  name: kr.name, definition: kr.definition || kr.name, formula: kr.formula || '실적 측정',
+                  unit: kr.unit || '건', weight: kr.weight || 20, targetValue: kr.targetValue || 100,
+                  biiType: kr.biiType || obj.biiType || 'Improve', kpiCategory: kr.kpiCategory || '전략',
                   perspective: kr.perspective || obj.perspective || '재무',
-                  indicatorType: kr.indicatorType || '결과',
-                  measurementCycle: kr.measurementCycle || '월',
-                  previousYear: 0,
-                  poolMatch: kr.poolMatch || 0,
+                  indicatorType: kr.indicatorType || '결과', measurementCycle: kr.measurementCycle || '월',
+                  previousYear: 0, poolMatch: kr.poolMatch || 0,
                   gradeCriteria: kr.gradeCriteria || { S: 120, A: 110, B: 100, C: 90, D: 0 },
-                  quarterlyTargets: { Q1: 0, Q2: 0, Q3: 0, Q4: 0 },
-                  selected: true
+                  quarterlyTargets: { Q1: 0, Q2: 0, Q3: 0, Q4: 0 }, selected: true
                 });
               });
             }
-          } catch (krErr) {
-            console.warn(`KR 생성 실패 (목표 ${objIdx + 1}):`, krErr);
-          }
+          } catch (krErr) { console.warn(`KR 생성 실패 (목표 ${objIdx + 1}):`, krErr); }
         }
-
-        if (allNewKRs.length > 0) {
-          setKrs(allNewKRs);
-        }
-
-        setCurrentStep(4);
-        alert('✨ AI가 OKR 전체 세트를 생성했습니다! 내용을 확인해주세요.');
+        if (allNewKRs.length > 0) setKrs(allNewKRs);
+        setCurrentStep(2); // [FIX] 기존 4→2로 수정 (KR설정 단계로)
+        setToastMessage('✨ AI가 OKR 전체 세트를 생성했습니다!');
       }
-
     } catch (error: any) {
-      console.error('AI Error:', error);
-      alert(`생성 실패: ${error.message}`);
+      setToastMessage(`❌ 생성 실패: ${error.message}`);
       setShowOneClickModal(true);
-    } finally {
-      setIsAIGenerating(false);
-    }
+    } finally { setIsAIGenerating(false); }
   };
 
   const handleStartWizard = () => {
@@ -661,79 +592,36 @@ export default function Wizard() {
     setCurrentStep(0);
   };
 
-  const handleSubmitForApproval = async () => {
-    if (!orgId) return;
-    if (!confirm('목표를 상위 조직에 제출하시겠습니까?')) return;
-
-    try {
-      const selectedIds = objectives.filter(o => o.selected && o.source).map(o => o.id);
-      if (selectedIds.length > 0) {
-        await supabase
-          .from('objectives')
-          .update({ approval_status: 'submitted', status: 'submitted' })
-          .in('id', selectedIds);
-      }
-      setApprovalStatus('submitted');
-      setSubmittedAt(new Date().toISOString());
-      alert('✅ 제출되었습니다. 상위 조직의 검토를 기다려주세요.');
-    } catch (err: any) {
-      alert(`제출 실패: ${err.message}`);
-    }
-  };
-
-  const handleSendReviewRequest = async () => {
-    if (reviewRequestOrgs.length === 0) return;
-    try {
-      alert(`✅ ${reviewRequestOrgs.length}개 조직에 검토 요청을 발송했습니다.`);
-      setShowReviewRequestModal(false);
-      setReviewRequestOrgs([]);
-      setReviewRequestMessage('');
-    } catch (err: any) {
-      alert(`발송 실패: ${err.message}`);
-    }
-  };
-
   const handleAIGenerateObjectives = async () => {
     setIsAIGenerating(true);
     try {
       const { data, error } = await supabase.functions.invoke('generate-objectives', {
         body: {
-          orgName: currentOrgName,
-          orgMission: mission,
-          orgType: currentOrg?.orgType || 'Front',
-          functionTags: currentOrg?.functionTags || [],
+          orgName: currentOrgName, orgMission: mission,
+          orgType: currentOrg?.orgType || 'Front', functionTags: currentOrg?.functionTags || [],
           industry: companyIndustry
         }
       });
-
       if (error) throw error;
-
-      if (data && data.objectives) {
-        const newObjectives = data.objectives.map((obj: any, index: number) => ({
-          id: String(index + 1), 
-          name: obj.name,
-          biiType: obj.biiType || 'Improve',
-          perspective: obj.perspective || '재무',
-          selected: index < 3
-        }));
-        setObjectives(newObjectives);
+      if (data?.objectives) {
+        setObjectives(data.objectives.map((obj: any, i: number) => ({
+          id: String(i + 1), name: obj.name, biiType: obj.biiType || 'Improve',
+          perspective: obj.perspective || '재무', selected: i < 3
+        })));
       }
-
-    } catch (error: any) {
-      console.error('AI Error:', error);
-      alert(`AI 생성 실패: ${error.message}`);
-    } finally {
-      setIsAIGenerating(false);
-    }
+    } catch (error: any) { setToastMessage(`❌ AI 생성 실패: ${error.message}`); }
+    finally { setIsAIGenerating(false); }
   };
 
-  const handleSave = async () => {
+  // ★★★ [FIX-1][FIX-8] handleSave — okr_sets upsert + 안전 롤백 + navigate 제거 ★★★
+  const handleSave = async (options?: { showConfirm?: boolean }) => {
     if (!orgId) {
-      alert('조직 ID가 없습니다. 다시 시도해주세요.');
+      setToastMessage('❌ 조직 ID가 없습니다.');
       return;
     }
 
-    if (!confirm('목표를 저장하시겠습니까?')) return;
+    const showConfirm = options?.showConfirm ?? true;
+    if (showConfirm && !confirm('목표를 저장하시겠습니까?')) return;
 
     setIsSaving(true);
     try {
@@ -742,96 +630,235 @@ export default function Wizard() {
         .filter(o => o.source && o.id && !o.id.startsWith('obj-new-'))
         .map(o => o.id);
 
+      // [FIX-8] is_latest false — 안전장치: KR 실패 시 롤백
       if (existingObjIds.length > 0) {
-        await supabase.from('objectives').update({ is_latest: false }).in('id', existingObjIds);
-        await supabase.from('key_results').update({ is_latest: false }).in('objective_id', existingObjIds).eq('is_latest', true);
-      }
+        const { error: e1 } = await supabase.from('objectives').update({ is_latest: false }).in('id', existingObjIds);
+        if (e1) throw new Error(`기존 목표 비활성화 실패: ${e1.message}`);
 
-      const objIdMap: Record<string, string> = {};
-
-      for (const obj of selectedObjectives) {
-        const isExisting = obj.source && obj.id && !obj.id.startsWith('obj-new-');
-        const prevVersion = obj.version || 0;
-        const newVersion = isExisting ? prevVersion + 1 : 0;
-        const originalId = isExisting ? (obj.originalObjId || obj.id) : null;
-
-        const { data: savedObj, error: objError } = await supabase
-          .from('objectives')
-          .insert({
-            org_id: orgId,
-            name: obj.name,
-            bii_type: obj.biiType,
-            perspective: obj.perspective,
-            period: selectedPeriodCode,
-            status: 'draft',
-            source: isExisting ? 'manual' : (obj.source || 'manual'),
-            approval_status: 'draft',
-            parent_obj_id: obj.parentObjId || null,
-            cascade_type: obj.cascadeType || 'independent',
-            sort_order: selectedObjectives.indexOf(obj),
-            version: newVersion,
-            is_latest: true,
-            original_obj_id: originalId,
-          })
-          .select()
-          .single();
-
-        if (objError) throw new Error(`목표 저장 실패: ${objError.message}`);
-        if (!savedObj) continue;
-
-        objIdMap[obj.id] = savedObj.id;
-
-        const relatedKRs = krs.filter(k => k.objectiveId === obj.id && k.selected !== false);
-        
-        for (const kr of relatedKRs) {
-          const isExistingKR = kr.id && !kr.id.startsWith('kr-new-') && !kr.id.startsWith('kr-ai-') && !kr.id.startsWith('kr-pool-');
-          const krPrevVersion = (kr as any).version || 0;
-          const krNewVersion = isExistingKR ? krPrevVersion + 1 : 0;
-          const krOriginalId = isExistingKR ? ((kr as any).originalKrId || kr.id) : null;
-
-          const { error } = await supabase
-            .from('key_results')
-            .insert({
-              objective_id: savedObj.id,
-              org_id: orgId,
-              name: kr.name,
-              definition: kr.definition,
-              formula: kr.formula,
-              unit: kr.unit,
-              weight: kr.weight,
-              target_value: kr.targetValue,
-              bii_type: kr.biiType,
-              kpi_category: kr.kpiCategory,
-              perspective: kr.perspective,
-              indicator_type: kr.indicatorType,
-              measurement_cycle: kr.measurementCycle,
-              grade_criteria: kr.gradeCriteria,
-              quarterly_targets: kr.quarterlyTargets,
-              current_value: 0,
-              source: isExistingKR ? 'manual' : 'manual',
-              status: 'draft',
-              version: krNewVersion,
-              is_latest: true,
-              original_kr_id: krOriginalId,
-            });
-          if (error) throw new Error(`KR 저장 실패: ${error.message}`);
+        const { error: e2 } = await supabase.from('key_results').update({ is_latest: false }).in('objective_id', existingObjIds).eq('is_latest', true);
+        if (e2) {
+          // 롤백: objectives 원복
+          await supabase.from('objectives').update({ is_latest: true }).in('id', existingObjIds);
+          throw new Error(`기존 KR 비활성화 실패: ${e2.message}`);
         }
       }
 
+      const objIdMap: Record<string, string> = {};
+      const savedObjIds: string[] = [];
+
+      try {
+        for (const obj of selectedObjectives) {
+          const isExisting = obj.source && obj.id && !obj.id.startsWith('obj-new-');
+          const newVersion = isExisting ? (obj.version || 0) + 1 : 0;
+          const originalId = isExisting ? (obj.originalObjId || obj.id) : null;
+
+          const { data: savedObj, error: objError } = await supabase
+            .from('objectives')
+            .insert({
+              org_id: orgId, name: obj.name, bii_type: obj.biiType, perspective: obj.perspective,
+              period: selectedPeriodCode, status: 'draft',
+              source: isExisting ? 'manual' : (obj.source || 'manual'),
+              approval_status: 'draft',
+              parent_obj_id: obj.parentObjId || null,
+              cascade_type: obj.cascadeType || 'independent',
+              sort_order: selectedObjectives.indexOf(obj),
+              version: newVersion, is_latest: true, original_obj_id: originalId,
+            })
+            .select().single();
+
+          if (objError) throw new Error(`목표 저장 실패: ${objError.message}`);
+          if (!savedObj) continue;
+          objIdMap[obj.id] = savedObj.id;
+          savedObjIds.push(savedObj.id);
+
+          const relatedKRs = krs.filter(k => k.objectiveId === obj.id && k.selected !== false);
+          for (const kr of relatedKRs) {
+            const isExKR = kr.id && !kr.id.startsWith('kr-new-') && !kr.id.startsWith('kr-ai-') && !kr.id.startsWith('kr-pool-');
+            const krNewVer = isExKR ? ((kr as any).version || 0) + 1 : 0;
+            const krOrigId = isExKR ? ((kr as any).originalKrId || kr.id) : null;
+
+            const { error } = await supabase.from('key_results').insert({
+              objective_id: savedObj.id, org_id: orgId, name: kr.name,
+              definition: kr.definition, formula: kr.formula, unit: kr.unit,
+              weight: kr.weight, target_value: kr.targetValue,
+              bii_type: kr.biiType, kpi_category: kr.kpiCategory,
+              perspective: kr.perspective, indicator_type: kr.indicatorType,
+              measurement_cycle: kr.measurementCycle,
+              grade_criteria: kr.gradeCriteria, quarterly_targets: kr.quarterlyTargets,
+              current_value: 0, source: 'manual', status: 'draft',
+              version: krNewVer, is_latest: true, original_kr_id: krOrigId,
+            });
+            if (error) throw new Error(`KR 저장 실패: ${error.message}`);
+          }
+        }
+      } catch (insertErr) {
+        // [FIX-8] 롤백: 새로 만든 것 삭제, 기존 것 복원
+        if (savedObjIds.length > 0) {
+          await supabase.from('key_results').delete().in('objective_id', savedObjIds);
+          await supabase.from('objectives').delete().in('id', savedObjIds);
+        }
+        if (existingObjIds.length > 0) {
+          await supabase.from('objectives').update({ is_latest: true }).in('id', existingObjIds);
+          await supabase.from('key_results').update({ is_latest: true }).in('objective_id', existingObjIds);
+        }
+        throw insertErr;
+      }
+
+      // ★ [FIX-1] okr_sets upsert — ApprovalInbox/OKRSetupStatus 연동
+      if (okrSetId) {
+        await supabase.from('okr_sets')
+          .update({ current_step: currentStep, updated_at: new Date().toISOString() })
+          .eq('id', okrSetId);
+      } else {
+        const { data: newSet } = await supabase.from('okr_sets')
+          .insert({
+            org_id: orgId, period: selectedPeriodCode, status: 'draft',
+            current_step: currentStep, version: 1, submitted_by: user?.id || null,
+          })
+          .select().single();
+        if (newSet) setOkrSetId(newSet.id);
+      }
+
+      // State를 새 ID로 갱신
+      setObjectives(prev => prev.map(obj => {
+        const newId = objIdMap[obj.id];
+        return newId ? { ...obj, id: newId, source: 'manual', version: (obj.version || 0) + 1, originalObjId: obj.originalObjId || obj.id } : obj;
+      }));
+      setKrs(prev => prev.map(kr => {
+        const newObjId = objIdMap[kr.objectiveId];
+        return newObjId ? { ...kr, objectiveId: newObjId } : kr;
+      }));
+      setHasDraft(true);
+
       await fetchObjectives(orgId);
       await fetchKRs(orgId);
-      
-      alert('✅ 저장되었습니다!');
-      navigate('/okr/team'); 
+
+      // [FIX-1] navigate 제거 — toast만 표시, 화면 유지
+      setToastMessage('✅ 저장되었습니다!');
 
     } catch (error: any) {
       console.error(error);
-      alert(`저장 중 오류가 발생했습니다: ${error.message}`);
-    } finally {
-      setIsSaving(false);
-    }
+      setToastMessage(`❌ 저장 중 오류: ${error.message}`);
+    } finally { setIsSaving(false); }
   };
 
+  // ★★★ [FIX-2] handleSubmitForApproval — okr_sets + 알림 발송 ★★★
+  const handleSubmitForApproval = async () => {
+    if (!orgId || !user?.id) return;
+    if (!confirm('목표를 상위 조직에 제출하시겠습니까?\n제출 후에도 수정이 가능합니다.')) return;
+
+    setIsSaving(true);
+    try {
+      // 1. 먼저 저장 (confirm 없이)
+      await handleSave({ showConfirm: false });
+
+      // 2. objectives 상태 → submitted
+      const selIds = objectives.filter(o => o.selected).map(o => o.id);
+      if (selIds.length > 0) {
+        await supabase.from('objectives')
+          .update({ approval_status: 'submitted', status: 'submitted' })
+          .in('id', selIds).eq('is_latest', true);
+      }
+
+      // 3. [FIX-2] okr_sets → submitted
+      const now = new Date().toISOString();
+      if (okrSetId) {
+        await supabase.from('okr_sets').update({
+          status: 'submitted', submitted_at: now, submitted_by: user.id, current_step: currentStep,
+        }).eq('id', okrSetId);
+      } else {
+        const { data: newSet } = await supabase.from('okr_sets')
+          .insert({
+            org_id: orgId, period: selectedPeriodCode, status: 'submitted',
+            submitted_at: now, submitted_by: user.id, current_step: currentStep, version: 1,
+          })
+          .select().single();
+        if (newSet) setOkrSetId(newSet.id);
+      }
+
+      // 4. [FIX-2] 상위 조직장 + CEO 알림 발송
+      const { data: myProfile } = await supabase.from('profiles').select('full_name').eq('id', user.id).single();
+      const senderName = myProfile?.full_name || '조직장';
+
+      // 직속 상위 조직 리더
+      const parentOrg = organizations.find(o => o.id === currentOrg?.parentOrgId);
+      if (parentOrg) {
+        const { data: parentLeaders } = await supabase
+          .from('user_roles').select('profile_id, roles!inner(level)').eq('org_id', parentOrg.id);
+        const leaders = parentLeaders?.filter((m: any) => m.roles?.level >= 70) || [];
+        for (const leader of leaders) {
+          await supabase.from('notifications').insert({
+            recipient_id: leader.profile_id, sender_id: user.id, sender_name: senderName,
+            type: 'okr_submitted', title: `📋 ${currentOrgName} OKR 검토 요청`,
+            message: `${currentOrgName}에서 ${selectedPeriodCode} OKR을 제출했습니다. 검토 후 승인해주세요.`,
+            priority: 'high', action_url: '/approval-inbox', org_id: orgId,
+          });
+        }
+      }
+
+      // CEO(전사 레벨) 알림
+      const companyOrg = organizations.find(o => o.level === '전사');
+      if (companyOrg && companyOrg.id !== parentOrg?.id) {
+        const { data: ceoRoles } = await supabase
+          .from('user_roles').select('profile_id, roles!inner(level)').eq('org_id', companyOrg.id);
+        const ceos = ceoRoles?.filter((m: any) => m.roles?.level >= 90) || [];
+        for (const ceo of ceos) {
+          await supabase.from('notifications').insert({
+            recipient_id: ceo.profile_id, sender_id: user.id, sender_name: senderName,
+            type: 'okr_submitted', title: `📋 ${currentOrgName} OKR 제출됨`,
+            message: `${currentOrgName}에서 ${selectedPeriodCode} OKR을 제출했습니다.`,
+            priority: 'normal', action_url: '/approval-inbox', org_id: orgId,
+          });
+        }
+      }
+
+      setApprovalStatus('submitted');
+      setSubmittedAt(now);
+      setToastMessage('✅ 제출되었습니다. 상위 조직의 검토를 기다려주세요.');
+    } catch (err: any) {
+      setToastMessage(`❌ 제출 실패: ${err.message}`);
+    } finally { setIsSaving(false); }
+  };
+
+  // ★ [FIX-6] 유관부서 검토 요청 — DB 연동 (review_requests + notifications)
+  const handleSendReviewRequest = async () => {
+    if (reviewRequestOrgs.length === 0 || !user?.id || !orgId) return;
+    try {
+      const { data: myProfile } = await supabase.from('profiles').select('full_name').eq('id', user.id).single();
+      const senderName = myProfile?.full_name || '조직장';
+      const requests: any[] = [];
+      const notifs: any[] = [];
+
+      for (const tOrgId of reviewRequestOrgs) {
+        requests.push({
+          requester_id: user.id, requester_org_id: orgId, reviewer_org_id: tOrgId,
+          title: `${currentOrgName} OKR 검토 요청`,
+          message: reviewRequestMessage || `${currentOrgName}의 ${selectedPeriodCode} OKR을 검토해주세요.`,
+          status: 'pending', period: selectedPeriodCode,
+        });
+        // 해당 조직의 리더에게 알림
+        const { data: tLeaders } = await supabase
+          .from('user_roles').select('profile_id, roles!inner(level)').eq('org_id', tOrgId);
+        for (const l of (tLeaders?.filter((m: any) => m.roles?.level >= 70) || [])) {
+          notifs.push({
+            recipient_id: l.profile_id, sender_id: user.id, sender_name: senderName,
+            type: 'review_request', title: `📨 ${currentOrgName} OKR 검토 요청`,
+            message: reviewRequestMessage || `${currentOrgName}의 OKR을 검토해주세요.`,
+            priority: 'normal', action_url: '/approval-inbox', org_id: tOrgId,
+          });
+        }
+      }
+      if (requests.length > 0) await supabase.from('review_requests').insert(requests);
+      if (notifs.length > 0) await supabase.from('notifications').insert(notifs);
+
+      setToastMessage(`✅ ${reviewRequestOrgs.length}개 조직에 검토 요청을 발송했습니다.`);
+      setShowReviewRequestModal(false);
+      setReviewRequestOrgs([]);
+      setReviewRequestMessage('');
+    } catch (err: any) { setToastMessage(`❌ 발송 실패: ${err.message}`); }
+  };
+
+  // ==================== Constants ====================
   const steps = [
     { id: 0, name: '전략방향', description: '전사 전략 및 조직 미션 확인' },
     { id: 1, name: '목표수립', description: '3-5개 핵심 목표 선정' },
@@ -839,7 +866,7 @@ export default function Wizard() {
     { id: 3, name: '목표치설정', description: '단위·산식·목표값·등급구간' },
     { id: 4, name: '가중치설정', description: 'Objective별 KR 가중치 배분' },
     { id: 5, name: '분기목표', description: '분기별 목표 배분' },
-    { id: 6, name: '최종확인', description: '종합 점검 및 확정' },
+    { id: 6, name: '최종확인', description: '종합 점검' },
     { id: 7, name: '제출', description: '상위 조직에 제출' },
   ];
 
@@ -867,66 +894,46 @@ export default function Wizard() {
           .from('user_roles')
           .select('org_id, roles!inner(level)')
           .eq('profile_id', user.id);
-
         if (data) {
           setMyOrgIds(data.map((r: any) => r.org_id).filter(Boolean));
           const maxLevel = Math.max(...data.map((r: any) => r.roles?.level || 0));
           setIsAdmin(maxLevel >= 90);
         }
-      } catch (err) {
-        console.warn('내 조직 조회 실패:', err);
-      }
+      } catch (err) { console.warn('내 조직 조회 실패:', err); }
     };
     loadMyOrgs();
   }, [user?.id]);
 
-
-  // [화면 1] 조직 선택 화면
+  // [화면 1] 조직 선택
   if (showOrgSelector) {
     const myOrgs = organizations.filter(o => o.level !== '전사' && myOrgIds.includes(o.id));
-
     return (
       <div className="p-6 max-w-3xl mx-auto">
         <div className="flex items-center gap-4 mb-6">
-          <button onClick={() => navigate(-1)} className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-600">
-            <ArrowLeft className="w-6 h-6" />
-          </button>
+          <button onClick={() => navigate(-1)} className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-600"><ArrowLeft className="w-6 h-6" /></button>
           <h1 className="text-2xl font-bold text-slate-900">조직 OKR 수립</h1>
         </div>
-
         {isAdmin && (
           <div className="bg-amber-50 border border-amber-200 rounded-xl p-5 mb-6">
             <div className="flex items-start gap-3">
               <AlertCircle className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" />
               <div>
                 <p className="text-amber-900 font-semibold text-sm">전사 OKR은 별도 메뉴에서 수립합니다</p>
-                <p className="text-amber-700 text-sm mt-1">
-                  CEO는 <strong>"전사 OKR 수립"</strong> 메뉴에서 전사 OKR 초안을 먼저 수립해주세요.
-                </p>
-                <button onClick={() => navigate('/ceo-okr-setup')} className="mt-3 px-4 py-2 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700">
-                  전사 OKR 수립으로 이동 →
-                </button>
+                <p className="text-amber-700 text-sm mt-1">CEO는 <strong>"전사 OKR 수립"</strong> 메뉴에서 전사 OKR 초안을 먼저 수립해주세요.</p>
+                <button onClick={() => navigate('/ceo-okr-setup')} className="mt-3 px-4 py-2 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700">전사 OKR 수립으로 이동 →</button>
               </div>
             </div>
           </div>
         )}
-
         {myOrgs.length > 0 ? (
           <div>
             <p className="text-slate-600 text-sm mb-4">내가 속한 조직의 OKR을 수립합니다.</p>
             <div className="grid grid-cols-1 gap-3">
               {myOrgs.map(org => (
-                <button
-                  key={org.id}
-                  onClick={() => handleSelectOrg(org.id)}
-                  className="text-left border-2 border-slate-200 rounded-xl p-5 hover:border-blue-500 hover:bg-blue-50 transition-all"
-                >
+                <button key={org.id} onClick={() => handleSelectOrg(org.id)} className="text-left border-2 border-slate-200 rounded-xl p-5 hover:border-blue-500 hover:bg-blue-50 transition-all">
                   <div className="flex items-center justify-between">
                     <div>
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="text-xs text-slate-500 bg-slate-100 px-2 py-0.5 rounded">{org.level}</span>
-                        <span className="text-xs text-slate-500">{org.orgType}</span>
-                      </div>
+                      <div className="flex items-center gap-2 mb-1"><span className="text-xs text-slate-500 bg-slate-100 px-2 py-0.5 rounded">{org.level}</span><span className="text-xs text-slate-500">{org.orgType}</span></div>
                       <div className="text-lg font-semibold text-slate-900">{org.name}</div>
                     </div>
                     <ChevronRight className="w-5 h-5 text-slate-400" />
@@ -936,445 +943,159 @@ export default function Wizard() {
             </div>
           </div>
         ) : (
-          <div className="bg-slate-50 border border-slate-200 rounded-xl p-8 text-center">
-            <Target className="w-10 h-10 text-slate-300 mx-auto mb-3" />
-            <p className="text-slate-500 text-sm">배정된 조직이 없습니다</p>
-          </div>
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-8 text-center"><Target className="w-10 h-10 text-slate-300 mx-auto mb-3" /><p className="text-slate-500 text-sm">배정된 조직이 없습니다</p></div>
         )}
       </div>
     );
   }
 
-  // [화면 2] 기간 선택 화면 (NEW - 박스 UI)
+  // [화면 2] 기간 선택
   if (!showOrgSelector && showPeriodSelector) {
     return (
       <div className="p-6 max-w-3xl mx-auto">
         <div className="flex items-center gap-4 mb-6">
-          <button 
-            onClick={() => {
-              if (!urlOrgId) setShowOrgSelector(true);
-              else navigate(-1);
-            }}
-            className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-600"
-          >
-            <ArrowLeft className="w-6 h-6" />
-          </button>
+          <button onClick={() => { if (!urlOrgId) setShowOrgSelector(true); else navigate(-1); }} className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-600"><ArrowLeft className="w-6 h-6" /></button>
           <h1 className="text-2xl font-bold text-slate-900">기간 선택</h1>
         </div>
-        
-        <p className="text-slate-600 text-sm mb-4">
-          <span className="font-semibold text-blue-600">{currentOrgName}</span>의 OKR을 수립할 기간을 선택해주세요.
-        </p>
-
+        <p className="text-slate-600 text-sm mb-4"><span className="font-semibold text-blue-600">{currentOrgName}</span>의 OKR을 수립할 기간을 선택해주세요.</p>
         {periodLoading ? (
-          <div className="flex justify-center py-12">
-            <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
-          </div>
+          <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 text-blue-600 animate-spin" /></div>
         ) : availablePeriods.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {availablePeriods.map(p => (
-              <button
-                key={p.id}
-                onClick={() => {
-                  setSelectedPeriodId(p.id);
-                  setSelectedPeriodCode(p.period_code);
-                  setShowPeriodSelector(false); // 선택 완료 후 수문장(Effect)으로 패스!
-                }}
-                className="text-left border-2 border-slate-200 rounded-xl p-5 hover:border-blue-500 hover:bg-blue-50 transition-all"
-              >
+              <button key={p.id} onClick={() => { setSelectedPeriodId(p.id); setSelectedPeriodCode(p.period_code); setShowPeriodSelector(false); }} className="text-left border-2 border-slate-200 rounded-xl p-5 hover:border-blue-500 hover:bg-blue-50 transition-all">
                 <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2">
-                    <Calendar className="w-4 h-4 text-slate-400" />
-                    <span className="text-lg font-bold text-slate-900">{p.period_name}</span>
-                  </div>
+                  <div className="flex items-center gap-2"><Calendar className="w-4 h-4 text-slate-400" /><span className="text-lg font-bold text-slate-900">{p.period_name}</span></div>
                   <ChevronRight className="w-5 h-5 text-slate-400" />
                 </div>
                 <div className="flex items-center gap-2 mt-1">
-                  <span className="text-xs text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
-                    {p.period_type === 'year' ? '연간' : p.period_type === 'half' ? '반기' : '분기'}
-                  </span>
-                  <span className={`text-xs px-2 py-0.5 rounded ${
-                    p.status === 'planning' ? 'bg-blue-100 text-blue-700' :
-                    p.status === 'active' ? 'bg-green-100 text-green-700' :
-                    'bg-slate-100 text-slate-600'
-                  }`}>
+                  <span className="text-xs text-slate-500 bg-slate-100 px-2 py-0.5 rounded">{p.period_type === 'year' ? '연간' : p.period_type === 'half' ? '반기' : '분기'}</span>
+                  <span className={`text-xs px-2 py-0.5 rounded ${p.status === 'planning' ? 'bg-blue-100 text-blue-700' : p.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-600'}`}>
                     {p.status === 'planning' ? '수립중' : p.status === 'active' ? '실행중' : '예정'}
                   </span>
                 </div>
-                <p className="text-xs text-slate-400 mt-2">
-                  {new Date(p.starts_at).toLocaleDateString('ko-KR')} ~ {new Date(p.ends_at).toLocaleDateString('ko-KR')}
-                </p>
+                <p className="text-xs text-slate-400 mt-2">{new Date(p.starts_at).toLocaleDateString('ko-KR')} ~ {new Date(p.ends_at).toLocaleDateString('ko-KR')}</p>
               </button>
             ))}
           </div>
         ) : (
-          <div className="bg-slate-50 border border-slate-200 rounded-xl p-8 text-center">
-            <Calendar className="w-10 h-10 text-slate-300 mx-auto mb-3" />
-            <p className="text-slate-500 text-sm">선택 가능한 기간이 없습니다</p>
-            <p className="text-slate-400 text-xs mt-1">관리자 설정에서 기간을 생성해주세요</p>
-          </div>
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-8 text-center"><Calendar className="w-10 h-10 text-slate-300 mx-auto mb-3" /><p className="text-slate-500 text-sm">선택 가능한 기간이 없습니다</p><p className="text-slate-400 text-xs mt-1">관리자 설정에서 기간을 생성해주세요</p></div>
         )}
       </div>
     );
   }
 
-  if (!orgId) {
-    return (
-      <div className="p-6 text-center">
-        <div className="bg-red-50 border border-red-200 rounded-xl p-6 max-w-md mx-auto">
-          <p className="text-red-800 mb-2">조직 정보를 불러올 수 없습니다</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (isLoadingDraft) {
-    return (
-      <div className="p-6 max-w-6xl mx-auto">
-        <div className="flex flex-col items-center justify-center py-20">
-          <Loader2 className="w-12 h-12 text-blue-600 animate-spin mb-4" />
-          <h3 className="text-lg font-semibold text-slate-900 mb-2">데이터 확인 중...</h3>
-        </div>
-      </div>
-    );
-  }
+  if (!orgId) return <div className="p-6 text-center"><div className="bg-red-50 border border-red-200 rounded-xl p-6 max-w-md mx-auto"><p className="text-red-800 mb-2">조직 정보를 불러올 수 없습니다</p></div></div>;
+  if (isLoadingDraft) return <div className="p-6 max-w-6xl mx-auto"><div className="flex flex-col items-center justify-center py-20"><Loader2 className="w-12 h-12 text-blue-600 animate-spin mb-4" /><h3 className="text-lg font-semibold text-slate-900 mb-2">데이터 확인 중...</h3></div></div>;
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
+      {/* [FIX-9] 토스트 메시지 */}
+      {toastMessage && (
+        <div className="fixed top-6 right-6 bg-slate-900 text-white px-5 py-3 rounded-xl shadow-xl z-[60] text-sm font-medium">
+          {toastMessage}
+        </div>
+      )}
+
       {/* 헤더 */}
       {!showOneClickModal && (
         <div className="flex items-center gap-3 mb-6 flex-wrap">
-          <button 
-            onClick={() => setShowPeriodSelector(true)} // 뒤로가기 누르면 기간 다시 선택
-            className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-600"
-            title="기간 다시 선택"
-          >
-            <ArrowLeft className="w-6 h-6" />
-          </button>
+          <button onClick={() => setShowPeriodSelector(true)} className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-600" title="기간 다시 선택"><ArrowLeft className="w-6 h-6" /></button>
           <h1 className="text-2xl font-bold text-slate-900">목표 수립 ({currentOrgName})</h1>
-          
-          <button 
-            onClick={() => setShowPeriodSelector(true)}
-            className="text-sm text-slate-700 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors font-medium ml-2"
-          >
-            📅 {selectedPeriodCode} <ChevronDown className="w-4 h-4" />
-          </button>
-
-          {hasDraft && (
-            <span className="text-xs font-medium text-blue-700 bg-blue-100 px-2.5 py-1 rounded-full flex items-center gap-1">
-              <Bot className="w-3 h-3" /> CEO 초안 기반
+          <button onClick={() => setShowPeriodSelector(true)} className="text-sm text-slate-700 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors font-medium ml-2">📅 {selectedPeriodCode} <ChevronDown className="w-4 h-4" /></button>
+          {hasDraft && <span className="text-xs font-medium text-blue-700 bg-blue-100 px-2.5 py-1 rounded-full flex items-center gap-1"><Bot className="w-3 h-3" /> CEO 초안 기반</span>}
+          {/* [FIX-2] 승인 상태 배지 */}
+          {approvalStatus !== 'draft' && (
+            <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${approvalStatus === 'submitted' ? 'bg-blue-100 text-blue-700' : approvalStatus === 'approved' ? 'bg-green-100 text-green-700' : approvalStatus === 'rejected' ? 'bg-red-100 text-red-700' : approvalStatus === 'revision_requested' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'}`}>
+              {approvalStatus === 'submitted' ? '📤 제출됨' : approvalStatus === 'approved' ? '✅ 승인' : approvalStatus === 'rejected' ? '❌ 반려' : approvalStatus === 'revision_requested' ? '⚠️ 수정요청' : ''}
             </span>
           )}
         </div>
       )}
 
-      {/* CEO 초안 작업 중 — 사이클 미시작 또는 일시중지 */}
+      {/* CEO 초안 작업 중 */}
       {ceoDraftInProgress && !showOrgSelector && !showPeriodSelector && (
-        <div className="max-w-3xl mx-auto mt-8">
-          <div className="bg-amber-50 border-2 border-amber-200 rounded-2xl p-8 text-center">
-            <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <Clock className="w-8 h-8 text-amber-600" />
-            </div>
-            <h3 className="text-xl font-bold text-amber-900 mb-2">🚀 아직 OKR 수립 기간이 아닙니다.</h3>
-            <p className="text-amber-700 mb-4">
-              선택하신 <b>{selectedPeriodCode}</b> 기간은 CEO가 전사 목표를 확정하고 배포하기 전입니다.<br />
-              배포가 완료되면 알림을 통해 안내드리겠습니다.
-            </p>
-            <button
-              onClick={() => setShowPeriodSelector(true)}
-              className="px-6 py-2.5 bg-amber-600 text-white rounded-lg font-medium hover:bg-amber-700 transition-colors"
-            >
-              다른 기간 선택하기
-            </button>
-          </div>
-        </div>
+        <div className="max-w-3xl mx-auto mt-8"><div className="bg-amber-50 border-2 border-amber-200 rounded-2xl p-8 text-center">
+          <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-4"><Clock className="w-8 h-8 text-amber-600" /></div>
+          <h3 className="text-xl font-bold text-amber-900 mb-2">🚀 아직 OKR 수립 기간이 아닙니다.</h3>
+          <p className="text-amber-700 mb-4">선택하신 <b>{selectedPeriodCode}</b> 기간은 CEO가 전사 목표를 확정하고 배포하기 전입니다.<br />배포가 완료되면 알림을 통해 안내드리겠습니다.</p>
+          <button onClick={() => setShowPeriodSelector(true)} className="px-6 py-2.5 bg-amber-600 text-white rounded-lg font-medium hover:bg-amber-700 transition-colors">다른 기간 선택하기</button>
+        </div></div>
       )}
 
-      {/* 모달: 수립 방식 선택 (초안이 없을 때만) */}
+      {/* [FIX-7] 모달: 수립 방식 선택 (초안 없을 때만) */}
       {showOneClickModal && !hasDraft && !ceoDraftInProgress && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl p-8 max-w-3xl w-full mx-4 relative">
-            <button onClick={() => navigate(-1)} className="absolute top-6 right-6 text-slate-400 hover:text-slate-600">
-              <X className="w-6 h-6" />
-            </button>
-
+            <button onClick={() => navigate(-1)} className="absolute top-6 right-6 text-slate-400 hover:text-slate-600"><X className="w-6 h-6" /></button>
             <h2 className="text-2xl font-bold text-slate-900 mb-2">{currentOrgName} 목표 수립</h2>
-            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-6">
-              <div className="flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0" />
-                <p className="text-sm text-amber-800">CEO가 배포한 초안이 아직 없습니다. 직접 수립하거나 AI를 활용해 생성하세요.</p>
-              </div>
-            </div>
-
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-6"><div className="flex items-center gap-2"><AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0" /><p className="text-sm text-amber-800">CEO가 배포한 초안이 아직 없습니다. 직접 수립하거나 AI를 활용해 생성하세요.</p></div></div>
             <div className="grid grid-cols-2 gap-6">
-              <div className="border-2 border-slate-200 rounded-xl p-6 hover:border-blue-600 transition-all cursor-pointer">
-                <div className="text-3xl mb-3">🤖</div>
-                <h3 className="text-lg font-bold text-slate-900 mb-2">AI 전체 생성</h3>
-                <p className="text-sm text-slate-600 mb-4">AI가 조직정보를 분석하여 목표+KR을 한번에 생성합니다.</p>
-                <button onClick={handleOneClickGenerate} className="w-full bg-blue-600 text-white rounded-lg py-3 font-medium hover:bg-blue-700">🚀 전체 생성</button>
-              </div>
-
-              <div className="border-2 border-slate-200 rounded-xl p-6 hover:border-blue-600 transition-all cursor-pointer">
-                <div className="text-3xl mb-3">📝</div>
-                <h3 className="text-lg font-bold text-slate-900 mb-2">위저드로 직접 수립</h3>
-                <p className="text-sm text-slate-600 mb-4">단계를 따라가며 직접 수립합니다. AI가 각 단계에서 보조합니다.</p>
-                <button onClick={handleStartWizard} className="w-full bg-slate-100 text-slate-700 rounded-lg py-3 font-medium hover:bg-slate-200">📝 시작하기</button>
-              </div>
+              <div className="border-2 border-slate-200 rounded-xl p-6 hover:border-blue-600 transition-all cursor-pointer"><div className="text-3xl mb-3">🤖</div><h3 className="text-lg font-bold text-slate-900 mb-2">AI 전체 생성</h3><p className="text-sm text-slate-600 mb-4">AI가 조직정보를 분석하여 목표+KR을 한번에 생성합니다.</p><button onClick={handleOneClickGenerate} className="w-full bg-blue-600 text-white rounded-lg py-3 font-medium hover:bg-blue-700">🚀 전체 생성</button></div>
+              <div className="border-2 border-slate-200 rounded-xl p-6 hover:border-blue-600 transition-all cursor-pointer"><div className="text-3xl mb-3">📝</div><h3 className="text-lg font-bold text-slate-900 mb-2">위저드로 직접 수립</h3><p className="text-sm text-slate-600 mb-4">단계를 따라가며 직접 수립합니다. AI가 각 단계에서 보조합니다.</p><button onClick={handleStartWizard} className="w-full bg-slate-100 text-slate-700 rounded-lg py-3 font-medium hover:bg-slate-200">📝 시작하기</button></div>
             </div>
           </div>
         </div>
       )}
 
       {/* 로딩 오버레이 */}
-      {isAIGenerating && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-2xl p-8 max-w-md w-full mx-4 text-center">
-            <Bot className="w-16 h-16 text-blue-600 mx-auto mb-4 animate-pulse" />
-            <h3 className="text-xl font-bold text-slate-900 mb-2">AI가 분석 중입니다...</h3>
-            <p className="text-slate-600 mb-4">{companyIndustry} 업종의 KPI DB를 참조하여 최적의 목표를 생성하고 있습니다.</p>
-            <div className="h-2 bg-slate-200 rounded-full overflow-hidden">
-              <div className="h-full bg-blue-600 rounded-full animate-pulse" style={{ width: '70%' }} />
-            </div>
-          </div>
-        </div>
-      )}
+      {isAIGenerating && (<div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"><div className="bg-white rounded-2xl p-8 max-w-md w-full mx-4 text-center"><Bot className="w-16 h-16 text-blue-600 mx-auto mb-4 animate-pulse" /><h3 className="text-xl font-bold text-slate-900 mb-2">AI가 분석 중입니다...</h3><p className="text-slate-600 mb-4">{companyIndustry} 업종의 KPI DB를 참조하여 최적의 목표를 생성하고 있습니다.</p><div className="h-2 bg-slate-200 rounded-full overflow-hidden"><div className="h-full bg-blue-600 rounded-full animate-pulse" style={{ width: '70%' }} /></div></div></div>)}
+      {isSaving && (<div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"><div className="bg-white rounded-2xl p-8 max-w-md w-full mx-4 text-center"><Loader2 className="w-16 h-16 text-blue-600 mx-auto mb-4 animate-spin" /><h3 className="text-xl font-bold text-slate-900 mb-2">저장 중입니다...</h3></div></div>)}
 
-      {isSaving && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-2xl p-8 max-w-md w-full mx-4 text-center">
-            <Loader2 className="w-16 h-16 text-blue-600 mx-auto mb-4 animate-spin" />
-            <h3 className="text-xl font-bold text-slate-900 mb-2">저장 중입니다...</h3>
-          </div>
-        </div>
-      )}
-
-      {/* Pool에서 선택 모달 */}
+      {/* Pool 모달 */}
       {showPoolModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl w-full max-w-4xl mx-4 max-h-[85vh] flex flex-col">
-            {/* 모달 헤더 */}
             <div className="p-6 border-b border-slate-200 flex-shrink-0">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-3">
-                  <Database className="w-6 h-6 text-blue-600" />
-                  <h2 className="text-xl font-bold text-slate-900">KR Pool에서 선택</h2>
-                  <span className="text-sm text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">{companyIndustry}</span>
-                </div>
-                <button onClick={() => { setShowPoolModal(false); setPoolTargetObjId(null); }} className="text-slate-400 hover:text-slate-600">
-                  <X className="w-6 h-6" />
-                </button>
-              </div>
-              {poolTargetObjId && (
-                <div className="mb-3 px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg">
-                  <p className="text-xs text-blue-700">
-                    <span className="font-medium">대상 목표:</span> {objectives.find(o => o.id === poolTargetObjId)?.name}
-                  </p>
-                </div>
-              )}
-
-              {/* 검색 & 필터 */}
-              <div className="flex gap-3">
-                <div className="flex-1 relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                  <input
-                    type="text"
-                    placeholder="KR명, 정의 검색..."
-                    value={poolSearch}
-                    onChange={(e) => setPoolSearch(e.target.value)}
-                    className="w-full pl-9 pr-4 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                  />
-                </div>
-                <select
-                  value={poolFunctionFilter}
-                  onChange={(e) => setPoolFunctionFilter(e.target.value)}
-                  className="border border-slate-300 rounded-lg px-3 py-2 text-sm min-w-[140px]"
-                >
-                  <option value="">전체 기능</option>
-                  <option value="영업">영업</option>
-                  <option value="마케팅">마케팅</option>
-                  <option value="R&D/연구개발">R&D/연구개발</option>
-                  <option value="생산/제조">생산/제조</option>
-                  <option value="품질">품질</option>
-                  <option value="구매/조달">구매/조달</option>
-                  <option value="HR/인사">HR/인사</option>
-                  <option value="재무/회계">재무/회계</option>
-                  <option value="IT/정보시스템">IT/정보시스템</option>
-                  <option value="경영기획">경영기획</option>
-                  <option value="SCM/물류">SCM/물류</option>
-                  <option value="고객서비스/CS">고객서비스/CS</option>
-                  <option value="설비/시설">설비/시설</option>
-                  <option value="법무/컴플라이언스">법무/컴플라이언스</option>
-                  <option value="사업개발">사업개발</option>
-                </select>
-              </div>
+              <div className="flex items-center justify-between mb-4"><div className="flex items-center gap-3"><Database className="w-6 h-6 text-blue-600" /><h2 className="text-xl font-bold text-slate-900">KR Pool에서 선택</h2><span className="text-sm text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">{companyIndustry}</span></div><button onClick={() => { setShowPoolModal(false); setPoolTargetObjId(null); }} className="text-slate-400 hover:text-slate-600"><X className="w-6 h-6" /></button></div>
+              {poolTargetObjId && <div className="mb-3 px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg"><p className="text-xs text-blue-700"><span className="font-medium">대상 목표:</span> {objectives.find(o => o.id === poolTargetObjId)?.name}</p></div>}
+              <div className="flex gap-3"><div className="flex-1 relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" /><input type="text" placeholder="KR명, 정의 검색..." value={poolSearch} onChange={(e) => setPoolSearch(e.target.value)} className="w-full pl-9 pr-4 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" /></div>
+              <select value={poolFunctionFilter} onChange={(e) => setPoolFunctionFilter(e.target.value)} className="border border-slate-300 rounded-lg px-3 py-2 text-sm min-w-[140px]"><option value="">전체 기능</option><option value="영업">영업</option><option value="마케팅">마케팅</option><option value="R&D/연구개발">R&D/연구개발</option><option value="생산/제조">생산/제조</option><option value="품질">품질</option><option value="구매/조달">구매/조달</option><option value="HR/인사">HR/인사</option><option value="재무/회계">재무/회계</option><option value="IT/정보시스템">IT/정보시스템</option><option value="경영기획">경영기획</option><option value="SCM/물류">SCM/물류</option><option value="고객서비스/CS">고객서비스/CS</option><option value="설비/시설">설비/시설</option><option value="법무/컴플라이언스">법무/컴플라이언스</option><option value="사업개발">사업개발</option></select></div>
             </div>
-
-            {/* 모달 바디 - KPI 리스트 */}
             <div className="flex-1 overflow-y-auto p-6">
-              {poolLoading ? (
-                <div className="flex items-center justify-center py-12">
-                  <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
-                  <span className="ml-3 text-slate-500">검색 중...</span>
-                </div>
-              ) : poolKPIs.length === 0 ? (
-                <div className="text-center py-12">
-                  <Database className="w-10 h-10 text-slate-300 mx-auto mb-2" />
-                  <p className="text-slate-500 text-sm">검색 결과가 없습니다</p>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {poolKPIs.map((pk) => {
-                    const isChecked = poolSelectedIds.has(pk.id);
-                    const biiColor = getBIIColor((pk.bii_type?.[0] || 'Improve') as BIIType);
-                    const perspColors: Record<string, string> = {
-                      '재무': 'bg-emerald-100 text-emerald-700',
-                      '고객': 'bg-sky-100 text-sky-700',
-                      '프로세스': 'bg-amber-100 text-amber-700',
-                      '학습성장': 'bg-violet-100 text-violet-700',
-                    };
-                    const pColor = perspColors[pk.perspective] || 'bg-slate-100 text-slate-600';
-
-                    return (
-                      <div
-                        key={pk.id}
-                        onClick={() => togglePoolSelection(pk.id)}
-                        className={`border rounded-lg p-4 cursor-pointer transition-all ${
-                          isChecked 
-                            ? 'border-blue-500 bg-blue-50/50' 
-                            : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
-                        }`}
-                      >
-                        <div className="flex items-start gap-3">
-                          <input
-                            type="checkbox"
-                            checked={isChecked}
-                            onChange={() => {}}
-                            className="mt-1 w-4 h-4 rounded border-slate-300 text-blue-600"
-                          />
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 mb-1">
-                              <span className="font-medium text-slate-900 text-sm">{pk.name}</span>
-                              {pk.is_mandatory && <Star className="w-3.5 h-3.5 text-amber-500 fill-amber-500 flex-shrink-0" />}
-                            </div>
-                            <p className="text-xs text-slate-500 mb-2 line-clamp-1">{pk.definition}</p>
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${biiColor.bg} ${biiColor.text}`}>
-                                {pk.bii_type?.[0] || 'Improve'}
-                              </span>
-                              <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${pColor}`}>
-                                {pk.perspective}
-                              </span>
-                              <span className="text-xs text-slate-400">{pk.unit}</span>
-                              <span className="text-xs text-slate-400">•</span>
-                              <span className="text-xs text-slate-400">{pk.indicator_type}</span>
-                            </div>
-                          </div>
-                          <div className="text-right flex-shrink-0">
-                            <div className="text-xs text-slate-400">관련도</div>
-                            <div className="text-sm font-semibold text-blue-600">{pk.relevance_score}</div>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
+              {poolLoading ? (<div className="flex items-center justify-center py-12"><Loader2 className="w-8 h-8 text-blue-600 animate-spin" /><span className="ml-3 text-slate-500">검색 중...</span></div>)
+              : poolKPIs.length === 0 ? (<div className="text-center py-12"><Database className="w-10 h-10 text-slate-300 mx-auto mb-2" /><p className="text-slate-500 text-sm">검색 결과가 없습니다</p></div>)
+              : (<div className="space-y-2">{poolKPIs.map((pk) => {
+                  const isChecked = poolSelectedIds.has(pk.id); const biiColor = getBIIColor((pk.bii_type?.[0] || 'Improve') as BIIType);
+                  const perspColors: Record<string, string> = { '재무': 'bg-emerald-100 text-emerald-700', '고객': 'bg-sky-100 text-sky-700', '프로세스': 'bg-amber-100 text-amber-700', '학습성장': 'bg-violet-100 text-violet-700' };
+                  return (<div key={pk.id} onClick={() => togglePoolSelection(pk.id)} className={`border rounded-lg p-4 cursor-pointer transition-all ${isChecked ? 'border-blue-500 bg-blue-50/50' : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'}`}>
+                    <div className="flex items-start gap-3"><input type="checkbox" checked={isChecked} onChange={() => {}} className="mt-1 w-4 h-4 rounded border-slate-300 text-blue-600" /><div className="flex-1 min-w-0"><div className="flex items-center gap-2 mb-1"><span className="font-medium text-slate-900 text-sm">{pk.name}</span>{pk.is_mandatory && <Star className="w-3.5 h-3.5 text-amber-500 fill-amber-500 flex-shrink-0" />}</div><p className="text-xs text-slate-500 mb-2 line-clamp-1">{pk.definition}</p><div className="flex items-center gap-2 flex-wrap"><span className={`px-1.5 py-0.5 rounded text-xs font-medium ${biiColor.bg} ${biiColor.text}`}>{pk.bii_type?.[0] || 'Improve'}</span><span className={`px-1.5 py-0.5 rounded text-xs font-medium ${perspColors[pk.perspective] || 'bg-slate-100 text-slate-600'}`}>{pk.perspective}</span><span className="text-xs text-slate-400">{pk.unit}</span><span className="text-xs text-slate-400">•</span><span className="text-xs text-slate-400">{pk.indicator_type}</span></div></div><div className="text-right flex-shrink-0"><div className="text-xs text-slate-400">관련도</div><div className="text-sm font-semibold text-blue-600">{pk.relevance_score}</div></div></div>
+                  </div>);
+                })}</div>)}
             </div>
-
-            {/* 모달 푸터 */}
-            <div className="p-4 border-t border-slate-200 flex items-center justify-between flex-shrink-0 bg-slate-50">
-              <div className="text-sm text-slate-600">
-                {poolSelectedIds.size > 0 
-                  ? <span className="font-medium text-blue-600">{poolSelectedIds.size}개 선택됨</span>
-                  : <span>{poolKPIs.length}개 KR 검색됨</span>
-                }
-              </div>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => { setShowPoolModal(false); setPoolTargetObjId(null); }}
-                  className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-100"
-                >
-                  취소
-                </button>
-                <button
-                  onClick={handleAddFromPool}
-                  disabled={poolSelectedIds.size === 0}
-                  className="px-6 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
-                >
-                  <Plus className="w-4 h-4" />
-                  {poolSelectedIds.size}개 추가
-                </button>
-              </div>
-            </div>
+            <div className="p-4 border-t border-slate-200 flex items-center justify-between flex-shrink-0 bg-slate-50"><div className="text-sm text-slate-600">{poolSelectedIds.size > 0 ? <span className="font-medium text-blue-600">{poolSelectedIds.size}개 선택됨</span> : <span>{poolKPIs.length}개 KR 검색됨</span>}</div><div className="flex gap-3"><button onClick={() => { setShowPoolModal(false); setPoolTargetObjId(null); }} className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-100">취소</button><button onClick={handleAddFromPool} disabled={poolSelectedIds.size === 0} className="px-6 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"><Plus className="w-4 h-4" />{poolSelectedIds.size}개 추가</button></div></div>
           </div>
         </div>
       )}
 
-      {/* Stepper + Main Content — CEO 작업 중이면 숨김 */}
-      {!ceoDraftInProgress && (
-      <>
-      {/* Stepper */}
+      {/* Stepper + Main Content */}
+      {!ceoDraftInProgress && (<>
       <div className="bg-white rounded-xl border border-slate-200 px-6 py-4 mb-6">
         <div className="flex items-center justify-between">
           {steps.map((step, index) => (
             <div key={step.id} className="flex items-center">
-              <button 
-                onClick={() => setCurrentStep(index)}
-                className="flex flex-col items-center group cursor-pointer"
-                title={step.description}
-              >
-                <div className={`w-8 h-8 rounded-full flex items-center justify-center font-semibold text-xs transition-all ${
-                  currentStep === index
-                    ? 'bg-blue-600 text-white ring-2 ring-blue-300'
-                    : currentStep > index
-                    ? 'bg-green-600 text-white'
-                    : 'bg-slate-200 text-slate-500 group-hover:bg-slate-300'
-                }`}>
-                  {currentStep > index ? '✓' : index + 1}
-                </div>
-                <span className={`mt-1 text-xs font-medium truncate max-w-[70px] text-center ${
-                  currentStep === index ? 'text-blue-600' : currentStep > index ? 'text-green-600' : 'text-slate-400'
-                }`}>
-                  {step.name}
-                </span>
+              <button onClick={() => setCurrentStep(index)} className="flex flex-col items-center group cursor-pointer" title={step.description}>
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center font-semibold text-xs transition-all ${currentStep === index ? 'bg-blue-600 text-white ring-2 ring-blue-300' : currentStep > index ? 'bg-green-600 text-white' : 'bg-slate-200 text-slate-500 group-hover:bg-slate-300'}`}>{currentStep > index ? '✓' : index + 1}</div>
+                <span className={`mt-1 text-xs font-medium truncate max-w-[70px] text-center ${currentStep === index ? 'text-blue-600' : currentStep > index ? 'text-green-600' : 'text-slate-400'}`}>{step.name}</span>
               </button>
-              {index < steps.length - 1 && (
-                <div className={`w-8 h-0.5 mx-1 ${currentStep > index ? 'bg-green-400' : 'bg-slate-200'}`} />
-              )}
+              {index < steps.length - 1 && <div className={`w-8 h-0.5 mx-1 ${currentStep > index ? 'bg-green-400' : 'bg-slate-200'}`} />}
             </div>
           ))}
         </div>
       </div>
 
-      {/* Main Content */}
       <div className="bg-white rounded-xl border border-slate-200 p-8">
-        
         {/* Step 0: 전략 방향 */}
         {currentStep === 0 && (
           <div className="space-y-6">
             <h2 className="text-xl font-bold text-slate-900">전략 방향 확인</h2>
-            <div className="bg-blue-50 border border-blue-200 rounded-xl p-6">
-              <h3 className="font-semibold text-blue-900 mb-2">전사 전략방향</h3>
-              <p className="text-blue-700">디지털 혁신을 통한 지속 가능한 성장과 고객 가치 창출</p>
-            </div>
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-6"><h3 className="font-semibold text-blue-900 mb-2">전사 전략방향</h3><p className="text-blue-700">디지털 혁신을 통한 지속 가능한 성장과 고객 가치 창출</p></div>
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-2">우리 조직 미션</label>
-              <textarea
-                value={mission}
-                onChange={(e) => setMission(e.target.value)}
-                className="w-full border border-slate-300 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none"
-                rows={4}
-              />
-              <button className="mt-2 px-4 py-2 bg-gradient-to-r from-blue-600 to-violet-600 text-white rounded-lg hover:from-blue-700 hover:to-violet-700 transition-colors text-sm font-medium flex items-center gap-2">
-                <Bot className="w-4 h-4" />
-                AI 미션 제안
-              </button>
+              <textarea value={mission} onChange={(e) => setMission(e.target.value)} className="w-full border border-slate-300 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none" rows={4} />
+              <button className="mt-2 px-4 py-2 bg-gradient-to-r from-blue-600 to-violet-600 text-white rounded-lg hover:from-blue-700 hover:to-violet-700 transition-colors text-sm font-medium flex items-center gap-2"><Bot className="w-4 h-4" />AI 미션 제안</button>
             </div>
-            <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
-              <p className="text-sm text-slate-600">
-                💡 좋은 미션은 Build, Innovate, Improve 중 하나의 방향을 내포합니다
-              </p>
-            </div>
+            <div className="bg-slate-50 border border-slate-200 rounded-lg p-4"><p className="text-sm text-slate-600">💡 좋은 미션은 Build, Innovate, Improve 중 하나의 방향을 내포합니다</p></div>
           </div>
         )}
 
@@ -1385,1160 +1106,211 @@ export default function Wizard() {
               <h2 className="text-xl font-bold text-slate-900">목표(Objective) 수립</h2>
               <div className="bg-gradient-to-br from-blue-50 to-violet-50 border border-blue-200 rounded-lg p-4">
                 <h4 className="text-sm font-semibold text-slate-900 mb-2">BII 밸런스</h4>
-                <div className="space-y-1 text-xs">
-                  <div className="flex items-center justify-between gap-4">
-                    <span className="text-slate-600">Build:</span>
-                    <div className="flex-1 h-2 bg-slate-200 rounded-full overflow-hidden">
-                      <div className="h-full bg-violet-600" style={{ width: `${biiBalance.Build * 20}%` }} />
-                    </div>
-                    <span className="font-medium">{biiBalance.Build}개</span>
-                  </div>
-                  <div className="flex items-center justify-between gap-4">
-                    <span className="text-slate-600">Innovate:</span>
-                    <div className="flex-1 h-2 bg-slate-200 rounded-full overflow-hidden">
-                      <div className="h-full bg-blue-600" style={{ width: `${biiBalance.Innovate * 20}%` }} />
-                    </div>
-                    <span className="font-medium">{biiBalance.Innovate}개</span>
-                  </div>
-                  <div className="flex items-center justify-between gap-4">
-                    <span className="text-slate-600">Improve:</span>
-                    <div className="flex-1 h-2 bg-slate-200 rounded-full overflow-hidden">
-                      <div className="h-full bg-green-600" style={{ width: `${biiBalance.Improve * 20}%` }} />
-                    </div>
-                    <span className="font-medium">{biiBalance.Improve}개</span>
-                  </div>
-                </div>
+                <div className="space-y-1 text-xs">{(['Build','Innovate','Improve'] as const).map(t => (<div key={t} className="flex items-center justify-between gap-4"><span className="text-slate-600">{t}:</span><div className="flex-1 h-2 bg-slate-200 rounded-full overflow-hidden"><div className={`h-full ${t === 'Build' ? 'bg-violet-600' : t === 'Innovate' ? 'bg-blue-600' : 'bg-green-600'}`} style={{ width: `${biiBalance[t] * 20}%` }} /></div><span className="font-medium">{biiBalance[t]}개</span></div>))}</div>
               </div>
             </div>
-
-            <p className="text-slate-600">
-              {hasDraft 
-                ? '📋 CEO가 배포한 초안 목표입니다. 검토 후 선택/수정/추가하세요.' 
-                : '🤖 AI가 목표 후보를 생성했습니다. 3~5개를 선택해주세요.'}
-            </p>
-
-            {/* 상위 조직 목표 참조 (접이식) */}
+            <p className="text-slate-600">{hasDraft ? '📋 CEO가 배포한 초안 목표입니다. 검토 후 선택/수정/추가하세요.' : '🤖 AI가 목표 후보를 생성했습니다. 3~5개를 선택해주세요.'}</p>
             {parentObjectives.length > 0 && (
               <details className="bg-violet-50 border border-violet-200 rounded-xl">
-                <summary className="cursor-pointer px-4 py-2.5 flex items-center gap-1.5 text-xs font-medium text-violet-700 [&>*]:marker:hidden list-none">
-                  <ChevronRight className="w-3.5 h-3.5 text-violet-500 transition-transform [[open]>&]:rotate-90" />
-                  <GitBranch className="w-3.5 h-3.5 text-violet-500" />
-                  상위 조직 목표 참조 ({parentObjectives.length}개)
-                </summary>
-                <div className="px-4 pb-3 space-y-3">
-                  {/* 조직별 그루핑 */}
-                  {Array.from(new Set(parentObjectives.map(po => po.orgId))).map(orgId => {
-                    const orgObjs = parentObjectives.filter(po => po.orgId === orgId);
-                    const orgInfo = orgObjs[0];
-                    return (
-                      <div key={orgId}>
-                        <div className="flex items-center gap-1.5 mb-1">
-                          <span className="text-xs bg-violet-200/60 text-violet-700 px-1.5 py-0.5 rounded font-medium">{orgInfo.orgLevel}</span>
-                          <span className="text-xs font-semibold text-violet-700">{orgInfo.orgName}</span>
-                        </div>
-                        <div className="space-y-1 ml-1">
-                          {orgObjs.map((po, idx) => (
-                            <div key={po.id} className="flex items-center gap-2 bg-white/60 rounded-lg px-3 py-1.5">
-                              <span className="text-xs font-bold text-violet-400"><i className="not-italic font-serif">O</i>{idx + 1}</span>
-                              <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${getBIIColor(po.biiType as BIIType).bg} ${getBIIColor(po.biiType as BIIType).text}`}>
-                                {po.biiType}
-                              </span>
-                              <span className="text-sm text-slate-800">{po.name}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
+                <summary className="cursor-pointer px-4 py-2.5 flex items-center gap-1.5 text-xs font-medium text-violet-700 [&>*]:marker:hidden list-none"><ChevronRight className="w-3.5 h-3.5 text-violet-500 transition-transform [[open]>&]:rotate-90" /><GitBranch className="w-3.5 h-3.5 text-violet-500" /> 상위 조직 목표 참조 ({parentObjectives.length}개)</summary>
+                <div className="px-4 pb-3 space-y-3">{Array.from(new Set(parentObjectives.map(po => po.orgId))).map(poOrgId => { const orgObjs = parentObjectives.filter(po => po.orgId === poOrgId); const orgInfo = orgObjs[0]; return (<div key={poOrgId}><div className="flex items-center gap-1.5 mb-1"><span className="text-xs bg-violet-200/60 text-violet-700 px-1.5 py-0.5 rounded font-medium">{orgInfo.orgLevel}</span><span className="text-xs font-semibold text-violet-700">{orgInfo.orgName}</span></div><div className="space-y-1 ml-1">{orgObjs.map((po, idx) => (<div key={po.id} className="flex items-center gap-2 bg-white/60 rounded-lg px-3 py-1.5"><span className="text-xs font-bold text-violet-400">O{idx + 1}</span><span className={`px-1.5 py-0.5 rounded text-xs font-medium ${getBIIColor(po.biiType as BIIType).bg} ${getBIIColor(po.biiType as BIIType).text}`}>{po.biiType}</span><span className="text-sm text-slate-800">{po.name}</span></div>))}</div></div>); })}</div>
               </details>
             )}
-
-            <div className="space-y-3">
-              {objectives.map((obj, objIdx) => {
-                const biiColor = getBIIColor(obj.biiType);
-                const isEditing = editingObjId === obj.id;
-                return (
-                  <div
-                    key={obj.id}
-                    className={`border-2 rounded-xl p-4 transition-all ${
-                      obj.selected ? 'border-blue-600 bg-blue-50' : 'border-slate-200 hover:border-slate-300'
-                    }`}
-                  >
-                    <div className="flex items-start gap-3">
-                      <input
-                        type="checkbox"
-                        checked={obj.selected}
-                        onChange={() => toggleObjective(obj.id)}
-                        className="mt-1.5 w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                      />
-                      <div className="w-8 h-8 rounded-lg bg-slate-900 text-white flex items-center justify-center text-sm font-bold flex-shrink-0">
-                        <i className="not-italic font-serif">O</i>{objIdx + 1}
+            <div className="space-y-3">{objectives.map((obj, objIdx) => {
+              const biiColor = getBIIColor(obj.biiType); const isEditing = editingObjId === obj.id;
+              return (<div key={obj.id} className={`border-2 rounded-xl p-4 transition-all ${obj.selected ? 'border-blue-600 bg-blue-50' : 'border-slate-200 hover:border-slate-300'}`}>
+                <div className="flex items-start gap-3">
+                  <input type="checkbox" checked={obj.selected} onChange={() => toggleObjective(obj.id)} className="mt-1.5 w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer" />
+                  <div className="w-8 h-8 rounded-lg bg-slate-900 text-white flex items-center justify-center text-sm font-bold flex-shrink-0">O{objIdx + 1}</div>
+                  <div className="flex-1 min-w-0">
+                    {isEditing ? (
+                      <div className="space-y-2">
+                        <input type="text" value={obj.name} onChange={(e) => setObjectives(prev => prev.map(o => o.id === obj.id ? { ...o, name: e.target.value } : o))} className="w-full px-2 py-1.5 border border-blue-300 rounded-lg text-sm font-medium focus:ring-2 focus:ring-blue-500 outline-none" placeholder="목표명을 입력하세요" autoFocus />
+                        <div className="flex gap-2">
+                          <select value={obj.biiType} onChange={(e) => setObjectives(prev => prev.map(o => o.id === obj.id ? { ...o, biiType: e.target.value as BIIType } : o))} className="flex-1 px-2 py-1 border border-slate-300 rounded text-xs"><option value="Build">Build</option><option value="Innovate">Innovate</option><option value="Improve">Improve</option></select>
+                          <select value={obj.perspective} onChange={(e) => setObjectives(prev => prev.map(o => o.id === obj.id ? { ...o, perspective: e.target.value } : o))} className="flex-1 px-2 py-1 border border-slate-300 rounded text-xs"><option value="재무">재무</option><option value="고객">고객</option><option value="프로세스">프로세스</option><option value="학습성장">학습성장</option></select>
+                        </div>
+                        {parentObjectives.length > 0 && (<div><label className="block text-xs text-slate-500 mb-1"><Link2 className="w-3 h-3 inline mr-1" />상위 목표 연결</label><select value={obj.parentObjId || ''} onChange={(e) => setObjectives(prev => prev.map(o => o.id === obj.id ? { ...o, parentObjId: e.target.value || null } : o))} className="w-full px-2 py-1.5 border border-violet-300 bg-violet-50/50 rounded text-xs focus:ring-2 focus:ring-violet-400 outline-none"><option value="">독립 목표 (연결 없음)</option>{Array.from(new Set(parentObjectives.map(po => po.orgId))).map(pOrgId => { const orgObjs = parentObjectives.filter(po => po.orgId === pOrgId); const orgInfo = orgObjs[0]; return (<optgroup key={pOrgId} label={`${orgInfo.orgLevel} · ${orgInfo.orgName}`}>{orgObjs.map((po, idx) => (<option key={po.id} value={po.id}>O{idx + 1} [{po.biiType}] {po.name}</option>))}</optgroup>); })}</select></div>)}
+                        <div className="flex gap-1 justify-end"><button onClick={() => setEditingObjId(null)} className="px-3 py-1 bg-blue-600 text-white rounded text-xs font-medium hover:bg-blue-700">완료</button><button onClick={() => { setObjectives(prev => prev.filter(o => o.id !== obj.id)); setEditingObjId(null); }} className="px-3 py-1 text-red-600 hover:bg-red-50 rounded text-xs font-medium">삭제</button></div>
                       </div>
-                      <div className="flex-1 min-w-0">
-                        {isEditing ? (
-                          <div className="space-y-2">
-                            <input
-                              type="text"
-                              value={obj.name}
-                              onChange={(e) => setObjectives(prev => prev.map(o => 
-                                o.id === obj.id ? { ...o, name: e.target.value } : o
-                              ))}
-                              className="w-full px-2 py-1.5 border border-blue-300 rounded-lg text-sm font-medium focus:ring-2 focus:ring-blue-500 outline-none"
-                              placeholder="목표명을 입력하세요"
-                              autoFocus
-                            />
-                            <div className="flex gap-2">
-                              <select
-                                value={obj.biiType}
-                                onChange={(e) => setObjectives(prev => prev.map(o => 
-                                  o.id === obj.id ? { ...o, biiType: e.target.value as BIIType } : o
-                                ))}
-                                className="flex-1 px-2 py-1 border border-slate-300 rounded text-xs"
-                              >
-                                <option value="Build">Build</option>
-                                <option value="Innovate">Innovate</option>
-                                <option value="Improve">Improve</option>
-                              </select>
-                              <select
-                                value={obj.perspective}
-                                onChange={(e) => setObjectives(prev => prev.map(o => 
-                                  o.id === obj.id ? { ...o, perspective: e.target.value } : o
-                                ))}
-                                className="flex-1 px-2 py-1 border border-slate-300 rounded text-xs"
-                              >
-                                <option value="재무">재무</option>
-                                <option value="고객">고객</option>
-                                <option value="프로세스">프로세스</option>
-                                <option value="학습성장">학습성장</option>
-                              </select>
-                            </div>
-                            {/* 상위 목표 연결 */}
-                            {parentObjectives.length > 0 && (
-                              <div>
-                                <label className="block text-xs text-slate-500 mb-1">
-                                  <Link2 className="w-3 h-3 inline mr-1" />상위 목표 연결
-                                </label>
-                                <select
-                                  value={obj.parentObjId || ''}
-                                  onChange={(e) => setObjectives(prev => prev.map(o => 
-                                    o.id === obj.id ? { ...o, parentObjId: e.target.value || null } : o
-                                  ))}
-                                  className="w-full px-2 py-1.5 border border-violet-300 bg-violet-50/50 rounded text-xs focus:ring-2 focus:ring-violet-400 outline-none"
-                                >
-                                  <option value="">독립 목표 (연결 없음)</option>
-                                  {Array.from(new Set(parentObjectives.map(po => po.orgId))).map(pOrgId => {
-                                    const orgObjs = parentObjectives.filter(po => po.orgId === pOrgId);
-                                    const orgInfo = orgObjs[0];
-                                    return (
-                                      <optgroup key={pOrgId} label={`${orgInfo.orgLevel} · ${orgInfo.orgName}`}>
-                                        {orgObjs.map((po, idx) => (
-                                          <option key={po.id} value={po.id}>
-                                            O{idx + 1} [{po.biiType}] {po.name}
-                                          </option>
-                                        ))}
-                                      </optgroup>
-                                    );
-                                  })}
-                                </select>
-                              </div>
-                            )}
-                            <div className="flex gap-1 justify-end">
-                              <button
-                                onClick={() => setEditingObjId(null)}
-                                className="px-3 py-1 bg-blue-600 text-white rounded text-xs font-medium hover:bg-blue-700"
-                              >
-                                완료
-                              </button>
-                              <button
-                                onClick={() => {
-                                  setObjectives(prev => prev.filter(o => o.id !== obj.id));
-                                  setEditingObjId(null);
-                                }}
-                                className="px-3 py-1 text-red-600 hover:bg-red-50 rounded text-xs font-medium"
-                              >
-                                삭제
-                              </button>
-                            </div>
-                          </div>
-                        ) : (
-                          <div 
-                            onClick={() => toggleObjective(obj.id)}
-                            className="cursor-pointer"
-                          >
-                            <h3 className="font-medium text-slate-900 mb-2">{obj.name || '(이름 없음)'}</h3>
-                            <div className="flex items-center gap-2">
-                              <span className={`px-2 py-1 rounded-full text-xs font-medium ${biiColor.bg} ${biiColor.text}`}>
-                                {obj.biiType}
-                              </span>
-                              <span className="text-xs text-slate-600">{obj.perspective} 관점</span>
-                            </div>
-                            {/* 상위 목표 연결 배지 */}
-                            {(() => {
-                              const parentObj = parentObjectives.find(po => po.id === obj.parentObjId);
-                              return parentObj ? (
-                                <div className="flex items-center gap-1.5 mt-2 bg-violet-50 border border-violet-200 rounded-lg px-2.5 py-1.5">
-                                  <Link2 className="w-3 h-3 text-violet-500 flex-shrink-0" />
-                                  <span className="text-xs bg-violet-200/60 text-violet-700 px-1 py-0.5 rounded font-medium">{parentObj.orgLevel}</span>
-                                  <span className="text-xs text-violet-700 font-medium">{parentObj.orgName}</span>
-                                  <span className="text-xs text-violet-400">›</span>
-                                  <span className="text-xs text-violet-800 truncate">{parentObj.name}</span>
-                                </div>
-                              ) : (
-                                <div className="flex items-center gap-1 mt-2">
-                                  <span className="text-xs text-slate-400">독립 목표</span>
-                                </div>
-                              );
-                            })()}
-                          </div>
-                        )}
+                    ) : (
+                      <div onClick={() => toggleObjective(obj.id)} className="cursor-pointer">
+                        <h3 className="font-medium text-slate-900 mb-2">{obj.name || '(이름 없음)'}</h3>
+                        <div className="flex items-center gap-2"><span className={`px-2 py-1 rounded-full text-xs font-medium ${biiColor.bg} ${biiColor.text}`}>{obj.biiType}</span><span className="text-xs text-slate-600">{obj.perspective} 관점</span></div>
+                        {(() => { const parentObj = parentObjectives.find(po => po.id === obj.parentObjId); return parentObj ? (<div className="flex items-center gap-1.5 mt-2 bg-violet-50 border border-violet-200 rounded-lg px-2.5 py-1.5"><Link2 className="w-3 h-3 text-violet-500 flex-shrink-0" /><span className="text-xs bg-violet-200/60 text-violet-700 px-1 py-0.5 rounded font-medium">{parentObj.orgLevel}</span><span className="text-xs text-violet-700 font-medium">{parentObj.orgName}</span><span className="text-xs text-violet-400">›</span><span className="text-xs text-violet-800 truncate">{parentObj.name}</span></div>) : (<div className="flex items-center gap-1 mt-2"><span className="text-xs text-slate-400">독립 목표</span></div>); })()}
                       </div>
-                      {!isEditing && (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setEditingObjId(obj.id);
-                          }}
-                          className="p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
-                          title="수정"
-                        >
-                          <Pencil className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                    </div>
+                    )}
                   </div>
-                );
-              })}
-            </div>
-
-            <div className="flex gap-2">
-              <button 
-                onClick={() => {
-                  const newId = `obj-new-${Date.now()}`;
-                  const newObj: ObjectiveCandidate = {
-                    id: newId,
-                    name: '',
-                    biiType: 'Improve',
-                    perspective: '재무',
-                    selected: true,
-                    parentObjId: null,
-                  };
-                  setObjectives(prev => [...prev, newObj]);
-                  setEditingObjId(newId);
-                }}
-                className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors text-sm font-medium flex items-center gap-2"
-              >
-                <Plus className="w-4 h-4" />
-                직접 추가
-              </button>
-            </div>
+                  {!isEditing && <button onClick={(e) => { e.stopPropagation(); setEditingObjId(obj.id); }} className="p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" title="수정"><Pencil className="w-3.5 h-3.5" /></button>}
+                </div>
+              </div>);
+            })}</div>
+            <div className="flex gap-2"><button onClick={() => { const newId = `obj-new-${Date.now()}`; setObjectives(prev => [...prev, { id: newId, name: '', biiType: 'Improve', perspective: '재무', selected: true, parentObjId: null }]); setEditingObjId(newId); }} className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors text-sm font-medium flex items-center gap-2"><Plus className="w-4 h-4" />직접 추가</button></div>
           </div>
         )}
 
-        {/* Step 2: OKR 검토 및 수정 — Objective별 통합 카드 */}
+        {/* Step 2: KR 설정 */}
         {currentStep === 2 && (
           <div className="space-y-6">
             <h2 className="text-xl font-bold text-slate-900">OKR 검토 및 수정</h2>
-
-            {/* ── Objective별 통합 카드 ── */}
             {objectives.filter(o => o.selected).map((obj, objIdx) => {
-              const biiColor = getBIIColor(obj.biiType);
-              const parentObj = parentObjectives.find(po => po.id === obj.parentObjId);
-              const objKRs = krs.filter(kr => kr.objectiveId === obj.id && kr.selected !== false);
-              const isEditingObj = editingObjId === obj.id;
-
-              return (
-                <div key={obj.id} className="border border-slate-200 rounded-2xl overflow-hidden bg-white shadow-sm">
-                  
-                  {/* ── 상위 연결 헤더 ── */}
-                  {parentObj && (
-                    <div className="bg-gradient-to-r from-violet-50 to-indigo-50 border-b border-violet-200 px-5 py-3">
-                      <div className="flex items-center gap-2">
-                        <GitBranch className="w-3.5 h-3.5 text-violet-500" />
-                        <span className="text-xs font-medium text-violet-600">상위 목표 연결</span>
-                        <span className="text-xs text-violet-400">|</span>
-                        <span className="text-xs bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded font-medium">{parentObj.orgLevel}</span>
-                        <span className="text-xs text-violet-600 font-medium">{parentObj.orgName}</span>
-                      </div>
-                      <div className="flex items-center gap-2 mt-1.5">
-                        <span className="text-xs font-bold text-violet-500 bg-violet-100 px-1.5 py-0.5 rounded">
-                          <i className="not-italic font-serif">O</i>{parentObjectives.filter(po => po.orgId === parentObj.orgId).indexOf(parentObj) + 1}
-                        </span>
-                        <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${getBIIColor(parentObj.biiType as BIIType).bg} ${getBIIColor(parentObj.biiType as BIIType).text}`}>
-                          {parentObj.biiType}
-                        </span>
-                        <span className="text-sm text-violet-900">{parentObj.name}</span>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* ── Objective 본문 ── */}
-                  <div className="px-5 pt-4 pb-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex items-start gap-3 flex-1 min-w-0">
-                        <div className="w-8 h-8 rounded-lg bg-slate-900 text-white flex items-center justify-center text-sm font-bold flex-shrink-0">
-                          <i className="not-italic font-serif">O</i>{objIdx + 1}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <h3 className="font-bold text-slate-900 text-base leading-snug">{obj.name}</h3>
-                          <div className="flex items-center gap-2 mt-1.5">
-                            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${biiColor.bg} ${biiColor.text}`}>
-                              {obj.biiType}
-                            </span>
-                            <span className="text-xs text-slate-500">{obj.perspective} 관점</span>
-                            {!parentObj && obj.source === 'ai_draft' && (
-                              <span className="text-xs text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">독립</span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* ── KR 리스트 ── */}
-                  <div className="px-5 pb-4 space-y-2">
-                    {objKRs.length === 0 ? (
-                      <div className="bg-slate-50 rounded-lg p-4 text-center">
-                        <p className="text-sm text-slate-400">KR이 없습니다</p>
-                        <button
-                          onClick={() => {
-                            setSelectedObjectiveTab(obj.id);
-                            handleAddKR();
-                          }}
-                          className="mt-2 text-xs text-blue-600 hover:underline"
-                        >
-                          + KR 추가
-                        </button>
-                      </div>
-                    ) : (
-                      objKRs.map((kr, krIdx) => {
-                        const krBiiColor = getBIIColor(kr.biiType);
-                        const categoryColor = getKPICategoryColor(kr.kpiCategory);
-                        const isEditing = editingKRId === kr.id;
-
-                        return (
-                          <div
-                            key={kr.id}
-                            className={`border rounded-xl transition-all ${
-                              isEditing ? 'border-blue-300 bg-blue-50/30' : 'border-slate-100 bg-slate-50/50 hover:border-slate-200'
-                            }`}
-                          >
-                            {/* KR 헤더 (항상 표시) */}
-                            <div className="flex items-center gap-3 px-4 py-3">
-                              <span className="text-xs font-bold text-blue-500 w-7 flex-shrink-0">
-                                KR{krIdx + 1}
-                              </span>
-                              
-                              {isEditing ? (
-                                <input
-                                  type="text"
-                                  value={kr.name}
-                                  onChange={(e) => handleKRChange(kr.id, 'name', e.target.value)}
-                                  className="flex-1 px-2 py-1 border border-blue-300 rounded text-sm font-medium focus:ring-2 focus:ring-blue-500 outline-none"
-                                />
-                              ) : (
-                                <span className="flex-1 text-sm font-medium text-slate-800 min-w-0 truncate">
-                                  {kr.name}
-                                </span>
-                              )}
-
-                              <div className="flex items-center gap-2 flex-shrink-0">
-
-                                {isEditing ? (
-                                  <button
-                                    onClick={() => setEditingKRId(null)}
-                                    className="p-1 text-green-600 hover:bg-green-100 rounded"
-                                    title="완료"
-                                  >
-                                    <Check className="w-3.5 h-3.5" />
-                                  </button>
-                                ) : (
-                                  <button
-                                    onClick={() => setEditingKRId(kr.id)}
-                                    className="p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded"
-                                    title="수정"
-                                  >
-                                    <Pencil className="w-3.5 h-3.5" />
-                                  </button>
-                                )}
-                                <button
-                                  onClick={() => setKrs(krs.filter(k => k.id !== kr.id))}
-                                  className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded"
-                                  title="삭제"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              </div>
-                            </div>
-
-                            {/* KR 상세 (편집 모드일 때 - 이름/정의만) */}
-                            {isEditing && (
-                              <div className="px-4 pb-3 pt-1 space-y-2 border-t border-blue-200">
-                                <div>
-                                  <label className="block text-xs text-slate-500 mb-1">정의</label>
-                                  <input
-                                    type="text"
-                                    value={kr.definition}
-                                    onChange={(e) => handleKRChange(kr.id, 'definition', e.target.value)}
-                                    className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm"
-                                    placeholder="이 KR이 측정하는 것을 한 문장으로"
-                                  />
-                                </div>
-                                <div>
-                                  <label className="block text-xs text-slate-500 mb-1">산식</label>
-                                  <input
-                                    type="text"
-                                    value={kr.formula}
-                                    onChange={(e) => handleKRChange(kr.id, 'formula', e.target.value)}
-                                    className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm"
-                                    placeholder="측정 산식 (예: 매출액 / 목표 × 100)"
-                                  />
-                                </div>
-                                <p className="text-xs text-slate-400">💡 목표값·단위·등급구간은 다음 단계(목표치설정)에서 설정합니다</p>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })
-                    )}
-
-                    {/* Objective 내 액션 바 */}
-                    <div className="flex items-center gap-2 pt-1">
-                      <button
-                        onClick={() => {
-                          setSelectedObjectiveTab(obj.id);
-                          handleAddKR();
-                        }}
-                        className="flex-1 border border-dashed border-slate-300 rounded-lg py-2 text-xs text-slate-500 hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50/30 transition-colors flex items-center justify-center gap-1"
-                      >
-                        <Plus className="w-3 h-3" /> KR 추가
-                      </button>
-                      <button
-                        onClick={() => {
-                          if (aiRegenObjId === obj.id) {
-                            setAiRegenObjId(null);
-                            setAiRegenContext('');
-                          } else {
-                            setAiRegenObjId(obj.id);
-                            setAiRegenContext('');
-                          }
-                        }}
-                        disabled={aiRegeneratingObjId === obj.id}
-                        className="px-3 py-2 border border-slate-200 text-slate-600 rounded-lg hover:bg-blue-50 hover:border-blue-300 hover:text-blue-700 text-xs font-medium flex items-center gap-1.5 transition-colors disabled:opacity-50"
-                      >
-                        <RefreshCw className={`w-3 h-3 ${aiRegeneratingObjId === obj.id ? 'animate-spin' : ''}`} />
-                        {aiRegeneratingObjId === obj.id ? '생성 중...' : 'AI KR'}
-                      </button>
-                      <button
-                        onClick={() => handleOpenPoolModal(obj.id)}
-                        className="px-3 py-2 border border-slate-200 text-slate-600 rounded-lg hover:bg-violet-50 hover:border-violet-300 hover:text-violet-700 text-xs font-medium flex items-center gap-1.5 transition-colors"
-                      >
-                        <Database className="w-3 h-3" /> Pool
-                      </button>
-                    </div>
-
-                    {/* AI 재생성 컨텍스트 입력 패널 */}
-                    {aiRegenObjId === obj.id && (
-                      <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 space-y-2 mt-1">
-                        <div className="flex items-center gap-2">
-                          <Sparkles className="w-3.5 h-3.5 text-blue-600" />
-                          <span className="text-xs font-medium text-blue-800">AI에게 KR 재생성 요청</span>
-                        </div>
-                        <textarea
-                          value={aiRegenContext}
-                          onChange={(e) => setAiRegenContext(e.target.value)}
-                          placeholder={`예: "${parentObjectives.find(po => po.id === obj.parentObjId)?.name || '상위 목표'}"와 더 잘 맞는 KR로 변경해줘`}
-                          className="w-full border border-blue-200 rounded-lg px-3 py-2 text-sm resize-none focus:ring-2 focus:ring-blue-400 outline-none bg-white"
-                          rows={2}
-                        />
-                        <div className="flex items-center justify-between">
-                          <p className="text-xs text-blue-500">⚠ 기존 KR이 모두 새로 생성된 KR로 대체됩니다</p>
-                          <div className="flex gap-2">
-                            <button
-                              onClick={() => { setAiRegenObjId(null); setAiRegenContext(''); }}
-                              className="px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
-                            >
-                              취소
-                            </button>
-                            <button
-                              onClick={() => handleAIRegenerateKRs(obj.id, aiRegenContext)}
-                              disabled={aiRegeneratingObjId === obj.id}
-                              className="px-4 py-1.5 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center gap-1.5"
-                            >
-                              <RefreshCw className={`w-3 h-3 ${aiRegeneratingObjId === obj.id ? 'animate-spin' : ''}`} />
-                              재생성
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* KR 개수 표시 */}
-                    {objKRs.length > 0 && (
-                      <div className="flex items-center px-1 pt-1">
-                        <span className="text-xs text-slate-400">{objKRs.length}개 KR</span>
-                      </div>
-                    )}
-                  </div>
+              const biiColor = getBIIColor(obj.biiType); const parentObj = parentObjectives.find(po => po.id === obj.parentObjId); const objKRs = krs.filter(kr => kr.objectiveId === obj.id && kr.selected !== false);
+              return (<div key={obj.id} className="border border-slate-200 rounded-2xl overflow-hidden bg-white shadow-sm">
+                {parentObj && (<div className="bg-gradient-to-r from-violet-50 to-indigo-50 border-b border-violet-200 px-5 py-3"><div className="flex items-center gap-2"><GitBranch className="w-3.5 h-3.5 text-violet-500" /><span className="text-xs font-medium text-violet-600">상위 목표 연결</span><span className="text-xs text-violet-400">|</span><span className="text-xs bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded font-medium">{parentObj.orgLevel}</span><span className="text-xs text-violet-600 font-medium">{parentObj.orgName}</span></div><div className="flex items-center gap-2 mt-1.5"><span className={`px-1.5 py-0.5 rounded text-xs font-medium ${getBIIColor(parentObj.biiType as BIIType).bg} ${getBIIColor(parentObj.biiType as BIIType).text}`}>{parentObj.biiType}</span><span className="text-sm text-violet-900">{parentObj.name}</span></div></div>)}
+                <div className="px-5 pt-4 pb-3"><div className="flex items-start gap-3"><div className="w-8 h-8 rounded-lg bg-slate-900 text-white flex items-center justify-center text-sm font-bold flex-shrink-0">O{objIdx + 1}</div><div><h3 className="font-bold text-slate-900 text-base leading-snug">{obj.name}</h3><div className="flex items-center gap-2 mt-1.5"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${biiColor.bg} ${biiColor.text}`}>{obj.biiType}</span><span className="text-xs text-slate-500">{obj.perspective} 관점</span></div></div></div></div>
+                <div className="px-5 pb-4 space-y-2">
+                  {objKRs.length === 0 ? (<div className="bg-slate-50 rounded-lg p-4 text-center"><p className="text-sm text-slate-400">KR이 없습니다</p><button onClick={() => { setSelectedObjectiveTab(obj.id); handleAddKR(); }} className="mt-2 text-xs text-blue-600 hover:underline">+ KR 추가</button></div>)
+                  : objKRs.map((kr, krIdx) => { const isEditing = editingKRId === kr.id; return (<div key={kr.id} className={`border rounded-xl transition-all ${isEditing ? 'border-blue-300 bg-blue-50/30' : 'border-slate-100 bg-slate-50/50 hover:border-slate-200'}`}><div className="flex items-center gap-3 px-4 py-3"><span className="text-xs font-bold text-blue-500 w-7 flex-shrink-0">KR{krIdx + 1}</span>{isEditing ? <input type="text" value={kr.name} onChange={(e) => handleKRChange(kr.id, 'name', e.target.value)} className="flex-1 px-2 py-1 border border-blue-300 rounded text-sm font-medium focus:ring-2 focus:ring-blue-500 outline-none" /> : <span className="flex-1 text-sm font-medium text-slate-800 min-w-0 truncate">{kr.name}</span>}<div className="flex items-center gap-2 flex-shrink-0">{isEditing ? <button onClick={() => setEditingKRId(null)} className="p-1 text-green-600 hover:bg-green-100 rounded" title="완료"><Check className="w-3.5 h-3.5" /></button> : <button onClick={() => setEditingKRId(kr.id)} className="p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded" title="수정"><Pencil className="w-3.5 h-3.5" /></button>}<button onClick={() => setKrs(krs.filter(k => k.id !== kr.id))} className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded" title="삭제"><Trash2 className="w-3.5 h-3.5" /></button></div></div>{isEditing && (<div className="px-4 pb-3 pt-1 space-y-2 border-t border-blue-200"><div><label className="block text-xs text-slate-500 mb-1">정의</label><input type="text" value={kr.definition} onChange={(e) => handleKRChange(kr.id, 'definition', e.target.value)} className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm" placeholder="이 KR이 측정하는 것을 한 문장으로" /></div><div><label className="block text-xs text-slate-500 mb-1">산식</label><input type="text" value={kr.formula} onChange={(e) => handleKRChange(kr.id, 'formula', e.target.value)} className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm" placeholder="측정 산식 (예: 매출액 / 목표 × 100)" /></div><p className="text-xs text-slate-400">💡 목표값·단위·등급구간은 다음 단계(목표치설정)에서 설정합니다</p></div>)}</div>); })}
+                  <div className="flex items-center gap-2 pt-1"><button onClick={() => { setSelectedObjectiveTab(obj.id); handleAddKR(); }} className="flex-1 border border-dashed border-slate-300 rounded-lg py-2 text-xs text-slate-500 hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50/30 transition-colors flex items-center justify-center gap-1"><Plus className="w-3 h-3" /> KR 추가</button><button onClick={() => { if (aiRegenObjId === obj.id) { setAiRegenObjId(null); setAiRegenContext(''); } else { setAiRegenObjId(obj.id); setAiRegenContext(''); } }} disabled={aiRegeneratingObjId === obj.id} className="px-3 py-2 border border-slate-200 text-slate-600 rounded-lg hover:bg-blue-50 hover:border-blue-300 hover:text-blue-700 text-xs font-medium flex items-center gap-1.5 transition-colors disabled:opacity-50"><RefreshCw className={`w-3 h-3 ${aiRegeneratingObjId === obj.id ? 'animate-spin' : ''}`} />{aiRegeneratingObjId === obj.id ? '생성 중...' : 'AI KR'}</button><button onClick={() => handleOpenPoolModal(obj.id)} className="px-3 py-2 border border-slate-200 text-slate-600 rounded-lg hover:bg-violet-50 hover:border-violet-300 hover:text-violet-700 text-xs font-medium flex items-center gap-1.5 transition-colors"><Database className="w-3 h-3" /> Pool</button></div>
+                  {aiRegenObjId === obj.id && (<div className="bg-blue-50 border border-blue-200 rounded-xl p-3 space-y-2 mt-1"><div className="flex items-center gap-2"><Sparkles className="w-3.5 h-3.5 text-blue-600" /><span className="text-xs font-medium text-blue-800">AI에게 KR 재생성 요청</span></div><textarea value={aiRegenContext} onChange={(e) => setAiRegenContext(e.target.value)} placeholder="원하는 방향을 입력하세요" className="w-full border border-blue-200 rounded-lg px-3 py-2 text-sm resize-none focus:ring-2 focus:ring-blue-400 outline-none bg-white" rows={2} /><div className="flex items-center justify-between"><p className="text-xs text-blue-500">⚠ 기존 KR이 모두 새로 생성된 KR로 대체됩니다</p><div className="flex gap-2"><button onClick={() => { setAiRegenObjId(null); setAiRegenContext(''); }} className="px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">취소</button><button onClick={() => handleAIRegenerateKRs(obj.id, aiRegenContext)} disabled={aiRegeneratingObjId === obj.id} className="px-4 py-1.5 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center gap-1.5"><RefreshCw className={`w-3 h-3 ${aiRegeneratingObjId === obj.id ? 'animate-spin' : ''}`} />재생성</button></div></div></div>)}
+                  {objKRs.length > 0 && <div className="flex items-center px-1 pt-1"><span className="text-xs text-slate-400">{objKRs.length}개 KR</span></div>}
                 </div>
-              );
+              </div>);
             })}
-
           </div>
         )}
 
-        {/* Step 3: 목표치 설정 */}
+        {/* ★ Step 3: 목표치 설정 — [FIX-4] kpiCategory 선택 추가 */}
         {currentStep === 3 && (
           <div className="space-y-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-xl font-bold text-slate-900">목표치 설정</h2>
-                <p className="text-slate-500 text-sm mt-1">각 KR의 측정 방식과 목표값, 등급 기준을 설정합니다.</p>
-              </div>
-            </div>
-
+            <div className="flex items-center justify-between"><div><h2 className="text-xl font-bold text-slate-900">목표치 설정</h2><p className="text-slate-500 text-sm mt-1">각 KR의 측정 방식과 목표값, 등급 기준을 설정합니다.</p></div></div>
             {objectives.filter(o => o.selected).map((obj, objIdx) => {
-              const biiColor = getBIIColor(obj.biiType);
-              const objKRs = krs.filter(kr => kr.objectiveId === obj.id && kr.selected !== false);
-
-              return (
-                <div key={obj.id} className="border border-slate-200 rounded-2xl overflow-hidden bg-white shadow-sm">
-                  {/* Objective 헤더 */}
-                  <div className="bg-gradient-to-r from-slate-50 to-slate-100 border-b border-slate-200 px-5 py-3 flex items-center gap-3">
-                    <div className="w-7 h-7 rounded-lg bg-slate-900 text-white flex items-center justify-center text-xs font-bold flex-shrink-0">
-                      <i className="not-italic font-serif">O</i>{objIdx + 1}
-                    </div>
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${biiColor.bg} ${biiColor.text}`}>
-                      {obj.biiType}
-                    </span>
-                    <span className="text-sm font-semibold text-slate-900 truncate">{obj.name}</span>
-                    <span className="text-xs text-slate-400 ml-auto">{objKRs.length}개 KR</span>
-                  </div>
-
-                  {/* KR 목표치 리스트 */}
-                  <div className="divide-y divide-slate-100">
-                    {objKRs.map((kr, krIdx) => (
-                      <div key={kr.id} className="px-5 py-5 hover:bg-slate-50/30 transition-colors">
-                        
-                        {/* KR 제목 영역 */}
-                        <div className="flex items-start gap-2.5 mb-4">
-                          <span className="text-xs font-bold text-blue-500 bg-blue-50 px-2 py-1 rounded-md mt-0.5 flex-shrink-0">
-                            KR{krIdx + 1}
-                          </span>
-                          <div>
-                            <h4 className="text-sm font-semibold text-slate-900 leading-snug">{kr.name}</h4>
-                            {kr.definition && (
-                              <p className="text-xs text-slate-400 mt-1 leading-relaxed">{kr.definition}</p>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* 측정 설정 카드 */}
-                        <div className="bg-slate-50/80 rounded-xl p-4 space-y-4">
-                          
-                          {/* 1행: 목표값+단위 (강조) | 유형·주기·관점 (보조) */}
-                          <div className="flex gap-4">
-                            <div className="w-36">
-                              <label className="block text-xs font-medium text-slate-600 mb-1.5">목표값</label>
-                              <input
-                                type="number"
-                                value={kr.targetValue}
-                                onChange={(e) => handleKRChange(kr.id, 'targetValue', parseInt(e.target.value) || 0)}
-                                className="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-base font-bold text-slate-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white"
-                              />
-                            </div>
-                            <div className="w-24">
-                              <label className="block text-xs font-medium text-slate-600 mb-1.5">단위</label>
-                              <input
-                                type="text"
-                                value={kr.unit}
-                                onChange={(e) => handleKRChange(kr.id, 'unit', e.target.value)}
-                                className="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-center font-medium focus:ring-2 focus:ring-blue-500 outline-none bg-white"
-                              />
-                            </div>
-                            <div className="w-px bg-slate-200 self-stretch my-1" />
-                            <div className="flex-1 grid grid-cols-3 gap-3">
-                              <div>
-                                <label className="block text-xs font-medium text-slate-600 mb-1.5">지표 유형</label>
-                                <select
-                                  value={kr.indicatorType}
-                                  onChange={(e) => handleKRChange(kr.id, 'indicatorType', e.target.value)}
-                                  className="w-full border border-slate-200 rounded-lg px-2.5 py-2.5 text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none"
-                                >
-                                  <option>투입</option><option>과정</option><option>산출</option><option>결과</option>
-                                </select>
-                              </div>
-                              <div>
-                                <label className="block text-xs font-medium text-slate-600 mb-1.5">측정 주기</label>
-                                <select
-                                  value={kr.measurementCycle}
-                                  onChange={(e) => handleKRChange(kr.id, 'measurementCycle', e.target.value)}
-                                  className="w-full border border-slate-200 rounded-lg px-2.5 py-2.5 text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none"
-                                >
-                                  <option>월</option><option>분기</option><option>반기</option><option>연</option>
-                                </select>
-                              </div>
-                              <div>
-                                <label className="block text-xs font-medium text-slate-600 mb-1.5">BSC 관점</label>
-                                <select
-                                  value={kr.perspective}
-                                  onChange={(e) => handleKRChange(kr.id, 'perspective', e.target.value)}
-                                  className="w-full border border-slate-200 rounded-lg px-2.5 py-2.5 text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none"
-                                >
-                                  <option>재무</option><option>고객</option><option>프로세스</option><option>학습성장</option>
-                                </select>
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* 2행: 등급 구간 */}
-                          <div>
-                            <div className="flex items-center justify-between mb-2">
-                              <label className="text-xs font-medium text-slate-600">등급 구간</label>
-                              <span className="text-xs text-slate-400">목표 대비 달성률 기준 ({kr.unit})</span>
-                            </div>
-                            
-                            <div className="flex gap-1.5">
-                              {([
-                                { grade: 'S' as const, color: 'from-blue-500 to-blue-600', border: 'border-blue-300', bg: 'bg-blue-50', text: 'text-blue-700', ring: 'focus:ring-blue-400' },
-                                { grade: 'A' as const, color: 'from-emerald-500 to-emerald-600', border: 'border-emerald-300', bg: 'bg-emerald-50', text: 'text-emerald-700', ring: 'focus:ring-emerald-400' },
-                                { grade: 'B' as const, color: 'from-slate-400 to-slate-500', border: 'border-slate-300', bg: 'bg-white', text: 'text-slate-700', ring: 'focus:ring-slate-400' },
-                                { grade: 'C' as const, color: 'from-amber-400 to-amber-500', border: 'border-amber-300', bg: 'bg-amber-50', text: 'text-amber-700', ring: 'focus:ring-amber-400' },
-                                { grade: 'D' as const, color: 'from-red-400 to-red-500', border: 'border-red-300', bg: 'bg-red-50', text: 'text-red-700', ring: 'focus:ring-red-400' },
-                              ]).map(({ grade, color, border, bg, text, ring }) => (
-                                <div key={grade} className="flex-1">
-                                  <div className="flex items-center gap-1.5 mb-1.5">
-                                    <div className={`w-3 h-3 rounded-full bg-gradient-to-br ${color} shadow-sm`} />
-                                    <span className={`text-xs font-bold ${text}`}>{grade}</span>
-                                    <span className="text-xs text-slate-400">
-                                      {grade === 'S' ? '≥' : grade === 'D' ? '<C' : '≥'}
-                                    </span>
-                                  </div>
-                                  <input
-                                    type="number"
-                                    value={kr.gradeCriteria[grade]}
-                                    onChange={(e) => {
-                                      const val = parseInt(e.target.value) || 0;
-                                      setKrs(prev => prev.map(k =>
-                                        k.id === kr.id ? { ...k, gradeCriteria: { ...k.gradeCriteria, [grade]: val } } : k
-                                      ));
-                                    }}
-                                    className={`w-full ${border} ${bg} border rounded-lg px-2.5 py-2 text-sm text-center font-semibold ${text} ${ring} focus:ring-2 outline-none transition-shadow`}
-                                  />
-                                </div>
-                              ))}
-                            </div>
-
-                          </div>
+              const biiColor = getBIIColor(obj.biiType); const objKRs = krs.filter(kr => kr.objectiveId === obj.id && kr.selected !== false);
+              return (<div key={obj.id} className="border border-slate-200 rounded-2xl overflow-hidden bg-white shadow-sm">
+                <div className="bg-gradient-to-r from-slate-50 to-slate-100 border-b border-slate-200 px-5 py-3 flex items-center gap-3"><div className="w-7 h-7 rounded-lg bg-slate-900 text-white flex items-center justify-center text-xs font-bold">O{objIdx + 1}</div><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${biiColor.bg} ${biiColor.text}`}>{obj.biiType}</span><span className="text-sm font-semibold text-slate-900 truncate">{obj.name}</span><span className="text-xs text-slate-400 ml-auto">{objKRs.length}개 KR</span></div>
+                <div className="divide-y divide-slate-100">{objKRs.map((kr, krIdx) => (
+                  <div key={kr.id} className="px-5 py-5 hover:bg-slate-50/30 transition-colors">
+                    <div className="flex items-start gap-2.5 mb-4"><span className="text-xs font-bold text-blue-500 bg-blue-50 px-2 py-1 rounded-md mt-0.5 flex-shrink-0">KR{krIdx + 1}</span><div><h4 className="text-sm font-semibold text-slate-900 leading-snug">{kr.name}</h4>{kr.definition && <p className="text-xs text-slate-400 mt-1 leading-relaxed">{kr.definition}</p>}</div></div>
+                    <div className="bg-slate-50/80 rounded-xl p-4 space-y-4">
+                      <div className="flex gap-4">
+                        <div className="w-36"><label className="block text-xs font-medium text-slate-600 mb-1.5">목표값</label><input type="number" value={kr.targetValue} onChange={(e) => handleKRChange(kr.id, 'targetValue', parseInt(e.target.value) || 0)} className="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-base font-bold text-slate-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white" /></div>
+                        <div className="w-24"><label className="block text-xs font-medium text-slate-600 mb-1.5">단위</label><input type="text" value={kr.unit} onChange={(e) => handleKRChange(kr.id, 'unit', e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-center font-medium focus:ring-2 focus:ring-blue-500 outline-none bg-white" /></div>
+                        <div className="w-px bg-slate-200 self-stretch my-1" />
+                        {/* [FIX-4] grid-cols-4: 기존 3개 + KPI유형 */}
+                        <div className="flex-1 grid grid-cols-4 gap-3">
+                          <div><label className="block text-xs font-medium text-slate-600 mb-1.5">지표 유형</label><select value={kr.indicatorType} onChange={(e) => handleKRChange(kr.id, 'indicatorType', e.target.value)} className="w-full border border-slate-200 rounded-lg px-2.5 py-2.5 text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none"><option>투입</option><option>과정</option><option>산출</option><option>결과</option></select></div>
+                          <div><label className="block text-xs font-medium text-slate-600 mb-1.5">측정 주기</label><select value={kr.measurementCycle} onChange={(e) => handleKRChange(kr.id, 'measurementCycle', e.target.value)} className="w-full border border-slate-200 rounded-lg px-2.5 py-2.5 text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none"><option>월</option><option>분기</option><option>반기</option><option>연</option></select></div>
+                          <div><label className="block text-xs font-medium text-slate-600 mb-1.5">BSC 관점</label><select value={kr.perspective} onChange={(e) => handleKRChange(kr.id, 'perspective', e.target.value)} className="w-full border border-slate-200 rounded-lg px-2.5 py-2.5 text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none"><option>재무</option><option>고객</option><option>프로세스</option><option>학습성장</option></select></div>
+                          <div><label className="block text-xs font-medium text-slate-600 mb-1.5">KPI 유형</label><select value={kr.kpiCategory} onChange={(e) => handleKRChange(kr.id, 'kpiCategory', e.target.value)} className="w-full border border-slate-200 rounded-lg px-2.5 py-2.5 text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none"><option>전략</option><option>고유업무</option><option>공통</option></select></div>
                         </div>
                       </div>
-                    ))}
+                      <div>
+                        <div className="flex items-center justify-between mb-2"><label className="text-xs font-medium text-slate-600">등급 구간</label><span className="text-xs text-slate-400">목표 대비 달성률 기준 ({kr.unit})</span></div>
+                        <div className="flex gap-1.5">{([{ grade: 'S' as const, color: 'from-blue-500 to-blue-600', border: 'border-blue-300', bg: 'bg-blue-50', text: 'text-blue-700', ring: 'focus:ring-blue-400' },{ grade: 'A' as const, color: 'from-emerald-500 to-emerald-600', border: 'border-emerald-300', bg: 'bg-emerald-50', text: 'text-emerald-700', ring: 'focus:ring-emerald-400' },{ grade: 'B' as const, color: 'from-slate-400 to-slate-500', border: 'border-slate-300', bg: 'bg-white', text: 'text-slate-700', ring: 'focus:ring-slate-400' },{ grade: 'C' as const, color: 'from-amber-400 to-amber-500', border: 'border-amber-300', bg: 'bg-amber-50', text: 'text-amber-700', ring: 'focus:ring-amber-400' },{ grade: 'D' as const, color: 'from-red-400 to-red-500', border: 'border-red-300', bg: 'bg-red-50', text: 'text-red-700', ring: 'focus:ring-red-400' }]).map(({ grade, color, border, bg, text, ring }) => (<div key={grade} className="flex-1"><div className="flex items-center gap-1.5 mb-1.5"><div className={`w-3 h-3 rounded-full bg-gradient-to-br ${color} shadow-sm`} /><span className={`text-xs font-bold ${text}`}>{grade}</span></div><input type="number" value={kr.gradeCriteria[grade]} onChange={(e) => { const val = parseInt(e.target.value) || 0; setKrs(prev => prev.map(k => k.id === kr.id ? { ...k, gradeCriteria: { ...k.gradeCriteria, [grade]: val } } : k)); }} className={`w-full ${border} ${bg} border rounded-lg px-2.5 py-2 text-sm text-center font-semibold ${text} ${ring} focus:ring-2 outline-none transition-shadow`} /></div>))}</div>
+                      </div>
+                    </div>
                   </div>
-                </div>
-              );
+                ))}</div>
+              </div>);
             })}
           </div>
         )}
 
         {/* Step 4: 가중치 설정 */}
         {currentStep === 4 && (() => {
-          const selectedObjs = objectives.filter(o => o.selected);
-          const activeKRs = krs.filter(kr => kr.selected !== false);
-          const objWeightMap = selectedObjs.map(obj => {
-            const objKRs = activeKRs.filter(kr => kr.objectiveId === obj.id);
-            const sum = objKRs.reduce((s, k) => s + k.weight, 0);
-            return { objId: obj.id, objName: obj.name, sum, valid: sum === 100, krCount: objKRs.length };
-          });
+          const selectedObjs = objectives.filter(o => o.selected); const activeKRs = krs.filter(kr => kr.selected !== false);
+          const objWeightMap = selectedObjs.map(obj => { const ok = activeKRs.filter(kr => kr.objectiveId === obj.id); const sum = ok.reduce((s, k) => s + k.weight, 0); return { objId: obj.id, objName: obj.name, sum, valid: sum === 100, krCount: ok.length }; });
           const allValid = objWeightMap.every(o => o.valid);
-
-          return (
-          <div className="space-y-6">
-            <h2 className="text-xl font-bold text-slate-900">가중치 설정</h2>
-            <p className="text-slate-600 text-sm">각 Objective 내 KR 가중치를 합계 100%로 배분합니다.</p>
-
-            <div className="flex justify-end">
-              <button
-                onClick={() => {
-                  const selObjs = objectives.filter(o => o.selected);
-                  setKrs(prev => {
-                    const next = [...prev];
-                    selObjs.forEach(obj => {
-                      const objKRIds = next.filter(kr => kr.objectiveId === obj.id && kr.selected !== false).map(kr => kr.id);
-                      const count = objKRIds.length;
-                      if (count === 0) return;
-                      const base = Math.floor(100 / count);
-                      const remainder = 100 - base * count;
-                      let idx = 0;
-                      for (let i = 0; i < next.length; i++) {
-                        if (objKRIds.includes(next[i].id)) {
-                          next[i] = { ...next[i], weight: base + (idx < remainder ? 1 : 0) };
-                          idx++;
-                        }
-                      }
-                    });
-                    return next;
-                  });
-                }}
-                className="px-3 py-1.5 border border-blue-300 text-blue-700 bg-blue-50 rounded-lg text-xs font-medium hover:bg-blue-100"
-              >
-                🔄 전체 균등배분
-              </button>
-            </div>
-
-            <div className="space-y-5">
-              {selectedObjs.map((obj, objIdx) => {
-                const objKRs = activeKRs.filter(kr => kr.objectiveId === obj.id);
-                const info = objWeightMap.find(o => o.objId === obj.id)!;
-                const biiColor = getBIIColor(obj.biiType);
-
-                return (
-                  <div key={obj.id} className={`border rounded-2xl overflow-hidden ${info.valid ? 'border-slate-200' : 'border-red-300'}`}>
-                    <div className={`px-5 py-3 flex items-center justify-between ${info.valid ? 'bg-slate-50' : 'bg-red-50'}`}>
-                      <div className="flex items-center gap-2">
-                        <div className="w-7 h-7 rounded-lg bg-slate-900 text-white flex items-center justify-center text-xs font-bold"><i className="not-italic font-serif">O</i>{objIdx + 1}</div>
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${biiColor.bg} ${biiColor.text}`}>{obj.biiType}</span>
-                        <span className="font-medium text-slate-900 text-sm truncate">{obj.name}</span>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <span className={`text-sm font-bold ${info.valid ? 'text-green-600' : 'text-red-600'}`}>
-                          {info.sum}% {info.valid ? '✅' : '❌'}
-                        </span>
-                        <button
-                          onClick={() => {
-                            setKrs(prev => {
-                              const next = [...prev];
-                              const objKRIds = next.filter(kr => kr.objectiveId === obj.id && kr.selected !== false).map(kr => kr.id);
-                              const count = objKRIds.length;
-                              if (count === 0) return next;
-                              const base = Math.floor(100 / count);
-                              const remainder = 100 - base * count;
-                              let idx = 0;
-                              for (let i = 0; i < next.length; i++) {
-                                if (objKRIds.includes(next[i].id)) {
-                                  next[i] = { ...next[i], weight: base + (idx < remainder ? 1 : 0) };
-                                  idx++;
-                                }
-                              }
-                              return next;
-                            });
-                          }}
-                          className="px-2 py-1 text-xs text-blue-600 hover:bg-blue-50 rounded"
-                        >균등</button>
-                      </div>
-                    </div>
-
-                    <div className="p-5 space-y-3">
-                      {objKRs.map((kr, krIdx) => (
-                        <div key={kr.id} className="flex items-center gap-4">
-                          <span className="text-xs font-bold text-blue-400 w-8 flex-shrink-0">KR{krIdx + 1}</span>
-                          <span className="text-sm text-slate-700 flex-1 min-w-0 truncate">{kr.name}</span>
-                          <div className="flex items-center gap-2 flex-shrink-0">
-                            <input
-                              type="range" min={0} max={100} step={5} value={kr.weight}
-                              onChange={(e) => setKrs(prev => prev.map(k => k.id === kr.id ? { ...k, weight: parseInt(e.target.value) } : k))}
-                              className="w-28 accent-blue-600"
-                            />
-                            <input
-                              type="number" min={0} max={100} value={kr.weight}
-                              onChange={(e) => setKrs(prev => prev.map(k => k.id === kr.id ? { ...k, weight: Math.max(0, Math.min(100, parseInt(e.target.value) || 0)) } : k))}
-                              className="w-14 text-center border border-slate-300 rounded py-1 text-sm font-medium"
-                            />
-                            <span className="text-xs text-slate-500">%</span>
-                          </div>
-                        </div>
-                      ))}
-                      {/* 시각적 바 */}
-                      {objKRs.length > 0 && (
-                        <div className="h-2 bg-slate-100 rounded-full overflow-hidden flex mt-2">
-                          {objKRs.map((kr, i) => {
-                            const colors = ['bg-blue-500', 'bg-emerald-500', 'bg-amber-500', 'bg-violet-500', 'bg-rose-500', 'bg-cyan-500'];
-                            return kr.weight > 0 ? (
-                              <div key={kr.id} className={`${colors[i % colors.length]} transition-all`} style={{ width: `${kr.weight}%` }} title={`${kr.name}: ${kr.weight}%`} />
-                            ) : null;
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            {!allValid && (
-              <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-                <p className="text-sm font-medium text-red-700 mb-1">⚠️ 가중치가 100%가 아닌 목표가 있습니다</p>
-                {objWeightMap.filter(o => !o.valid).map(o => (
-                  <p key={o.objId} className="text-xs text-red-600">• {o.objName}: {o.sum}%</p>
-                ))}
-              </div>
-            )}
-          </div>
-          );
+          return (<div className="space-y-6"><h2 className="text-xl font-bold text-slate-900">가중치 설정</h2><p className="text-slate-600 text-sm">각 Objective 내 KR 가중치를 합계 100%로 배분합니다.</p>
+            <div className="flex justify-end"><button onClick={() => { setKrs(prev => { const next = [...prev]; selectedObjs.forEach(obj => { const ids = next.filter(kr => kr.objectiveId === obj.id && kr.selected !== false).map(kr => kr.id); const cnt = ids.length; if (cnt === 0) return; const base = Math.floor(100 / cnt); const rem = 100 - base * cnt; let idx = 0; for (let i = 0; i < next.length; i++) { if (ids.includes(next[i].id)) { next[i] = { ...next[i], weight: base + (idx < rem ? 1 : 0) }; idx++; } } }); return next; }); }} className="px-3 py-1.5 border border-blue-300 text-blue-700 bg-blue-50 rounded-lg text-xs font-medium hover:bg-blue-100">🔄 전체 균등배분</button></div>
+            <div className="space-y-5">{selectedObjs.map((obj, objIdx) => { const objKRs = activeKRs.filter(kr => kr.objectiveId === obj.id); const info = objWeightMap.find(o => o.objId === obj.id)!; const biiColor = getBIIColor(obj.biiType);
+              return (<div key={obj.id} className={`border rounded-2xl overflow-hidden ${info.valid ? 'border-slate-200' : 'border-red-300'}`}>
+                <div className={`px-5 py-3 flex items-center justify-between ${info.valid ? 'bg-slate-50' : 'bg-red-50'}`}><div className="flex items-center gap-2"><div className="w-7 h-7 rounded-lg bg-slate-900 text-white flex items-center justify-center text-xs font-bold">O{objIdx + 1}</div><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${biiColor.bg} ${biiColor.text}`}>{obj.biiType}</span><span className="font-medium text-slate-900 text-sm truncate">{obj.name}</span></div><div className="flex items-center gap-3"><span className={`text-sm font-bold ${info.valid ? 'text-green-600' : 'text-red-600'}`}>{info.sum}% {info.valid ? '✅' : '❌'}</span><button onClick={() => { setKrs(prev => { const next = [...prev]; const ids = next.filter(kr => kr.objectiveId === obj.id && kr.selected !== false).map(kr => kr.id); const cnt = ids.length; if (cnt === 0) return next; const base = Math.floor(100 / cnt); const rem = 100 - base * cnt; let idx = 0; for (let i = 0; i < next.length; i++) { if (ids.includes(next[i].id)) { next[i] = { ...next[i], weight: base + (idx < rem ? 1 : 0) }; idx++; } } return next; }); }} className="px-2 py-1 text-xs text-blue-600 hover:bg-blue-50 rounded">균등</button></div></div>
+                <div className="p-5 space-y-3">{objKRs.map((kr, krIdx) => (<div key={kr.id} className="flex items-center gap-4"><span className="text-xs font-bold text-blue-400 w-8 flex-shrink-0">KR{krIdx + 1}</span><span className="text-sm text-slate-700 flex-1 min-w-0 truncate">{kr.name}</span><div className="flex items-center gap-2 flex-shrink-0"><input type="range" min={0} max={100} step={5} value={kr.weight} onChange={(e) => setKrs(prev => prev.map(k => k.id === kr.id ? { ...k, weight: parseInt(e.target.value) } : k))} className="w-28 accent-blue-600" /><input type="number" min={0} max={100} value={kr.weight} onChange={(e) => setKrs(prev => prev.map(k => k.id === kr.id ? { ...k, weight: Math.max(0, Math.min(100, parseInt(e.target.value) || 0)) } : k))} className="w-14 text-center border border-slate-300 rounded py-1 text-sm font-medium" /><span className="text-xs text-slate-500">%</span></div></div>))}{objKRs.length > 0 && (<div className="h-2 bg-slate-100 rounded-full overflow-hidden flex mt-2">{objKRs.map((kr, i) => { const colors = ['bg-blue-500', 'bg-emerald-500', 'bg-amber-500', 'bg-violet-500', 'bg-rose-500', 'bg-cyan-500']; return kr.weight > 0 ? (<div key={kr.id} className={`${colors[i % colors.length]} transition-all`} style={{ width: `${kr.weight}%` }} title={`${kr.name}: ${kr.weight}%`} />) : null; })}</div>)}</div>
+              </div>); })}</div>
+            {!allValid && <div className="bg-red-50 border border-red-200 rounded-lg p-4"><p className="text-sm font-medium text-red-700 mb-1">⚠️ 가중치가 100%가 아닌 목표가 있습니다</p>{objWeightMap.filter(o => !o.valid).map(o => <p key={o.objId} className="text-xs text-red-600">• {o.objName}: {o.sum}%</p>)}</div>}
+          </div>);
         })()}
 
         {/* Step 5: 분기별 목표 배분 */}
         {currentStep === 5 && (() => {
           const activeKRs = krs.filter(kr => kr.selected !== false);
-          return (
-          <div className="space-y-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-xl font-bold text-slate-900">분기별 목표 배분</h2>
-                <p className="text-slate-600 text-sm mt-1">각 KR의 연간 목표를 분기별로 배분합니다.</p>
-              </div>
-              <button
-                onClick={() => {
-                  setKrs(prev => prev.map(kr => ({
-                    ...kr,
-                    quarterlyTargets: {
-                      Q1: Math.round(kr.targetValue * 0.25),
-                      Q2: Math.round(kr.targetValue * 0.50),
-                      Q3: Math.round(kr.targetValue * 0.75),
-                      Q4: kr.targetValue
-                    }
-                  })));
-                }}
-                className="px-3 py-1.5 border border-blue-300 text-blue-700 bg-blue-50 rounded-lg text-xs font-medium hover:bg-blue-100"
-              >
-                📊 누적형 균등배분
-              </button>
-            </div>
-
-            {objectives.filter(o => o.selected).map((obj, objIdx) => {
-              const biiColor = getBIIColor(obj.biiType);
-              const objKRs = activeKRs.filter(kr => kr.objectiveId === obj.id);
-
-              return (
-                <div key={obj.id} className="border border-slate-200 rounded-2xl overflow-hidden bg-white">
-                  <div className="bg-slate-50 border-b border-slate-200 px-5 py-3 flex items-center gap-3">
-                    <div className="w-7 h-7 rounded-lg bg-slate-900 text-white flex items-center justify-center text-xs font-bold"><i className="not-italic font-serif">O</i>{objIdx + 1}</div>
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${biiColor.bg} ${biiColor.text}`}>{obj.biiType}</span>
-                    <span className="text-sm font-semibold text-slate-900 truncate">{obj.name}</span>
-                  </div>
-                  <div className="overflow-x-auto p-4">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="border-b border-slate-200">
-                          <th className="text-left py-2 pr-4 text-xs font-medium text-slate-500 w-[200px]">KR명</th>
-                          <th className="text-center py-2 px-2 text-xs font-medium text-slate-500 w-20">연간</th>
-                          <th className="text-center py-2 px-2 text-xs font-medium text-blue-600 w-20">Q1</th>
-                          <th className="text-center py-2 px-2 text-xs font-medium text-blue-600 w-20">Q2</th>
-                          <th className="text-center py-2 px-2 text-xs font-medium text-blue-600 w-20">Q3</th>
-                          <th className="text-center py-2 px-2 text-xs font-medium text-blue-600 w-20">Q4</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {objKRs.map((kr, krIdx) => (
-                          <tr key={kr.id}>
-                            <td className="py-2 pr-4">
-                              <div className="flex items-center gap-1.5">
-                                <span className="text-xs font-bold text-blue-400">KR{krIdx + 1}</span>
-                                <span className="text-slate-700 truncate">{kr.name}</span>
-                                <span className="text-xs text-slate-400">({kr.unit})</span>
-                              </div>
-                            </td>
-                            <td className="py-2 px-2 text-center font-semibold text-slate-900">{kr.targetValue.toLocaleString()}</td>
-                            {(['Q1', 'Q2', 'Q3', 'Q4'] as const).map(q => (
-                              <td key={q} className="py-2 px-1">
-                                <input
-                                  type="number"
-                                  value={kr.quarterlyTargets[q]}
-                                  onChange={(e) => {
-                                    const val = parseInt(e.target.value) || 0;
-                                    setKrs(prev => prev.map(k =>
-                                      k.id === kr.id ? { ...k, quarterlyTargets: { ...k.quarterlyTargets, [q]: val } } : k
-                                    ));
-                                  }}
-                                  className="w-full text-center border border-slate-200 rounded-lg py-1.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                                />
-                              </td>
-                            ))}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-          );
+          return (<div className="space-y-6">
+            <div className="flex items-center justify-between"><div><h2 className="text-xl font-bold text-slate-900">분기별 목표 배분</h2><p className="text-slate-600 text-sm mt-1">각 KR의 연간 목표를 분기별로 배분합니다.</p></div><button onClick={() => { setKrs(prev => prev.map(kr => ({ ...kr, quarterlyTargets: { Q1: Math.round(kr.targetValue * 0.25), Q2: Math.round(kr.targetValue * 0.50), Q3: Math.round(kr.targetValue * 0.75), Q4: kr.targetValue } }))); }} className="px-3 py-1.5 border border-blue-300 text-blue-700 bg-blue-50 rounded-lg text-xs font-medium hover:bg-blue-100">📊 누적형 균등배분</button></div>
+            {objectives.filter(o => o.selected).map((obj, objIdx) => { const biiColor = getBIIColor(obj.biiType); const objKRs = activeKRs.filter(kr => kr.objectiveId === obj.id);
+              return (<div key={obj.id} className="border border-slate-200 rounded-2xl overflow-hidden bg-white"><div className="bg-slate-50 border-b border-slate-200 px-5 py-3 flex items-center gap-3"><div className="w-7 h-7 rounded-lg bg-slate-900 text-white flex items-center justify-center text-xs font-bold">O{objIdx + 1}</div><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${biiColor.bg} ${biiColor.text}`}>{obj.biiType}</span><span className="text-sm font-semibold text-slate-900 truncate">{obj.name}</span></div>
+                <div className="overflow-x-auto p-4"><table className="w-full text-sm"><thead><tr className="border-b border-slate-200"><th className="text-left py-2 pr-4 text-xs font-medium text-slate-500 w-[200px]">KR명</th><th className="text-center py-2 px-2 text-xs font-medium text-slate-500 w-20">연간</th><th className="text-center py-2 px-2 text-xs font-medium text-blue-600 w-20">Q1</th><th className="text-center py-2 px-2 text-xs font-medium text-blue-600 w-20">Q2</th><th className="text-center py-2 px-2 text-xs font-medium text-blue-600 w-20">Q3</th><th className="text-center py-2 px-2 text-xs font-medium text-blue-600 w-20">Q4</th></tr></thead><tbody className="divide-y divide-slate-100">{objKRs.map((kr, krIdx) => (<tr key={kr.id}><td className="py-2 pr-4"><div className="flex items-center gap-1.5"><span className="text-xs font-bold text-blue-400">KR{krIdx + 1}</span><span className="text-slate-700 truncate">{kr.name}</span><span className="text-xs text-slate-400">({kr.unit})</span></div></td><td className="py-2 px-2 text-center font-semibold text-slate-900">{kr.targetValue.toLocaleString()}</td>{(['Q1', 'Q2', 'Q3', 'Q4'] as const).map(q => (<td key={q} className="py-2 px-1"><input type="number" value={kr.quarterlyTargets[q]} onChange={(e) => { const val = parseInt(e.target.value) || 0; setKrs(prev => prev.map(k => k.id === kr.id ? { ...k, quarterlyTargets: { ...k.quarterlyTargets, [q]: val } } : k)); }} className="w-full text-center border border-slate-200 rounded-lg py-1.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none" /></td>))}</tr>))}</tbody></table></div>
+              </div>); })}
+          </div>);
         })()}
 
-        {/* Step 6: 최종 확인 */}
+        {/* ★ Step 6: 최종 확인 — [FIX-5] 읽기 전용 (저장/리뷰 버튼 Step 7로 이동) */}
         {currentStep === 6 && (
           <div className="space-y-6">
-            <h2 className="text-xl font-bold text-slate-900">최종 확인 & 확정</h2>
+            <h2 className="text-xl font-bold text-slate-900">최종 확인</h2>
+            <p className="text-slate-500 text-sm">수립한 OKR을 종합 점검합니다. 수정이 필요하면 이전 단계로 돌아가세요.</p>
 
             <div className="grid grid-cols-4 gap-4">
-              <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-center">
-                <div className="text-sm text-green-600 mb-1">BII 밸런스</div>
-                <div className="text-xs text-green-700">
-                  B:{krs.filter(k => k.biiType === 'Build').length} I:{krs.filter(k => k.biiType === 'Innovate').length} Im:{krs.filter(k => k.biiType === 'Improve').length}
-                </div>
-              </div>
-              <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-center">
-                <div className="text-sm text-green-600 mb-1">가중치 검증</div>
-                <div className="text-xs text-green-700">
-                  {objectives.filter(o => o.selected).map(obj => {
-                    const sum = krs.filter(k => k.objectiveId === obj.id && k.selected !== false).reduce((s, k) => s + k.weight, 0);
-                    return `${obj.name.substring(0, 6)}:${sum}%`;
-                  }).join(' / ')} ✅
-                </div>
-              </div>
-              <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-center">
-                <div className="text-sm text-green-600 mb-1">Alignment</div>
-                <div className="text-xs text-green-700">수직 ✅ 수평 ✅</div>
-              </div>
-              <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-center">
-                <div className="text-sm text-green-600 mb-1">BII 체크리스트</div>
-                <div className="text-xs text-green-700">평균 10.2/12 ✅</div>
-              </div>
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-center"><div className="text-sm text-green-600 mb-1">목표 수</div><div className="text-lg font-bold text-green-700">{objectives.filter(o => o.selected).length}개</div></div>
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-center"><div className="text-sm text-blue-600 mb-1">KR 수</div><div className="text-lg font-bold text-blue-700">{krs.filter(k => k.selected !== false).length}개</div></div>
+              <div className="bg-violet-50 border border-violet-200 rounded-lg p-4 text-center"><div className="text-sm text-violet-600 mb-1">BII 밸런스</div><div className="text-xs text-violet-700 mt-1">B:{biiBalance.Build} I:{biiBalance.Innovate} Im:{biiBalance.Improve}</div></div>
+              <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4 text-center"><div className="text-sm text-emerald-600 mb-1">가중치 검증</div><div className="text-xs text-emerald-700 mt-1">{objectives.filter(o => o.selected).every(obj => krs.filter(k => k.objectiveId === obj.id && k.selected !== false).reduce((s, k) => s + k.weight, 0) === 100) ? '✅ 모두 100%' : '⚠️ 확인 필요'}</div></div>
             </div>
 
             <div className="border border-slate-200 rounded-xl overflow-hidden">
               <table className="w-full">
                 <thead className="bg-slate-50 border-b border-slate-200">
-                  <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-600 uppercase">목표</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-600 uppercase">KR</th>
-                    <th className="px-4 py-3 text-center text-xs font-medium text-slate-600 uppercase">가중치</th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-slate-600 uppercase">목표값</th>
-                    <th className="px-4 py-3 text-center text-xs font-medium text-slate-600 uppercase">등급구간</th>
-                    <th className="px-4 py-3 text-center text-xs font-medium text-slate-600 uppercase">BII</th>
-                    <th className="px-4 py-3 text-center text-xs font-medium text-slate-600 uppercase">유형</th>
-                  </tr>
+                  <tr><th className="px-4 py-3 text-left text-xs font-medium text-slate-600 uppercase">목표</th><th className="px-4 py-3 text-left text-xs font-medium text-slate-600 uppercase">KR</th><th className="px-4 py-3 text-center text-xs font-medium text-slate-600 uppercase">가중치</th><th className="px-4 py-3 text-right text-xs font-medium text-slate-600 uppercase">목표값</th><th className="px-4 py-3 text-center text-xs font-medium text-slate-600 uppercase">등급구간</th><th className="px-4 py-3 text-center text-xs font-medium text-slate-600 uppercase">BII</th><th className="px-4 py-3 text-center text-xs font-medium text-slate-600 uppercase">유형</th></tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200">
                   {objectives.filter(o => o.selected).map((obj) => {
                     const objKrs = krs.filter(kr => kr.objectiveId === obj.id && kr.selected !== false);
                     return objKrs.map((kr, idx) => {
-                      const biiColor = getBIIColor(kr.biiType);
-                      const categoryColor = getKPICategoryColor(kr.kpiCategory);
-                      return (
-                        <tr key={kr.id} className="hover:bg-slate-50">
-                          <td className="px-4 py-3 text-sm text-slate-700">
-                            {idx === 0 ? obj.name.substring(0, 20) + '...' : ''}
-                          </td>
-                          <td className="px-4 py-3">
-                            <div className="text-sm font-medium text-slate-900">{kr.name}</div>
-                            <div className="text-xs text-slate-500">{kr.definition.substring(0, 30)}...</div>
-                          </td>
-                          <td className="px-4 py-3 text-center">
-                            <span className="text-sm font-semibold text-slate-900">{kr.weight}%</span>
-                          </td>
-                          <td className="px-4 py-3 text-right">
-                            <span className="text-sm font-medium text-slate-900">{kr.targetValue.toLocaleString()}</span>
-                            <span className="text-xs text-slate-500 ml-1">{kr.unit}</span>
-                          </td>
-                          <td className="px-4 py-3 text-center">
-                            <div className="text-xs text-slate-600">
-                              <span className="text-blue-600">S:{kr.gradeCriteria.S}</span>
-                              <span className="mx-1">/</span>
-                              <span className="text-green-600">A:{kr.gradeCriteria.A}</span>
-                              <span className="mx-1">/</span>
-                              <span className="text-lime-600">B:{kr.gradeCriteria.B}</span>
-                            </div>
-                          </td>
-                          <td className="px-4 py-3 text-center">
-                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${biiColor.bg} ${biiColor.text}`}>
-                              {kr.biiType}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 text-center">
-                            <span className={`px-2 py-1 rounded text-xs font-medium border ${categoryColor}`}>
-                              {kr.kpiCategory}
-                            </span>
-                          </td>
-                        </tr>
-                      );
+                      const biiColor = getBIIColor(kr.biiType); const categoryColor = getKPICategoryColor(kr.kpiCategory);
+                      return (<tr key={kr.id} className="hover:bg-slate-50">
+                        <td className="px-4 py-3 text-sm text-slate-700">{idx === 0 ? (obj.name.length > 20 ? obj.name.substring(0, 20) + '...' : obj.name) : ''}</td>
+                        <td className="px-4 py-3"><div className="text-sm font-medium text-slate-900">{kr.name}</div><div className="text-xs text-slate-500">{kr.definition ? (kr.definition.length > 30 ? kr.definition.substring(0, 30) + '...' : kr.definition) : ''}</div></td>
+                        <td className="px-4 py-3 text-center"><span className="text-sm font-semibold text-slate-900">{kr.weight}%</span></td>
+                        <td className="px-4 py-3 text-right"><span className="text-sm font-medium text-slate-900">{kr.targetValue.toLocaleString()}</span><span className="text-xs text-slate-500 ml-1">{kr.unit}</span></td>
+                        <td className="px-4 py-3 text-center"><div className="text-xs text-slate-600"><span className="text-blue-600">S:{kr.gradeCriteria.S}</span><span className="mx-1">/</span><span className="text-green-600">A:{kr.gradeCriteria.A}</span><span className="mx-1">/</span><span>B:{kr.gradeCriteria.B}</span></div></td>
+                        <td className="px-4 py-3 text-center"><span className={`px-2 py-1 rounded-full text-xs font-medium ${biiColor.bg} ${biiColor.text}`}>{kr.biiType}</span></td>
+                        <td className="px-4 py-3 text-center"><span className={`px-2 py-1 rounded text-xs font-medium border ${categoryColor}`}>{kr.kpiCategory}</span></td>
+                      </tr>);
                     });
                   })}
                 </tbody>
-                <tfoot className="bg-slate-50 border-t border-slate-200">
-                  <tr>
-                    <td colSpan={2} className="px-4 py-3 text-sm font-medium text-slate-700">합계</td>
-                    <td className="px-4 py-3 text-center">
-                      <span className="text-sm font-bold text-green-600">{krs.filter(k => k.selected !== false).reduce((s, k) => s + k.weight, 0)}%</span>
-                    </td>
-                    <td colSpan={4} className="px-4 py-3 text-right text-sm text-slate-600">
-                      총 {krs.filter(k => k.selected !== false).length}개 KR
-                    </td>
-                  </tr>
-                </tfoot>
+                <tfoot className="bg-slate-50 border-t border-slate-200"><tr><td colSpan={2} className="px-4 py-3 text-sm font-medium text-slate-700">합계</td><td className="px-4 py-3 text-center"><span className="text-sm font-bold text-green-600">{krs.filter(k => k.selected !== false).reduce((s, k) => s + k.weight, 0)}%</span></td><td colSpan={4} className="px-4 py-3 text-right text-sm text-slate-600">총 {krs.filter(k => k.selected !== false).length}개 KR</td></tr></tfoot>
               </table>
             </div>
-
-            <div className="flex gap-3">
-              <button
-                onClick={handleSave}
-                disabled={isSaving}
-                className="flex-1 bg-blue-600 text-white rounded-lg py-3 font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
-              >
-                {isSaving ? '저장 중...' : '✅ KR 세트 확정 (DB 저장)'}
-              </button>
-              <button 
-                onClick={() => setShowReviewRequestModal(true)}
-                className="px-6 border border-slate-300 text-slate-700 rounded-lg py-3 font-medium hover:bg-slate-50 transition-colors"
-              >
-                📨 리뷰 요청 발송
-              </button>
-              <button className="px-6 border border-slate-300 text-slate-700 rounded-lg py-3 font-medium hover:bg-slate-50 transition-colors">
-                📥 엑셀 다운로드
-              </button>
-            </div>
-
-            {/* OKR 토론/코멘트 패널 */}
-            <div className="mt-6">
-              <OKRCommentPanel
-                objectiveId={objectives.filter(o => o.selected)[0]?.id}
-                compact={false}
-              />
-            </div>
+            {/* [FIX-5] 버튼 없음 — 제출은 Step 7에서 */}
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4"><p className="text-sm text-blue-700">📋 검토가 완료되었으면 <strong>"다음"</strong> 버튼을 눌러 제출 단계로 이동하세요.</p></div>
           </div>
         )}
 
-        {/* Step 7: 제출 & 승인 워크플로우 */}
+        {/* ★ Step 7: 제출 & 승인 — [FIX-1][FIX-2][FIX-6] 통합 액션 */}
         {currentStep === 7 && (
           <div className="space-y-6">
             <h2 className="text-xl font-bold text-slate-900">제출 & 승인</h2>
-
-            {/* 승인 상태 카드 */}
-            <div className={`border-2 rounded-xl p-6 ${
-              approvalStatus === 'draft' ? 'border-slate-300 bg-slate-50' :
-              approvalStatus === 'submitted' ? 'border-blue-300 bg-blue-50' :
-              approvalStatus === 'approved' ? 'border-green-300 bg-green-50' :
-              approvalStatus === 'rejected' ? 'border-red-300 bg-red-50' :
-              approvalStatus === 'revision_requested' ? 'border-amber-300 bg-amber-50' :
-              'border-slate-300 bg-slate-50'
-            }`}>
+            <div className={`border-2 rounded-xl p-6 ${approvalStatus === 'draft' ? 'border-slate-300 bg-slate-50' : approvalStatus === 'submitted' ? 'border-blue-300 bg-blue-50' : approvalStatus === 'approved' ? 'border-green-300 bg-green-50' : approvalStatus === 'rejected' ? 'border-red-300 bg-red-50' : approvalStatus === 'revision_requested' ? 'border-amber-300 bg-amber-50' : 'border-slate-300 bg-slate-50'}`}>
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-3">
-                  <FileCheck className={`w-6 h-6 ${
-                    approvalStatus === 'approved' ? 'text-green-600' :
-                    approvalStatus === 'rejected' ? 'text-red-600' :
-                    approvalStatus === 'submitted' ? 'text-blue-600' :
-                    'text-slate-400'
-                  }`} />
-                  <div>
-                    <h3 className="font-semibold text-slate-900">승인 상태</h3>
-                    <p className="text-sm text-slate-600">
-                      {approvalStatus === 'draft' && '초안 작성 중 - 제출 전입니다'}
-                      {approvalStatus === 'submitted' && `제출 완료 - ${parentOrgName || '상위 조직장'} 검토 대기 중`}
-                      {approvalStatus === 'approved' && '✅ 승인 완료'}
-                      {approvalStatus === 'rejected' && '❌ 반려됨 - 수정 후 재제출 필요'}
-                      {approvalStatus === 'revision_requested' && '⚠️ 수정 요청됨'}
-                    </p>
-                  </div>
+                  <FileCheck className={`w-6 h-6 ${approvalStatus === 'approved' ? 'text-green-600' : approvalStatus === 'rejected' ? 'text-red-600' : approvalStatus === 'submitted' ? 'text-blue-600' : 'text-slate-400'}`} />
+                  <div><h3 className="font-semibold text-slate-900">승인 상태</h3><p className="text-sm text-slate-600">{approvalStatus === 'draft' && '초안 작성 중 - 제출 전입니다'}{approvalStatus === 'submitted' && `제출 완료 - ${parentOrgName || '상위 조직장'} 검토 대기 중`}{approvalStatus === 'approved' && '✅ 승인 완료'}{approvalStatus === 'rejected' && '❌ 반려됨 - 수정 후 재제출 필요'}{approvalStatus === 'revision_requested' && '⚠️ 수정 요청됨'}</p></div>
                 </div>
-                {submittedAt && (
-                  <div className="flex items-center gap-1 text-xs text-slate-500">
-                    <Clock className="w-3.5 h-3.5" />
-                    {new Date(submittedAt).toLocaleString('ko-KR')}
-                  </div>
-                )}
+                {submittedAt && <div className="flex items-center gap-1 text-xs text-slate-500"><Clock className="w-3.5 h-3.5" />{new Date(submittedAt).toLocaleString('ko-KR')}</div>}
               </div>
-
-              {/* 승인 프로세스 타임라인 */}
-              <div className="flex items-center gap-0 mb-6">
-                {[
-                  { key: 'draft', label: '초안', icon: '📝' },
-                  { key: 'submitted', label: '제출', icon: '📤' },
-                  { key: 'under_review', label: '검토중', icon: '🔍' },
-                  { key: 'approved', label: '승인', icon: '✅' },
-                ].map((step, idx) => {
-                  const stages = ['draft', 'submitted', 'under_review', 'approved'];
-                  const currentIdx = stages.indexOf(approvalStatus === 'rejected' || approvalStatus === 'revision_requested' ? 'submitted' : approvalStatus);
-                  const stepIdx = stages.indexOf(step.key);
-                  const isActive = stepIdx <= currentIdx;
-                  const isCurrent = step.key === approvalStatus;
-                  return (
-                    <div key={step.key} className="flex items-center flex-1">
-                      <div className={`flex flex-col items-center ${isCurrent ? 'scale-110' : ''}`}>
-                        <div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg ${
-                          isActive ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-400'
-                        } ${isCurrent ? 'ring-4 ring-blue-200' : ''}`}>
-                          {step.icon}
-                        </div>
-                        <span className={`text-xs mt-1 ${isActive ? 'text-blue-700 font-medium' : 'text-slate-400'}`}>
-                          {step.label}
-                        </span>
-                      </div>
-                      {idx < 3 && (
-                        <div className={`flex-1 h-0.5 mx-1 ${stepIdx < currentIdx ? 'bg-blue-400' : 'bg-slate-200'}`} />
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* 반려/수정요청 코멘트 */}
-              {(approvalStatus === 'rejected' || approvalStatus === 'revision_requested') && reviewComment && (
-                <div className="bg-white border border-red-200 rounded-lg p-4 mb-4">
-                  <div className="flex items-center gap-2 mb-2">
-                    <MessageSquare className="w-4 h-4 text-red-500" />
-                    <span className="text-sm font-medium text-red-800">검토 의견</span>
-                  </div>
-                  <p className="text-sm text-red-700">{reviewComment}</p>
-                </div>
-              )}
+              <div className="flex items-center gap-0 mb-6">{[{ key: 'draft', label: '초안', icon: '📝' },{ key: 'submitted', label: '제출', icon: '📤' },{ key: 'under_review', label: '검토중', icon: '🔍' },{ key: 'approved', label: '승인', icon: '✅' }].map((step, idx) => { const stages = ['draft', 'submitted', 'under_review', 'approved']; const currentIdx = stages.indexOf(approvalStatus === 'rejected' || approvalStatus === 'revision_requested' ? 'submitted' : approvalStatus); const stepIdx = stages.indexOf(step.key); const isActive = stepIdx <= currentIdx; const isCurrent = step.key === approvalStatus; return (<div key={step.key} className="flex items-center flex-1"><div className={`flex flex-col items-center ${isCurrent ? 'scale-110' : ''}`}><div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg ${isActive ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-400'} ${isCurrent ? 'ring-4 ring-blue-200' : ''}`}>{step.icon}</div><span className={`text-xs mt-1 ${isActive ? 'text-blue-700 font-medium' : 'text-slate-400'}`}>{step.label}</span></div>{idx < 3 && <div className={`flex-1 h-0.5 mx-1 ${stepIdx < currentIdx ? 'bg-blue-400' : 'bg-slate-200'}`} />}</div>); })}</div>
+              {(approvalStatus === 'rejected' || approvalStatus === 'revision_requested') && reviewComment && (<div className="bg-white border border-red-200 rounded-lg p-4 mb-4"><div className="flex items-center gap-2 mb-2"><MessageSquare className="w-4 h-4 text-red-500" /><span className="text-sm font-medium text-red-800">검토 의견</span></div><p className="text-sm text-red-700">{reviewComment}</p></div>)}
             </div>
 
-            {/* 액션 버튼 */}
+            {/* ★ [FIX-1][FIX-2][FIX-6] 액션 버튼 — 모든 액션을 여기에 집중 */}
             <div className="space-y-3">
               {(approvalStatus === 'draft' || approvalStatus === 'revision_requested' || approvalStatus === 'rejected') && (
                 <div className="flex gap-3">
-                  <button onClick={handleSubmitForApproval} className="flex-1 bg-blue-600 text-white rounded-lg py-3 font-semibold hover:bg-blue-700 transition-colors flex items-center justify-center gap-2">
-                    <Send className="w-4 h-4" />
-                    {approvalStatus === 'draft' ? '상위 조직에 제출' : '수정 후 재제출'}
-                  </button>
-                  <button onClick={handleSave} disabled={isSaving} className="px-6 border border-slate-300 text-slate-700 rounded-lg py-3 font-medium hover:bg-slate-50 transition-colors">
-                    💾 임시 저장
-                  </button>
+                  <button onClick={handleSubmitForApproval} className="flex-1 bg-blue-600 text-white rounded-lg py-3 font-semibold hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"><Send className="w-4 h-4" />{approvalStatus === 'draft' ? '상위 조직에 제출' : '수정 후 재제출'}</button>
+                  <button onClick={() => handleSave()} disabled={isSaving} className="px-6 border border-slate-300 text-slate-700 rounded-lg py-3 font-medium hover:bg-slate-50 transition-colors">💾 임시 저장</button>
                 </div>
               )}
               <div className="flex gap-3">
-                <button onClick={() => setShowReviewRequestModal(true)} className="flex-1 border border-indigo-300 text-indigo-700 bg-indigo-50 rounded-lg py-3 font-medium hover:bg-indigo-100 transition-colors flex items-center justify-center gap-2">
-                  <Users className="w-4 h-4" />유관부서 검토 요청
-                </button>
-                <button className="flex-1 border border-slate-300 text-slate-700 rounded-lg py-3 font-medium hover:bg-slate-50 transition-colors flex items-center justify-center gap-2">
-                  <Link2 className="w-4 h-4" />Alignment 현황 보기
-                </button>
+                <button onClick={() => setShowReviewRequestModal(true)} className="flex-1 border border-indigo-300 text-indigo-700 bg-indigo-50 rounded-lg py-3 font-medium hover:bg-indigo-100 transition-colors flex items-center justify-center gap-2"><Users className="w-4 h-4" />유관부서 검토 요청</button>
+                <button onClick={() => navigate('/okr-map')} className="flex-1 border border-slate-300 text-slate-700 rounded-lg py-3 font-medium hover:bg-slate-50 transition-colors flex items-center justify-center gap-2"><Link2 className="w-4 h-4" />Alignment 현황 보기</button>
               </div>
             </div>
 
-            {/* Cascading 상태 요약 */}
-            {parentOKRs.length > 0 && (
-              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
-                <div className="flex items-center gap-2 mb-3">
-                  <GitBranch className="w-4 h-4 text-slate-500" />
-                  <span className="text-sm font-medium text-slate-700">Cascading 연결 현황</span>
-                </div>
-                <div className="space-y-2">
-                  {objectives.filter(o => o.selected).map(obj => {
-                    const linked = cascadingLinked[obj.id];
-                    const parentObj = parentOKRs.find(p => p.objective.id === linked);
-                    return (
-                      <div key={obj.id} className="flex items-center gap-2 text-sm">
-                        <span className="text-slate-600">{obj.name.substring(0, 25)}...</span>
-                        {parentObj ? (
-                          <>
-                            <span className="text-blue-400">←</span>
-                            <span className="text-blue-600 text-xs bg-blue-50 px-2 py-0.5 rounded">{parentObj.objective.name.substring(0, 20)}...</span>
-                          </>
-                        ) : (
-                          <span className="text-xs text-slate-400 bg-slate-100 px-2 py-0.5 rounded">독립</span>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* OKR 토론/코멘트 패널 (승인 과정 논의용) */}
+            {/* [FIX-10] OKR 토론/코멘트 — okrSetId 전달 */}
             <OKRCommentPanel
               objectiveId={objectives.filter(o => o.selected)[0]?.id}
+              okrSetId={okrSetId || undefined}
               compact={false}
             />
           </div>
@@ -2548,75 +1320,33 @@ export default function Wizard() {
         {showReviewRequestModal && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
             <div className="bg-white rounded-2xl p-6 max-w-lg w-full mx-4">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-bold text-slate-900">유관부서 검토 요청</h3>
-                <button onClick={() => setShowReviewRequestModal(false)} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
-              </div>
+              <div className="flex items-center justify-between mb-4"><h3 className="text-lg font-bold text-slate-900">유관부서 검토 요청</h3><button onClick={() => setShowReviewRequestModal(false)} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button></div>
               <p className="text-sm text-slate-600 mb-4">검토를 요청할 조직을 선택하고 메시지를 작성해주세요.</p>
-              <div className="space-y-3 mb-4 max-h-40 overflow-y-auto">
-                {organizations.filter(o => o.id !== orgId && o.level !== '전사').map(org => (
-                  <label key={org.id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-slate-50 cursor-pointer">
-                    <input type="checkbox" checked={reviewRequestOrgs.includes(org.id)} onChange={(e) => { if (e.target.checked) setReviewRequestOrgs(prev => [...prev, org.id]); else setReviewRequestOrgs(prev => prev.filter(id => id !== org.id)); }} className="w-4 h-4 rounded border-slate-300 text-indigo-600" />
-                    <div><span className="text-sm font-medium text-slate-900">{org.name}</span><span className="text-xs text-slate-500 ml-2">{org.level}</span></div>
-                  </label>
-                ))}
-              </div>
+              <div className="space-y-3 mb-4 max-h-40 overflow-y-auto">{organizations.filter(o => o.id !== orgId && o.level !== '전사').map(org => (<label key={org.id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-slate-50 cursor-pointer"><input type="checkbox" checked={reviewRequestOrgs.includes(org.id)} onChange={(e) => { if (e.target.checked) setReviewRequestOrgs(prev => [...prev, org.id]); else setReviewRequestOrgs(prev => prev.filter(id => id !== org.id)); }} className="w-4 h-4 rounded border-slate-300 text-indigo-600" /><div><span className="text-sm font-medium text-slate-900">{org.name}</span><span className="text-xs text-slate-500 ml-2">{org.level}</span></div></label>))}</div>
               <textarea value={reviewRequestMessage} onChange={(e) => setReviewRequestMessage(e.target.value)} placeholder="검토 요청 메시지를 작성해주세요..." className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm mb-4 resize-none" rows={3} />
-              <div className="flex gap-3">
-                <button onClick={handleSendReviewRequest} disabled={reviewRequestOrgs.length === 0} className="flex-1 bg-indigo-600 text-white rounded-lg py-2.5 font-medium hover:bg-indigo-700 disabled:opacity-50 flex items-center justify-center gap-2">
-                  <Send className="w-4 h-4" />{reviewRequestOrgs.length}개 조직에 요청 발송
-                </button>
-                <button onClick={() => setShowReviewRequestModal(false)} className="px-4 border border-slate-300 text-slate-600 rounded-lg py-2.5 hover:bg-slate-50">취소</button>
-              </div>
+              <div className="flex gap-3"><button onClick={handleSendReviewRequest} disabled={reviewRequestOrgs.length === 0} className="flex-1 bg-indigo-600 text-white rounded-lg py-2.5 font-medium hover:bg-indigo-700 disabled:opacity-50 flex items-center justify-center gap-2"><Send className="w-4 h-4" />{reviewRequestOrgs.length}개 조직에 요청 발송</button><button onClick={() => setShowReviewRequestModal(false)} className="px-4 border border-slate-300 text-slate-600 rounded-lg py-2.5 hover:bg-slate-50">취소</button></div>
             </div>
           </div>
         )}
 
         {/* 네비게이션 버튼 */}
         <div className="flex justify-between mt-8 pt-6 border-t border-slate-200">
-          <button
-            onClick={() => setCurrentStep(Math.max(0, currentStep - 1))}
-            disabled={currentStep === 0}
-            className="px-6 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-          >
-            <ChevronLeft className="w-4 h-4" />
-            이전
-          </button>
-          
-          {/* 단계 표시 */}
-          <span className="text-sm text-slate-400 self-center">
-            {currentStep + 1} / {steps.length}
-          </span>
-
+          <button onClick={() => setCurrentStep(Math.max(0, currentStep - 1))} disabled={currentStep === 0} className="px-6 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"><ChevronLeft className="w-4 h-4" />이전</button>
+          <span className="text-sm text-slate-400 self-center">{currentStep + 1} / {steps.length}</span>
           {currentStep < 7 ? (
-            <button
-              onClick={() => {
-                if (currentStep === 4) {
-                  const selObjs = objectives.filter(o => o.selected);
-                  const actKRs = krs.filter(kr => kr.selected !== false);
-                  const invalid = selObjs.filter(obj => {
-                    const sum = actKRs.filter(kr => kr.objectiveId === obj.id).reduce((s, k) => s + k.weight, 0);
-                    return sum !== 100;
-                  });
-                  if (invalid.length > 0) {
-                    alert(`다음 Objective의 KR 가중치 합계가 100%가 아닙니다:\n${invalid.map(o => `• ${o.name}`).join('\n')}`);
-                    return;
-                  }
-                }
-                setCurrentStep(currentStep + 1);
-              }}
-              className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium flex items-center gap-2"
-            >
-              {currentStep === 6 ? '제출 단계로' : '다음'}
-              <ChevronRight className="w-4 h-4" />
-            </button>
-          ) : (
-            <div /> 
-          )}
+            <button onClick={() => {
+              if (currentStep === 4) {
+                const selObjs = objectives.filter(o => o.selected); const actKRs = krs.filter(kr => kr.selected !== false);
+                const invalid = selObjs.filter(obj => { const sum = actKRs.filter(kr => kr.objectiveId === obj.id).reduce((s, k) => s + k.weight, 0); return sum !== 100; });
+                if (invalid.length > 0) { setToastMessage(`⚠️ KR 가중치 합계가 100%가 아닌 목표가 있습니다`); return; }
+              }
+              setCurrentStep(currentStep + 1);
+            }} className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium flex items-center gap-2">{currentStep === 6 ? '제출 단계로' : '다음'}<ChevronRight className="w-4 h-4" /></button>
+          ) : (<div />)}
         </div>
       </div>
       </>
       )}
     </div>
   );
-} 
+}
