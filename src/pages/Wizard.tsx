@@ -850,7 +850,7 @@ export default function Wizard() {
             message: reviewRequestMessage || `${currentOrgName}의 OKR을 검토해주세요.`,
             priority: 'normal', action_url: '/approval-inbox', org_id: tOrgId,
           });
-        }
+        } 
       }
       if (requests.length > 0) {
         const { data: insertData, error: insertErr } = await supabase.from('review_requests').insert(requests).select();
