@@ -1952,12 +1952,14 @@ export default function CEOOKRSetup() {
                     >
                       <Megaphone className="w-4 h-4" /> 수립 현황 보기
                     </button>
-                    <button
-                      onClick={() => navigate('/okr-map')}
-                      className="px-6 py-2.5 border border-slate-300 text-slate-700 rounded-lg font-medium hover:bg-slate-50 flex items-center gap-2"
-                    >
-                      <GitBranch className="w-4 h-4" /> OKR Map 보기
-                    </button>
+                    // Step 7 렌더링 부분에서 버튼 수정
+<button 
+  onClick={() => navigate('/okr-map')}
+  className="px-4 py-2 border border-slate-300 rounded-lg text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+>
+  <Link2 className="w-4 h-4" />
+  Alignment 현황 보기
+</button>
                   </div>
 
                   {/* 하단 관리 링크 */}
