@@ -244,14 +244,14 @@ const { fetchObjectives, fetchKRs, organizations, company } = useStore();
   const [objectives, setObjectives] = useState<ObjectiveCandidate[]>([]);
   const [krs, setKrs] = useState<(KRCandidate & { selected?: boolean; parentObjId?: string | null })[]>([]);
 
- // DB 초안 로드 함수
+// DB 초안 로드 함수
 const loadDraftFromDB = async (targetOrgId?: string) => {
   const orgIdToUse = targetOrgId || selectedOrgId;
   if (!orgIdToUse) return;
 
   setIsLoadingDraft(true);
   try {
-    // okr_sets에서 현재 기간의 저장 정보 조회
+    // okr_sets에서 현재 기간의 저장 정보 조회 (단계 복원용)
     const { data: okrSet } = await supabase
       .from('okr_sets')
       .select('id, current_step, status')
@@ -261,82 +261,88 @@ const loadDraftFromDB = async (targetOrgId?: string) => {
       .limit(1)
       .maybeSingle();
 
-    // objectives 조회
-    const { data: objs } = await supabase
+    // ✅ 원본 쿼리 유지! (is_latest, source 필터 포함)
+    const { data: objs, error: objErr } = await supabase
       .from('objectives')
       .select(`
-        id, name, description, bii_type, sort_order, parent_objective_id, status,
-        key_results (
-          id, name, weight, target_value, unit, bii_type, 
-          kpi_category, perspective, grade_criteria
-        )
+        id, name, bii_type, period, status, source, sort_order,
+        parent_obj_id, cascade_type, approval_status, perspective,
+        version, is_latest, original_obj_id
       `)
       .eq('org_id', orgIdToUse)
       .eq('period', selectedPeriodCode)
-      .in('status', ['draft', 'active', 'agreed'])
+      .eq('is_latest', true)
+      .in('source', ['ai_draft', 'manual'])
       .order('sort_order');
+
+    if (objErr) throw objErr;
 
     if (objs && objs.length > 0) {
       setHasDraft(true);
-      
-      // ObjectiveCandidate 형식으로 변환
-      const convertedObjs: ObjectiveCandidate[] = objs.map((obj: any, idx: number) => ({
+
+      const loadedObjectives: ObjectiveCandidate[] = objs.map((obj: any) => ({
         id: obj.id,
         name: obj.name,
         biiType: obj.bii_type || 'Improve',
-        perspective: '재무',
+        perspective: obj.perspective || '재무',
         selected: true,
-        parentObjId: obj.parent_objective_id,
-        source: 'db'
+        parentObjId: obj.parent_obj_id,
+        cascadeType: obj.cascade_type || 'independent',
+        source: obj.source,
+        version: obj.version || 0,
+        originalObjId: obj.original_obj_id || obj.id,
       }));
+      setObjectives(loadedObjectives);
+      setSelectedObjectiveTab(loadedObjectives[0]?.id || '');
 
-      // KRCandidate 형식으로 변환
-      const convertedKRs: (KRCandidate & { selected?: boolean })[] = [];
-      objs.forEach((obj: any) => {
-        (obj.key_results || []).forEach((kr: any, krIdx: number) => {
-          convertedKRs.push({
-            id: kr.id,
-            objectiveId: obj.id,
-            name: kr.name,
-            definition: '',
-            formula: '',
-            unit: kr.unit || '%',
-            weight: kr.weight || 20,
-            targetValue: kr.target_value || 100,
-            biiType: kr.bii_type || 'Improve',
-            kpiCategory: kr.kpi_category || '전략',
-            perspective: kr.perspective || '재무',
-            indicatorType: '결과',
-            measurementCycle: '월',
-            previousYear: 0,
-            poolMatch: 0,
-            gradeCriteria: kr.grade_criteria || { S: 120, A: 110, B: 100, C: 90, D: 0 },
-            quarterlyTargets: { Q1: 0, Q2: 0, Q3: 0, Q4: 0 },
-            selected: true
-          });
-        });
-      });
+      // KR 로드 (원본 로직 유지)
+      const objIds = objs.map((o: any) => o.id);
+      const { data: allKRs } = await supabase
+        .from('key_results')
+        .select('*')
+        .in('objective_id', objIds)
+        .eq('is_latest', true)
+        .order('created_at');
 
-      setObjectives(convertedObjs);
-      setKrs(convertedKRs);
+      if (allKRs && allKRs.length > 0) {
+        const loadedKRs = allKRs.map((kr: any) => ({
+          id: kr.id,
+          objectiveId: kr.objective_id,
+          name: kr.name,
+          definition: kr.definition || '',
+          formula: kr.formula || '',
+          unit: kr.unit || '%',
+          weight: kr.weight || 20,
+          targetValue: kr.target_value || 100,
+          biiType: (kr.bii_type || 'Improve') as BIIType,
+          kpiCategory: (kr.kpi_category || '전략') as any,
+          perspective: (kr.perspective || '재무') as any,
+          indicatorType: (kr.indicator_type || '결과') as any,
+          measurementCycle: (kr.measurement_cycle || '월') as any,
+          previousYear: 0,
+          poolMatch: 0,
+          gradeCriteria: kr.grade_criteria || { S: 120, A: 110, B: 100, C: 90, D: 0 },
+          quarterlyTargets: kr.quarterly_targets || { Q1: 0, Q2: 0, Q3: 0, Q4: 0 },
+          selected: true,
+          parentObjId: kr.parent_obj_id || null,
+        }));
+        setKrs(loadedKRs);
+      }
 
-      // 저장된 단계로 복원
+      setShowOneClickModal(false);
+      
+      // ✅ 저장된 단계가 있으면 복원, 없으면 Step 1
       if (okrSet?.current_step && okrSet.current_step > 0) {
         setCurrentStep(okrSet.current_step);
       } else {
-        const hasKRs = convertedKRs.length > 0;
-        setCurrentStep(hasKRs ? 2 : 1);
+        setCurrentStep(1);
       }
     } else {
       setHasDraft(false);
-      setCurrentStep(0);
-      setObjectives([]);
-      setKrs([]);
       setShowOneClickModal(true);
     }
-
   } catch (err) {
-    console.error('Draft 로드 실패:', err);
+    console.error('AI 초안 로딩 실패:', err);
   } finally {
     setIsLoadingDraft(false);
   }
