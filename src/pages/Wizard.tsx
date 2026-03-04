@@ -780,17 +780,81 @@ const handleSubmitForApproval = async () => {
   }
 };
 
-  const handleSendReviewRequest = async () => {
-    if (reviewRequestOrgs.length === 0) return;
-    try {
-      alert(`✅ ${reviewRequestOrgs.length}개 조직에 검토 요청을 발송했습니다.`);
-      setShowReviewRequestModal(false);
-      setReviewRequestOrgs([]);
-      setReviewRequestMessage('');
-    } catch (err: any) {
-      alert(`발송 실패: ${err.message}`);
+ // ============================================================
+// handleSendReviewRequest - DB에 실제 저장 + 알림 발송
+// ============================================================
+const handleSendReviewRequest = async () => {
+  if (reviewRequestOrgs.length === 0) {
+    alert('검토를 요청할 조직을 선택해주세요.');
+    return;
+  }
+
+  if (!selectedOrgId || !user?.id) return;
+
+  try {
+    const currentOrg = organizations.find(o => o.id === selectedOrgId);
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('full_name')
+      .eq('id', user.id)
+      .single();
+
+    // 선택된 각 조직에 검토 요청 생성
+    for (const targetOrgId of reviewRequestOrgs) {
+      const targetOrg = organizations.find(o => o.id === targetOrgId);
+      
+      // 대상 조직의 조직장 찾기
+      const { data: targetHead } = await supabase
+        .from('user_roles')
+        .select('profile_id, roles!inner(name)')
+        .eq('org_id', targetOrgId)
+        .in('roles.name', ['org_head', 'company_admin'])
+        .limit(1)
+        .maybeSingle();
+
+      if (!targetHead?.profile_id) continue;
+
+      // review_requests 테이블에 INSERT
+      const { data: reviewReq, error: reqError } = await supabase
+        .from('review_requests')
+        .insert({
+          requester_id: user.id,
+          requester_org_id: selectedOrgId,
+          reviewer_id: targetHead.profile_id,
+          reviewer_org_id: targetOrgId,
+          title: `${currentOrg?.name || '조직'} OKR 검토 요청`,
+          message: reviewRequestMessage || `${selectedPeriodCode} 기간 OKR에 대한 검토를 요청드립니다.`,
+          status: 'pending',
+          period: selectedPeriodCode,
+        })
+        .select()
+        .single();
+
+      if (reqError) throw reqError;
+
+      // 대상 조직장에게 알림 발송
+      await supabase.from('notifications').insert({
+        recipient_id: targetHead.profile_id,
+        type: 'review_request',
+        title: `${currentOrg?.name || '조직'}에서 OKR 검토를 요청했습니다`,
+        message: reviewRequestMessage || '유관부서로서 OKR 검토 의견을 부탁드립니다.',
+        action_url: '/approval-inbox',
+        priority: 'normal',
+        org_id: selectedOrgId,
+        related_id: reviewReq.id,
+      });
     }
-  };
+
+    alert(`✅ ${reviewRequestOrgs.length}개 조직에 검토 요청을 발송했습니다.`);
+    setShowReviewRequestModal(false);
+    setReviewRequestOrgs([]);
+    setReviewRequestMessage('');
+
+  } catch (err: any) {
+    console.error('검토 요청 실패:', err);
+    alert(`발송 실패: ${err.message}`);
+  }
+};
 
   const handleAIGenerateObjectives = async () => {
     setIsAIGenerating(true);
