@@ -2736,9 +2736,12 @@ const handleSave = async (showAlert = true) => {
                 <button onClick={() => setShowReviewRequestModal(true)} className="flex-1 border border-indigo-300 text-indigo-700 bg-indigo-50 rounded-lg py-3 font-medium hover:bg-indigo-100 transition-colors flex items-center justify-center gap-2">
                   <Users className="w-4 h-4" />유관부서 검토 요청
                 </button>
-                <button className="flex-1 border border-slate-300 text-slate-700 rounded-lg py-3 font-medium hover:bg-slate-50 transition-colors flex items-center justify-center gap-2">
-                  <Link2 className="w-4 h-4" />Alignment 현황 보기
-                </button>
+                <button 
+  onClick={() => navigate('/okr-map')}
+  className="flex-1 border border-slate-300 text-slate-700 rounded-lg py-3 font-medium hover:bg-slate-50 transition-colors flex items-center justify-center gap-2"
+>
+  <Link2 className="w-4 h-4" />Alignment 현황 보기
+</button>
               </div>
             </div>
 
