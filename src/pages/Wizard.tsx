@@ -661,25 +661,124 @@ export default function Wizard() {
     setCurrentStep(0);
   };
 
-  const handleSubmitForApproval = async () => {
-    if (!orgId) return;
-    if (!confirm('목표를 상위 조직에 제출하시겠습니까?')) return;
+ // ============================================================
+// handleSubmitForApproval - okr_sets 테이블 연동 + 알림 발송
+// ============================================================
+const handleSubmitForApproval = async () => {
+  if (!selectedOrgId || !user?.id) {
+    alert('조직 또는 사용자 정보가 없습니다.');
+    return;
+  }
 
-    try {
-      const selectedIds = objectives.filter(o => o.selected && o.source).map(o => o.id);
-      if (selectedIds.length > 0) {
-        await supabase
-          .from('objectives')
-          .update({ approval_status: 'submitted', status: 'submitted' })
-          .in('id', selectedIds);
-      }
-      setApprovalStatus('submitted');
-      setSubmittedAt(new Date().toISOString());
-      alert('✅ 제출되었습니다. 상위 조직의 검토를 기다려주세요.');
-    } catch (err: any) {
-      alert(`제출 실패: ${err.message}`);
+  const selectedIds = objectives
+    .filter(o => selectedObjectives.includes(o.id))
+    .map(o => o.id);
+
+  if (selectedIds.length === 0) {
+    alert('제출할 목표를 선택해주세요.');
+    return;
+  }
+
+  setSubmitting(true);
+  try {
+    // 1. okr_sets 테이블에 INSERT 또는 UPDATE (upsert)
+    const { data: existingSet } = await supabase
+      .from('okr_sets')
+      .select('id, version')
+      .eq('org_id', selectedOrgId)
+      .eq('period', selectedPeriodCode)
+      .order('version', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const newVersion = existingSet ? existingSet.version + 1 : 1;
+
+    const { data: okrSet, error: setError } = await supabase
+      .from('okr_sets')
+      .upsert({
+        id: existingSet?.id || undefined, // 기존 있으면 업데이트
+        org_id: selectedOrgId,
+        period: selectedPeriodCode,
+        status: 'submitted',
+        version: newVersion,
+        submitted_at: new Date().toISOString(),
+        submitted_by: user.id,
+        current_step: currentStep, // 진행 단계 저장
+      }, { 
+        onConflict: 'org_id,period',
+        ignoreDuplicates: false 
+      })
+      .select()
+      .single();
+
+    if (setError) throw setError;
+
+    // 2. objectives 상태 업데이트
+    const { error: objError } = await supabase
+      .from('objectives')
+      .update({ 
+        approval_status: 'submitted',
+        okr_set_id: okrSet.id // okr_set과 연결
+      })
+      .in('id', selectedIds);
+
+    if (objError) throw objError;
+
+    // 3. 상위 조직장(또는 CEO)에게 알림 발송
+    const currentOrg = organizations.find(o => o.id === selectedOrgId);
+    let reviewerId: string | null = null;
+
+    // 상위 조직 찾기
+    if (currentOrg?.parent_id) {
+      // 상위 조직의 조직장 찾기
+      const { data: parentHead } = await supabase
+        .from('user_roles')
+        .select('profile_id, roles!inner(name)')
+        .eq('org_id', currentOrg.parent_id)
+        .in('roles.name', ['org_head', 'company_admin', 'ceo'])
+        .limit(1)
+        .maybeSingle();
+      
+      reviewerId = parentHead?.profile_id || null;
     }
-  };
+
+    // 상위 조직장 없으면 CEO 찾기
+    if (!reviewerId) {
+      const { data: ceoRole } = await supabase
+        .from('user_roles')
+        .select('profile_id, roles!inner(name)')
+        .eq('company_id', company?.id)
+        .eq('roles.name', 'ceo')
+        .limit(1)
+        .maybeSingle();
+      
+      reviewerId = ceoRole?.profile_id || null;
+    }
+
+    // 알림 발송
+    if (reviewerId) {
+      await supabase.from('notifications').insert({
+        recipient_id: reviewerId,
+        type: 'okr_submitted',
+        title: `${currentOrg?.name || '조직'} OKR이 제출되었습니다`,
+        message: `${selectedPeriodCode} 기간 OKR 검토가 필요합니다. (목표 ${selectedIds.length}개)`,
+        action_url: '/approval-inbox',
+        priority: 'high',
+        org_id: selectedOrgId,
+        related_id: okrSet.id,
+      });
+    }
+
+    alert('✅ OKR이 성공적으로 제출되었습니다. 상위 조직장에게 알림이 전송되었습니다.');
+    navigate('/okr-setup'); // 수립 현황 페이지로 이동
+
+  } catch (err: any) {
+    console.error('제출 실패:', err);
+    alert(`제출 실패: ${err.message}`);
+  } finally {
+    setSubmitting(false);
+  }
+};
 
   const handleSendReviewRequest = async () => {
     if (reviewRequestOrgs.length === 0) return;
