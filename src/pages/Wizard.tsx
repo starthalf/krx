@@ -2159,73 +2159,72 @@ const handleSave = async (showAlert = true) => {
                         {/* 측정 설정 카드 */}
                         <div className="bg-slate-50/80 rounded-xl p-4 space-y-4">
                           
-                          {/* 1행: 목표값+단위 (강조) | 유형·주기·관점 (보조) */}
-                          <div className="flex gap-4">
-                            <div className="w-36">
-                              <label className="block text-xs font-medium text-slate-600 mb-1.5">목표값</label>
-                              <input
-                                type="number"
-                                value={kr.targetValue}
-                                onChange={(e) => handleKRChange(kr.id, 'targetValue', parseInt(e.target.value) || 0)}
-                                className="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-base font-bold text-slate-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white"
-                              />
-                            </div>
-                            <div className="w-24">
-                              <label className="block text-xs font-medium text-slate-600 mb-1.5">단위</label>
-                              <input
-                                type="text"
-                                value={kr.unit}
-                                onChange={(e) => handleKRChange(kr.id, 'unit', e.target.value)}
-                                className="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-center font-medium focus:ring-2 focus:ring-blue-500 outline-none bg-white"
-                              />
-                            </div>
-                            <div className="w-px bg-slate-200 self-stretch my-1" />
-                            <div className="flex-1 grid grid-cols-3 gap-3">
-                              <div>
-                                <label className="block text-xs font-medium text-slate-600 mb-1.5">지표 유형</label>
-                                <select
-                                  value={kr.indicatorType}
-                                  onChange={(e) => handleKRChange(kr.id, 'indicatorType', e.target.value)}
-                                  className="w-full border border-slate-200 rounded-lg px-2.5 py-2.5 text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none"
-                                >
-                                  <option>투입</option><option>과정</option><option>산출</option><option>결과</option>
-                                </select>
-                              </div>
-                              <div>
-                                <label className="block text-xs font-medium text-slate-600 mb-1.5">측정 주기</label>
-                                <select
-                                  value={kr.measurementCycle}
-                                  onChange={(e) => handleKRChange(kr.id, 'measurementCycle', e.target.value)}
-                                  className="w-full border border-slate-200 rounded-lg px-2.5 py-2.5 text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none"
-                                >
-                                  <option>월</option><option>분기</option><option>반기</option><option>연</option>
-                                </select>
-                              </div>
-                              <div>
-                                <label className="block text-xs font-medium text-slate-600 mb-1.5">BSC 관점</label>
-                                <select
-                                  value={kr.perspective}
-                                  onChange={(e) => handleKRChange(kr.id, 'perspective', e.target.value)}
-                                  className="w-full border border-slate-200 rounded-lg px-2.5 py-2.5 text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none"
-                                >
-                                  <option>재무</option><option>고객</option><option>프로세스</option><option>학습성장</option>
-                                </select>
-                              </div>
-                              // KR 편집 UI에 추가
-<div className="mb-3">
-  <label className="block text-xs font-medium text-slate-600 mb-1">KPI 구분</label>
-  <select
-    value={kr.kpiCategory || '전략'}
-    onChange={(e) => updateKR(objIndex, krIndex, 'kpiCategory', e.target.value)}
-    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
-  >
-    <option value="전략">전략</option>
-    <option value="고유업무">고유업무</option>
-    <option value="공통">공통</option>
-  </select>
+                         {/* 1행: 목표값+단위 (강조) | 유형·주기·관점 (보조) */}
+<div className="flex gap-4">
+  <div className="w-36">
+    <label className="block text-xs font-medium text-slate-600 mb-1.5">목표값</label>
+    <input
+      type="number"
+      value={kr.targetValue}
+      onChange={(e) => handleKRChange(kr.id, 'targetValue', parseInt(e.target.value) || 0)}
+      className="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-base font-bold text-slate-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white"
+    />
+  </div>
+  <div className="w-24">
+    <label className="block text-xs font-medium text-slate-600 mb-1.5">단위</label>
+    <input
+      type="text"
+      value={kr.unit}
+      onChange={(e) => handleKRChange(kr.id, 'unit', e.target.value)}
+      className="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-center font-medium focus:ring-2 focus:ring-blue-500 outline-none bg-white"
+    />
+  </div>
+  <div className="w-px bg-slate-200 self-stretch my-1" />
+  <div className="flex-1 grid grid-cols-4 gap-3">
+    <div>
+      <label className="block text-xs font-medium text-slate-600 mb-1.5">지표 유형</label>
+      <select
+        value={kr.indicatorType}
+        onChange={(e) => handleKRChange(kr.id, 'indicatorType', e.target.value)}
+        className="w-full border border-slate-200 rounded-lg px-2.5 py-2.5 text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+      >
+        <option>투입</option><option>과정</option><option>산출</option><option>결과</option>
+      </select>
+    </div>
+    <div>
+      <label className="block text-xs font-medium text-slate-600 mb-1.5">측정 주기</label>
+      <select
+        value={kr.measurementCycle}
+        onChange={(e) => handleKRChange(kr.id, 'measurementCycle', e.target.value)}
+        className="w-full border border-slate-200 rounded-lg px-2.5 py-2.5 text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+      >
+        <option>월</option><option>분기</option><option>반기</option><option>연</option>
+      </select>
+    </div>
+    <div>
+      <label className="block text-xs font-medium text-slate-600 mb-1.5">BSC 관점</label>
+      <select
+        value={kr.perspective}
+        onChange={(e) => handleKRChange(kr.id, 'perspective', e.target.value)}
+        className="w-full border border-slate-200 rounded-lg px-2.5 py-2.5 text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+      >
+        <option>재무</option><option>고객</option><option>프로세스</option><option>학습성장</option>
+      </select>
+    </div>
+    <div>
+      <label className="block text-xs font-medium text-slate-600 mb-1.5">KPI 구분</label>
+      <select
+        value={kr.kpiCategory}
+        onChange={(e) => handleKRChange(kr.id, 'kpiCategory', e.target.value)}
+        className="w-full border border-slate-200 rounded-lg px-2.5 py-2.5 text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+      >
+        <option value="전략">전략</option>
+        <option value="고유업무">고유업무</option>
+        <option value="공통">공통</option>
+      </select>
+    </div>
+  </div>
 </div>
-                            </div>
-                          </div>
 
                           {/* 2행: 등급 구간 */}
                           <div>
