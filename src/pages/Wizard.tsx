@@ -829,43 +829,53 @@ export default function Wizard() {
       const requests: any[] = [];
       const notifs: any[] = [];
 
-  for (const tOrgId of reviewRequestOrgs) {
-        requests.push({
-          requester_id: user.id, 
-          requester_org_id: orgId, 
-          reviewer_org_id: tOrgId,
-          request_type: 'review',
-          title: `${currentOrgName} OKR 검토 요청`,
-          message: reviewRequestMessage || `${currentOrgName}의 ${selectedPeriodCode} OKR을 검토해주세요.`,
-          status: 'pending', 
-          period: selectedPeriodCode,
-        });
-        // 해당 조직의 리더에게 알림
+      for (const tOrgId of reviewRequestOrgs) {
+        // 1. 타겟 조직(tOrgId)의 리더들을 먼저 조회합니다.
         const { data: tLeaders } = await supabase
           .from('user_roles').select('profile_id, roles!inner(level)').eq('org_id', tOrgId);
-        for (const l of (tLeaders?.filter((m: any) => m.roles?.level >= 70) || [])) {
+        
+        const leaders = tLeaders?.filter((m: any) => m.roles?.level >= 70) || [];
+
+        // 2. 해당 부서의 리더들에게 각각 검토 요청을 보냅니다.
+        for (const l of leaders) {
+          // ⭐ 핵심: requests.push를 리더 반복문 안으로 옮겨서 reviewer_id를 명시합니다!
+          requests.push({
+            requester_id: user.id, 
+            requester_org_id: orgId, 
+            reviewer_id: l.profile_id, // 👈 승인 대기함에 뜨게 만드는 핵심 키!
+            reviewer_org_id: tOrgId,
+            request_type: 'review',
+            title: `${currentOrgName} OKR 검토 요청`,
+            message: reviewRequestMessage || `${currentOrgName}의 ${selectedPeriodCode} OKR을 검토해주세요.`,
+            status: 'pending', 
+            period: selectedPeriodCode,
+          });
+
+          // 알림 발송 (403 에러 방지를 위해 org_id를 발신자 기준으로 설정)
           notifs.push({
             recipient_id: l.profile_id, sender_id: user.id, sender_name: senderName,
             type: 'review_request', title: `📨 ${currentOrgName} OKR 검토 요청`,
             message: reviewRequestMessage || `${currentOrgName}의 OKR을 검토해주세요.`,
-            priority: 'normal', action_url: '/approval-inbox', org_id: tOrgId,
+            priority: 'normal', action_url: '/approval-inbox', 
+            org_id: orgId, 
           });
-        } 
+        }
       }
+
       if (requests.length > 0) {
-        const { data: insertData, error: insertErr } = await supabase.from('review_requests').insert(requests).select();
-        console.log('[Wizard] review_requests insert:', { count: requests.length, data: insertData, error: insertErr, requests });
+        await supabase.from('review_requests').insert(requests);
       }
       if (notifs.length > 0) {
-        const { data: notifData, error: notifErr } = await supabase.from('notifications').insert(notifs).select();
-        console.log('[Wizard] notifications insert:', { count: notifs.length, data: notifData, error: notifErr });
+        await supabase.from('notifications').insert(notifs);
       }
 
       setToastMessage(`✅ ${reviewRequestOrgs.length}개 조직에 검토 요청을 발송했습니다.`);
       setShowReviewRequestModal(false);
       setReviewRequestOrgs([]);
       setReviewRequestMessage('');
-    } catch (err: any) { setToastMessage(`❌ 발송 실패: ${err.message}`); }
+    } catch (err: any) { 
+      setToastMessage(`❌ 발송 실패: ${err.message}`); 
+    }
   };
 
   // ==================== Constants ====================
