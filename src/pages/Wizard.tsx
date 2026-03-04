@@ -832,6 +832,7 @@ export default function Wizard() {
       for (const tOrgId of reviewRequestOrgs) {
         requests.push({
           requester_id: user.id, requester_org_id: orgId, reviewer_org_id: tOrgId,
+          request_type: 'review',
           title: `${currentOrgName} OKR 검토 요청`,
           message: reviewRequestMessage || `${currentOrgName}의 ${selectedPeriodCode} OKR을 검토해주세요.`,
           status: 'pending', period: selectedPeriodCode,
@@ -848,8 +849,14 @@ export default function Wizard() {
           });
         }
       }
-      if (requests.length > 0) await supabase.from('review_requests').insert(requests);
-      if (notifs.length > 0) await supabase.from('notifications').insert(notifs);
+      if (requests.length > 0) {
+        const { data: insertData, error: insertErr } = await supabase.from('review_requests').insert(requests).select();
+        console.log('[Wizard] review_requests insert:', { count: requests.length, data: insertData, error: insertErr, requests });
+      }
+      if (notifs.length > 0) {
+        const { data: notifData, error: notifErr } = await supabase.from('notifications').insert(notifs).select();
+        console.log('[Wizard] notifications insert:', { count: notifs.length, data: notifData, error: notifErr });
+      }
 
       setToastMessage(`✅ ${reviewRequestOrgs.length}개 조직에 검토 요청을 발송했습니다.`);
       setShowReviewRequestModal(false);
@@ -1306,13 +1313,6 @@ export default function Wizard() {
                 <button onClick={() => navigate('/okr-map')} className="flex-1 border border-slate-300 text-slate-700 rounded-lg py-3 font-medium hover:bg-slate-50 transition-colors flex items-center justify-center gap-2"><Link2 className="w-4 h-4" />Alignment 현황 보기</button>
               </div>
             </div>
-
-            {/* [FIX-10] OKR 토론/코멘트 — okrSetId 전달 */}
-            <OKRCommentPanel
-              objectiveId={objectives.filter(o => o.selected)[0]?.id}
-              okrSetId={okrSetId || undefined}
-              compact={false}
-            />
           </div>
         )}
 
