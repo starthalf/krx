@@ -829,13 +829,16 @@ export default function Wizard() {
       const requests: any[] = [];
       const notifs: any[] = [];
 
-      for (const tOrgId of reviewRequestOrgs) {
+  for (const tOrgId of reviewRequestOrgs) {
         requests.push({
-          requester_id: user.id, requester_org_id: orgId, reviewer_org_id: tOrgId,
-          request_type: 'review',
+          requester_id: user.id, 
+          requester_org_id: orgId, 
+          reviewer_org_id: tOrgId,
+          request_type: 'okr_review', // 👈 이 줄을 추가해야 합니다!
           title: `${currentOrgName} OKR 검토 요청`,
           message: reviewRequestMessage || `${currentOrgName}의 ${selectedPeriodCode} OKR을 검토해주세요.`,
-          status: 'pending', period: selectedPeriodCode,
+          status: 'pending', 
+          period: selectedPeriodCode,
         });
         // 해당 조직의 리더에게 알림
         const { data: tLeaders } = await supabase
