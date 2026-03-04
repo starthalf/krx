@@ -905,13 +905,16 @@ const handleSendReviewRequest = async () => {
     }
   };
 
-  // ============================================================
+ // ============================================================
 // handleSave - 임시저장 (okr_sets 연동 + 화면 유지)
 // ============================================================
 const handleSave = async (showAlert = true) => {
   if (!selectedOrgId || !user?.id) return;
 
-  setSaving(true);
+  const targetOrg = organizations.find(o => o.id === selectedOrgId);
+  const companyId = targetOrg?.companyId || company?.id;
+
+  setIsSaving(true);
   try {
     // 1. okr_sets 테이블에 draft 상태로 저장
     const { data: existingSet } = await supabase
@@ -932,36 +935,39 @@ const handleSave = async (showAlert = true) => {
         status: 'draft',
         version: existingSet?.version || 1,
         submitted_by: user.id,
-        current_step: currentStep, // 현재 진행 단계 저장
+        current_step: currentStep,
         updated_at: new Date().toISOString(),
       }, { onConflict: 'org_id,period' });
 
     if (setError) throw setError;
 
-    // 2. objectives 저장
-    for (const obj of objectives) {
-      if (obj.id.startsWith('temp-')) {
+    // 2. objectives + KRs 저장
+    const selectedObjs = objectives.filter(o => o.selected);
+    
+    for (const obj of selectedObjs) {
+      const isNewObj = obj.id.startsWith('obj-new-') || obj.id.match(/^\d+$/);
+      
+      if (isNewObj) {
         // 새 목표 INSERT
         const { data: newObj, error } = await supabase
           .from('objectives')
           .insert({
             org_id: selectedOrgId,
-            company_id: company?.id,
+            company_id: companyId,
             name: obj.name,
-            description: obj.description,
             bii_type: obj.biiType,
             period: selectedPeriodCode,
             status: 'draft',
-            sort_order: obj.sortOrder,
-            parent_objective_id: obj.parentObjectiveId || null,
+            parent_objective_id: obj.parentObjId || null,
           })
           .select()
           .single();
 
         if (error) throw error;
 
-        // KR 저장
-        for (const kr of obj.keyResults) {
+        // 해당 목표의 KR 저장
+        const objKRs = krs.filter(kr => kr.objectiveId === obj.id && kr.selected !== false);
+        for (const kr of objKRs) {
           await supabase.from('key_results').insert({
             objective_id: newObj.id,
             org_id: selectedOrgId,
@@ -975,23 +981,29 @@ const handleSave = async (showAlert = true) => {
             grade_criteria: kr.gradeCriteria,
           });
         }
+
+        // 새 ID로 업데이트 (UI 동기화)
+        setObjectives(prev => prev.map(o => o.id === obj.id ? { ...o, id: newObj.id } : o));
+        setKrs(prev => prev.map(k => k.objectiveId === obj.id ? { ...k, objectiveId: newObj.id } : k));
+
       } else {
         // 기존 목표 UPDATE
         await supabase
           .from('objectives')
           .update({
             name: obj.name,
-            description: obj.description,
             bii_type: obj.biiType,
-            sort_order: obj.sortOrder,
-            parent_objective_id: obj.parentObjectiveId || null,
+            parent_objective_id: obj.parentObjId || null,
           })
           .eq('id', obj.id);
 
         // KR 업데이트
-        for (const kr of obj.keyResults) {
-          if (kr.id.startsWith('temp-')) {
-            await supabase.from('key_results').insert({
+        const objKRs = krs.filter(kr => kr.objectiveId === obj.id && kr.selected !== false);
+        for (const kr of objKRs) {
+          const isNewKR = kr.id.startsWith('kr-');
+          
+          if (isNewKR) {
+            const { data: newKR } = await supabase.from('key_results').insert({
               objective_id: obj.id,
               org_id: selectedOrgId,
               name: kr.name,
@@ -1002,7 +1014,12 @@ const handleSave = async (showAlert = true) => {
               kpi_category: kr.kpiCategory,
               perspective: kr.perspective,
               grade_criteria: kr.gradeCriteria,
-            });
+            }).select().single();
+
+            // 새 KR ID로 업데이트
+            if (newKR) {
+              setKrs(prev => prev.map(k => k.id === kr.id ? { ...k, id: newKR.id } : k));
+            }
           } else {
             await supabase
               .from('key_results')
@@ -1025,13 +1042,13 @@ const handleSave = async (showAlert = true) => {
     if (showAlert) {
       alert('✅ 임시 저장되었습니다.');
     }
-    // 화면 유지 (navigate 제거)
+    // 화면 유지 (navigate 제거됨)
 
   } catch (err: any) {
     console.error('저장 실패:', err);
     alert(`저장 실패: ${err.message}`);
   } finally {
-    setSaving(false);
+    setIsSaving(false);
   }
 };
 
