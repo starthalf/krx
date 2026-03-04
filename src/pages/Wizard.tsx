@@ -318,8 +318,7 @@ export default function Wizard() {
         setCurrentStep(1);
       } else {
         setHasDraft(false);
-        setShowOneClickModal(false);
-        setCurrentStep(1);
+        setShowOneClickModal(true);
       }
     } catch (err) {
       console.error('AI 초안 로딩 실패:', err);
@@ -1043,7 +1042,7 @@ export default function Wizard() {
   return (
     <div className="p-6 max-w-6xl mx-auto">
       {/* 헤더 */}
-      {!ceoDraftInProgress && (
+      {!showOneClickModal && (
         <div className="flex items-center gap-3 mb-6 flex-wrap">
           <button 
             onClick={() => setShowPeriodSelector(true)} // 뒤로가기 누르면 기간 다시 선택
@@ -1087,6 +1086,41 @@ export default function Wizard() {
             >
               다른 기간 선택하기
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* 모달: 수립 방식 선택 (초안이 없을 때만) */}
+      {showOneClickModal && !hasDraft && !ceoDraftInProgress && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl p-8 max-w-3xl w-full mx-4 relative">
+            <button onClick={() => navigate(-1)} className="absolute top-6 right-6 text-slate-400 hover:text-slate-600">
+              <X className="w-6 h-6" />
+            </button>
+
+            <h2 className="text-2xl font-bold text-slate-900 mb-2">{currentOrgName} 목표 수립</h2>
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-6">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0" />
+                <p className="text-sm text-amber-800">CEO가 배포한 초안이 아직 없습니다. 직접 수립하거나 AI를 활용해 생성하세요.</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-6">
+              <div className="border-2 border-slate-200 rounded-xl p-6 hover:border-blue-600 transition-all cursor-pointer">
+                <div className="text-3xl mb-3">🤖</div>
+                <h3 className="text-lg font-bold text-slate-900 mb-2">AI 전체 생성</h3>
+                <p className="text-sm text-slate-600 mb-4">AI가 조직정보를 분석하여 목표+KR을 한번에 생성합니다.</p>
+                <button onClick={handleOneClickGenerate} className="w-full bg-blue-600 text-white rounded-lg py-3 font-medium hover:bg-blue-700">🚀 전체 생성</button>
+              </div>
+
+              <div className="border-2 border-slate-200 rounded-xl p-6 hover:border-blue-600 transition-all cursor-pointer">
+                <div className="text-3xl mb-3">📝</div>
+                <h3 className="text-lg font-bold text-slate-900 mb-2">위저드로 직접 수립</h3>
+                <p className="text-sm text-slate-600 mb-4">단계를 따라가며 직접 수립합니다. AI가 각 단계에서 보조합니다.</p>
+                <button onClick={handleStartWizard} className="w-full bg-slate-100 text-slate-700 rounded-lg py-3 font-medium hover:bg-slate-200">📝 시작하기</button>
+              </div>
+            </div>
           </div>
         </div>
       )}
