@@ -826,110 +826,135 @@ const handleSubmitForApproval = async () => {
     }
   };
 
-  const handleSave = async () => {
-    if (!orgId) {
-      alert('조직 ID가 없습니다. 다시 시도해주세요.');
-      return;
-    }
+  // ============================================================
+// handleSave - 임시저장 (okr_sets 연동 + 화면 유지)
+// ============================================================
+const handleSave = async (showAlert = true) => {
+  if (!selectedOrgId || !user?.id) return;
 
-    if (!confirm('목표를 저장하시겠습니까?')) return;
+  setSaving(true);
+  try {
+    // 1. okr_sets 테이블에 draft 상태로 저장
+    const { data: existingSet } = await supabase
+      .from('okr_sets')
+      .select('id, version')
+      .eq('org_id', selectedOrgId)
+      .eq('period', selectedPeriodCode)
+      .order('version', { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
-    setIsSaving(true);
-    try {
-      const selectedObjectives = objectives.filter(o => o.selected);
-      const existingObjIds = selectedObjectives
-        .filter(o => o.source && o.id && !o.id.startsWith('obj-new-'))
-        .map(o => o.id);
+    const { error: setError } = await supabase
+      .from('okr_sets')
+      .upsert({
+        id: existingSet?.id || undefined,
+        org_id: selectedOrgId,
+        period: selectedPeriodCode,
+        status: 'draft',
+        version: existingSet?.version || 1,
+        submitted_by: user.id,
+        current_step: currentStep, // 현재 진행 단계 저장
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'org_id,period' });
 
-      if (existingObjIds.length > 0) {
-        await supabase.from('objectives').update({ is_latest: false }).in('id', existingObjIds);
-        await supabase.from('key_results').update({ is_latest: false }).in('objective_id', existingObjIds).eq('is_latest', true);
-      }
+    if (setError) throw setError;
 
-      const objIdMap: Record<string, string> = {};
-
-      for (const obj of selectedObjectives) {
-        const isExisting = obj.source && obj.id && !obj.id.startsWith('obj-new-');
-        const prevVersion = obj.version || 0;
-        const newVersion = isExisting ? prevVersion + 1 : 0;
-        const originalId = isExisting ? (obj.originalObjId || obj.id) : null;
-
-        const { data: savedObj, error: objError } = await supabase
+    // 2. objectives 저장
+    for (const obj of objectives) {
+      if (obj.id.startsWith('temp-')) {
+        // 새 목표 INSERT
+        const { data: newObj, error } = await supabase
           .from('objectives')
           .insert({
-            org_id: orgId,
+            org_id: selectedOrgId,
+            company_id: company?.id,
             name: obj.name,
+            description: obj.description,
             bii_type: obj.biiType,
-            perspective: obj.perspective,
             period: selectedPeriodCode,
             status: 'draft',
-            source: isExisting ? 'manual' : (obj.source || 'manual'),
-            approval_status: 'draft',
-            parent_obj_id: obj.parentObjId || null,
-            cascade_type: obj.cascadeType || 'independent',
-            sort_order: selectedObjectives.indexOf(obj),
-            version: newVersion,
-            is_latest: true,
-            original_obj_id: originalId,
+            sort_order: obj.sortOrder,
+            parent_objective_id: obj.parentObjectiveId || null,
           })
           .select()
           .single();
 
-        if (objError) throw new Error(`목표 저장 실패: ${objError.message}`);
-        if (!savedObj) continue;
+        if (error) throw error;
 
-        objIdMap[obj.id] = savedObj.id;
+        // KR 저장
+        for (const kr of obj.keyResults) {
+          await supabase.from('key_results').insert({
+            objective_id: newObj.id,
+            org_id: selectedOrgId,
+            name: kr.name,
+            weight: kr.weight,
+            target_value: kr.targetValue,
+            unit: kr.unit,
+            bii_type: kr.biiType,
+            kpi_category: kr.kpiCategory,
+            perspective: kr.perspective,
+            grade_criteria: kr.gradeCriteria,
+          });
+        }
+      } else {
+        // 기존 목표 UPDATE
+        await supabase
+          .from('objectives')
+          .update({
+            name: obj.name,
+            description: obj.description,
+            bii_type: obj.biiType,
+            sort_order: obj.sortOrder,
+            parent_objective_id: obj.parentObjectiveId || null,
+          })
+          .eq('id', obj.id);
 
-        const relatedKRs = krs.filter(k => k.objectiveId === obj.id && k.selected !== false);
-        
-        for (const kr of relatedKRs) {
-          const isExistingKR = kr.id && !kr.id.startsWith('kr-new-') && !kr.id.startsWith('kr-ai-') && !kr.id.startsWith('kr-pool-');
-          const krPrevVersion = (kr as any).version || 0;
-          const krNewVersion = isExistingKR ? krPrevVersion + 1 : 0;
-          const krOriginalId = isExistingKR ? ((kr as any).originalKrId || kr.id) : null;
-
-          const { error } = await supabase
-            .from('key_results')
-            .insert({
-              objective_id: savedObj.id,
-              org_id: orgId,
+        // KR 업데이트
+        for (const kr of obj.keyResults) {
+          if (kr.id.startsWith('temp-')) {
+            await supabase.from('key_results').insert({
+              objective_id: obj.id,
+              org_id: selectedOrgId,
               name: kr.name,
-              definition: kr.definition,
-              formula: kr.formula,
-              unit: kr.unit,
               weight: kr.weight,
               target_value: kr.targetValue,
+              unit: kr.unit,
               bii_type: kr.biiType,
               kpi_category: kr.kpiCategory,
               perspective: kr.perspective,
-              indicator_type: kr.indicatorType,
-              measurement_cycle: kr.measurementCycle,
               grade_criteria: kr.gradeCriteria,
-              quarterly_targets: kr.quarterlyTargets,
-              current_value: 0,
-              source: isExistingKR ? 'manual' : 'manual',
-              status: 'draft',
-              version: krNewVersion,
-              is_latest: true,
-              original_kr_id: krOriginalId,
             });
-          if (error) throw new Error(`KR 저장 실패: ${error.message}`);
+          } else {
+            await supabase
+              .from('key_results')
+              .update({
+                name: kr.name,
+                weight: kr.weight,
+                target_value: kr.targetValue,
+                unit: kr.unit,
+                bii_type: kr.biiType,
+                kpi_category: kr.kpiCategory,
+                perspective: kr.perspective,
+                grade_criteria: kr.gradeCriteria,
+              })
+              .eq('id', kr.id);
+          }
         }
       }
-
-      await fetchObjectives(orgId);
-      await fetchKRs(orgId);
-      
-      alert('✅ 저장되었습니다!');
-      navigate('/okr/team'); 
-
-    } catch (error: any) {
-      console.error(error);
-      alert(`저장 중 오류가 발생했습니다: ${error.message}`);
-    } finally {
-      setIsSaving(false);
     }
-  };
+
+    if (showAlert) {
+      alert('✅ 임시 저장되었습니다.');
+    }
+    // 화면 유지 (navigate 제거)
+
+  } catch (err: any) {
+    console.error('저장 실패:', err);
+    alert(`저장 실패: ${err.message}`);
+  } finally {
+    setSaving(false);
+  }
+};
 
   const steps = [
     { id: 0, name: '전략방향', description: '전사 전략 및 조직 미션 확인' },
