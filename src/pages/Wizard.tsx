@@ -2755,7 +2755,7 @@ const handleSave = async (showAlert = true) => {
                 <div className="space-y-2">
                   {objectives.filter(o => o.selected).map(obj => {
                     const linked = cascadingLinked[obj.id];
-                    const parentObj = parentOKRs.find(p => p.objective.id === linked);
+                    const parentObj = parentOKRs.find(p => p.objectiveid === linked);
                     return (
                       <div key={obj.id} className="flex items-center gap-2 text-sm">
                         <span className="text-slate-600">{obj.name.substring(0, 25)}...</span>
