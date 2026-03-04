@@ -834,7 +834,7 @@ export default function Wizard() {
           requester_id: user.id, 
           requester_org_id: orgId, 
           reviewer_org_id: tOrgId,
-          request_type: 'okr_review', // 👈 이 줄을 추가해야 합니다!
+          request_type: 'review',
           title: `${currentOrgName} OKR 검토 요청`,
           message: reviewRequestMessage || `${currentOrgName}의 ${selectedPeriodCode} OKR을 검토해주세요.`,
           status: 'pending', 
