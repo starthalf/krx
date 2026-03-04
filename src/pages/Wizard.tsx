@@ -872,7 +872,7 @@ const handleSendReviewRequest = async () => {
     console.error('검토 요청 실패:', err);
     alert(`발송 실패: ${err.message}`);
   }
-};
+}; 
 
   const handleAIGenerateObjectives = async () => {
     setIsAIGenerating(true);
