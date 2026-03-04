@@ -949,16 +949,9 @@ export default function CEOOKRSetup() {
         }
       }
 
-     if (notifications.length > 0) {
+      if (notifications.length > 0) {
         await supabase.from('notifications').insert(notifications);
       }
-
-      // 🚨 [여기에 추가!] 사이클이 배포되면 무조건 fiscal_periods도 '수립중'으로 강제 동기화
-      await supabase
-        .from('fiscal_periods')
-        .update({ status: 'planning', planning_status: 'in_progress' })
-        .eq('company_id', company.id)
-        .eq('period_code', selectedPeriodCode);
 
       setCycleStarted(true);
       alert(`✅ 사이클이 시작되었습니다! ${notifications.length}명에게 알림이 발송되었습니다.`);
@@ -1952,14 +1945,12 @@ export default function CEOOKRSetup() {
                     >
                       <Megaphone className="w-4 h-4" /> 수립 현황 보기
                     </button>
-                    // Step 7 렌더링 부분에서 버튼 수정
-<button 
-  onClick={() => navigate('/okr-map')}
-  className="px-4 py-2 border border-slate-300 rounded-lg text-slate-700 hover:bg-slate-50 flex items-center gap-2"
->
-  <Link2 className="w-4 h-4" />
-  Alignment 현황 보기
-</button>
+                    <button
+                      onClick={() => navigate('/okr-map')}
+                      className="px-6 py-2.5 border border-slate-300 text-slate-700 rounded-lg font-medium hover:bg-slate-50 flex items-center gap-2"
+                    >
+                      <GitBranch className="w-4 h-4" /> OKR Map 보기
+                    </button>
                   </div>
 
                   {/* 하단 관리 링크 */}
