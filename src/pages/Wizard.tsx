@@ -81,7 +81,7 @@ const { fetchObjectives, fetchKRs, organizations, company } = useStore();
   const [showOneClickModal, setShowOneClickModal] = useState(false);
   const [isAIGenerating, setIsAIGenerating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
+ const [submitting, setSubmitting] = useState(false);
   
   // 데이터 입력 관련
   const [mission, setMission] = useState('고객 중심의 마케팅 전략을 통한 시장 점유율 확대');
