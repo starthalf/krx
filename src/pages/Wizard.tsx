@@ -685,18 +685,21 @@ const handleSubmitForApproval = async () => {
     return;
   }
 
-  const selectedIds = objectives
-    .filter(o => selectedObjectives.includes(o.id))
-    .map(o => o.id);
-
-  if (selectedIds.length === 0) {
+  const selectedObjs = objectives.filter(o => o.selected);
+  if (selectedObjs.length === 0) {
     alert('제출할 목표를 선택해주세요.');
     return;
   }
 
+  const targetOrg = organizations.find(o => o.id === selectedOrgId);
+  const companyId = targetOrg?.companyId || company?.id;
+
   setSubmitting(true);
   try {
-    // 1. okr_sets 테이블에 INSERT 또는 UPDATE (upsert)
+    // 먼저 저장
+    await handleSave(false);
+
+    // 1. okr_sets 테이블에 submitted 상태로 업데이트
     const { data: existingSet } = await supabase
       .from('okr_sets')
       .select('id, version')
@@ -711,14 +714,14 @@ const handleSubmitForApproval = async () => {
     const { data: okrSet, error: setError } = await supabase
       .from('okr_sets')
       .upsert({
-        id: existingSet?.id || undefined, // 기존 있으면 업데이트
+        id: existingSet?.id || undefined,
         org_id: selectedOrgId,
         period: selectedPeriodCode,
         status: 'submitted',
         version: newVersion,
         submitted_at: new Date().toISOString(),
         submitted_by: user.id,
-        current_step: currentStep, // 진행 단계 저장
+        current_step: currentStep,
       }, { 
         onConflict: 'org_id,period',
         ignoreDuplicates: false 
@@ -728,28 +731,29 @@ const handleSubmitForApproval = async () => {
 
     if (setError) throw setError;
 
-    // 2. objectives 상태 업데이트
-    const { error: objError } = await supabase
-      .from('objectives')
-      .update({ 
-        approval_status: 'submitted',
-        okr_set_id: okrSet.id // okr_set과 연결
-      })
-      .in('id', selectedIds);
-
-    if (objError) throw objError;
+    // 2. objectives 상태 업데이트 (DB에 저장된 실제 ID만)
+    const realObjIds = selectedObjs
+      .filter(o => !o.id.startsWith('obj-new-') && !o.id.match(/^\d+$/))
+      .map(o => o.id);
+    
+    if (realObjIds.length > 0) {
+      await supabase
+        .from('objectives')
+        .update({ 
+          approval_status: 'submitted',
+          okr_set_id: okrSet.id
+        })
+        .in('id', realObjIds);
+    }
 
     // 3. 상위 조직장(또는 CEO)에게 알림 발송
-    const currentOrg = organizations.find(o => o.id === selectedOrgId);
     let reviewerId: string | null = null;
 
-    // 상위 조직 찾기
-    if (currentOrg?.parent_id) {
-      // 상위 조직의 조직장 찾기
+    if (targetOrg?.parentOrgId) {
       const { data: parentHead } = await supabase
         .from('user_roles')
         .select('profile_id, roles!inner(name)')
-        .eq('org_id', currentOrg.parent_id)
+        .eq('org_id', targetOrg.parentOrgId)
         .in('roles.name', ['org_head', 'company_admin', 'ceo'])
         .limit(1)
         .maybeSingle();
@@ -757,12 +761,11 @@ const handleSubmitForApproval = async () => {
       reviewerId = parentHead?.profile_id || null;
     }
 
-    // 상위 조직장 없으면 CEO 찾기
-    if (!reviewerId) {
+    if (!reviewerId && companyId) {
       const { data: ceoRole } = await supabase
         .from('user_roles')
         .select('profile_id, roles!inner(name)')
-        .eq('company_id', company?.id)
+        .eq('company_id', companyId)
         .eq('roles.name', 'ceo')
         .limit(1)
         .maybeSingle();
@@ -770,13 +773,12 @@ const handleSubmitForApproval = async () => {
       reviewerId = ceoRole?.profile_id || null;
     }
 
-    // 알림 발송
     if (reviewerId) {
       await supabase.from('notifications').insert({
         recipient_id: reviewerId,
         type: 'okr_submitted',
-        title: `${currentOrg?.name || '조직'} OKR이 제출되었습니다`,
-        message: `${selectedPeriodCode} 기간 OKR 검토가 필요합니다. (목표 ${selectedIds.length}개)`,
+        title: `${targetOrg?.name || '조직'} OKR이 제출되었습니다`,
+        message: `${selectedPeriodCode} 기간 OKR 검토가 필요합니다. (목표 ${selectedObjs.length}개)`,
         action_url: '/approval-inbox',
         priority: 'high',
         org_id: selectedOrgId,
@@ -784,8 +786,10 @@ const handleSubmitForApproval = async () => {
       });
     }
 
+    setApprovalStatus('submitted');
+    setSubmittedAt(new Date().toISOString());
     alert('✅ OKR이 성공적으로 제출되었습니다. 상위 조직장에게 알림이 전송되었습니다.');
-    navigate('/okr-setup'); // 수립 현황 페이지로 이동
+    navigate('/okr-setup');
 
   } catch (err: any) {
     console.error('제출 실패:', err);
@@ -794,7 +798,6 @@ const handleSubmitForApproval = async () => {
     setSubmitting(false);
   }
 };
-
  // ============================================================
 // handleSendReviewRequest - DB에 실제 저장 + 알림 발송
 // ============================================================
