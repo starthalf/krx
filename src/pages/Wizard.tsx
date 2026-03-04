@@ -60,7 +60,7 @@ interface KRCandidate {
 export default function Wizard() {
   const navigate = useNavigate();
   const { orgId: urlOrgId } = useParams<{ orgId: string }>();
-  const { fetchObjectives, fetchKRs, organizations, company } = useStore();
+  const { fetchObjectives, fetchKRs, organizations } = useStore();
   const { user } = useAuth();
 
   // ==================== State 관리 ====================
@@ -81,7 +81,6 @@ export default function Wizard() {
   const [showOneClickModal, setShowOneClickModal] = useState(false);
   const [isAIGenerating, setIsAIGenerating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
   
   // 데이터 입력 관련
   const [mission, setMission] = useState('고객 중심의 마케팅 전략을 통한 시장 점유율 확대');
@@ -244,20 +243,9 @@ export default function Wizard() {
   const [objectives, setObjectives] = useState<ObjectiveCandidate[]>([]);
   const [krs, setKrs] = useState<(KRCandidate & { selected?: boolean; parentObjId?: string | null })[]>([]);
 
-  // DB 초안 로드 함수 (okr_sets 연동 + current_step 복원)
+  // DB 초안 로드 함수
   const loadDraftFromDB = async (targetOrgId: string) => {
     try {
-      // 1. okr_sets에서 현재 기간의 저장 정보 조회 (단계 복원용)
-      const { data: okrSet } = await supabase
-        .from('okr_sets')
-        .select('id, current_step, status')
-        .eq('org_id', targetOrgId)
-        .eq('period', selectedPeriodCode)
-        .order('version', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      // 2. objectives 조회 (원본 쿼리 유지)
       const { data: objs, error: objErr } = await supabase
         .from('objectives')
         .select(`
@@ -291,7 +279,6 @@ export default function Wizard() {
         setObjectives(loadedObjectives);
         setSelectedObjectiveTab(loadedObjectives[0]?.id || '');
 
-        // 3. KR 로드
         const objIds = objs.map((o: any) => o.id);
         const { data: allKRs } = await supabase
           .from('key_results')
@@ -328,15 +315,8 @@ export default function Wizard() {
         }
 
         setShowOneClickModal(false);
-        
-        // 4. 저장된 단계가 있으면 복원, 없으면 Step 1
-        if (okrSet?.current_step && okrSet.current_step > 0) {
-          setCurrentStep(okrSet.current_step);
-        } else {
-          setCurrentStep(1);
-        }
+        setCurrentStep(1);
       } else {
-        // objectives가 없음 = 초안이 없음
         setHasDraft(false);
         setShowOneClickModal(true);
       }
@@ -681,203 +661,34 @@ export default function Wizard() {
     setCurrentStep(0);
   };
 
-  // ============================================================
-  // handleSubmitForApproval - okr_sets 테이블 연동 + 알림 발송
-  // ============================================================
   const handleSubmitForApproval = async () => {
-    if (!selectedOrgId || !user?.id) {
-      alert('조직 또는 사용자 정보가 없습니다.');
-      return;
-    }
-
-    const selectedObjs = objectives.filter(o => o.selected);
-    if (selectedObjs.length === 0) {
-      alert('제출할 목표를 선택해주세요.');
-      return;
-    }
-
+    if (!orgId) return;
     if (!confirm('목표를 상위 조직에 제출하시겠습니까?')) return;
 
-    const targetOrg = organizations.find(o => o.id === selectedOrgId);
-    const companyId = targetOrg?.companyId || company?.id;
-
-    setSubmitting(true);
     try {
-      // 먼저 저장
-      await handleSave(false);
-
-      // 1. okr_sets 테이블에 submitted 상태로 업데이트
-      const { data: existingSet } = await supabase
-        .from('okr_sets')
-        .select('id, version')
-        .eq('org_id', selectedOrgId)
-        .eq('period', selectedPeriodCode)
-        .order('version', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      const newVersion = existingSet ? existingSet.version + 1 : 1;
-
-      const { data: okrSet, error: setError } = await supabase
-        .from('okr_sets')
-        .upsert({
-          id: existingSet?.id || undefined,
-          org_id: selectedOrgId,
-          period: selectedPeriodCode,
-          status: 'submitted',
-          version: newVersion,
-          submitted_at: new Date().toISOString(),
-          submitted_by: user.id,
-          current_step: currentStep,
-        }, { 
-          onConflict: 'org_id,period',
-          ignoreDuplicates: false 
-        })
-        .select()
-        .single();
-
-      if (setError) throw setError;
-
-      // 2. objectives 상태 업데이트 (DB에 저장된 실제 ID만)
-      const realObjIds = selectedObjs
-        .filter(o => !o.id.startsWith('obj-new-') && !o.id.match(/^\d+$/))
-        .map(o => o.id);
-      
-      if (realObjIds.length > 0) {
+      const selectedIds = objectives.filter(o => o.selected && o.source).map(o => o.id);
+      if (selectedIds.length > 0) {
         await supabase
           .from('objectives')
-          .update({ 
-            approval_status: 'submitted',
-            okr_set_id: okrSet.id
-          })
-          .in('id', realObjIds);
+          .update({ approval_status: 'submitted', status: 'submitted' })
+          .in('id', selectedIds);
       }
-
-      // 3. 상위 조직장(또는 CEO)에게 알림 발송
-      let reviewerId: string | null = null;
-
-      if (targetOrg?.parentOrgId) {
-        const { data: parentHead } = await supabase
-          .from('user_roles')
-          .select('profile_id, roles!inner(name)')
-          .eq('org_id', targetOrg.parentOrgId)
-          .in('roles.name', ['org_head', 'company_admin', 'ceo'])
-          .limit(1)
-          .maybeSingle();
-        
-        reviewerId = parentHead?.profile_id || null;
-      }
-
-      if (!reviewerId && companyId) {
-        const { data: ceoRole } = await supabase
-          .from('user_roles')
-          .select('profile_id, roles!inner(name)')
-          .eq('company_id', companyId)
-          .eq('roles.name', 'ceo')
-          .limit(1)
-          .maybeSingle();
-        
-        reviewerId = ceoRole?.profile_id || null;
-      }
-
-      if (reviewerId) {
-        await supabase.from('notifications').insert({
-          recipient_id: reviewerId,
-          type: 'okr_submitted',
-          title: `${targetOrg?.name || '조직'} OKR이 제출되었습니다`,
-          message: `${selectedPeriodCode} 기간 OKR 검토가 필요합니다. (목표 ${selectedObjs.length}개)`,
-          action_url: '/approval-inbox',
-          priority: 'high',
-          org_id: selectedOrgId,
-          related_id: okrSet.id,
-        });
-      }
-
       setApprovalStatus('submitted');
       setSubmittedAt(new Date().toISOString());
-      alert('✅ OKR이 성공적으로 제출되었습니다. 상위 조직장에게 알림이 전송되었습니다.');
-      navigate('/okr-setup');
-
+      alert('✅ 제출되었습니다. 상위 조직의 검토를 기다려주세요.');
     } catch (err: any) {
-      console.error('제출 실패:', err);
       alert(`제출 실패: ${err.message}`);
-    } finally {
-      setSubmitting(false);
     }
   };
 
-  // ============================================================
-  // handleSendReviewRequest - DB에 실제 저장 + 알림 발송
-  // ============================================================
   const handleSendReviewRequest = async () => {
-    if (reviewRequestOrgs.length === 0) {
-      alert('검토를 요청할 조직을 선택해주세요.');
-      return;
-    }
-
-    if (!selectedOrgId || !user?.id) return;
-
+    if (reviewRequestOrgs.length === 0) return;
     try {
-      const currentOrg = organizations.find(o => o.id === selectedOrgId);
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('full_name')
-        .eq('id', user.id)
-        .single();
-
-      // 선택된 각 조직에 검토 요청 생성
-      for (const targetOrgId of reviewRequestOrgs) {
-        const targetOrg = organizations.find(o => o.id === targetOrgId);
-        
-        // 대상 조직의 조직장 찾기
-        const { data: targetHead } = await supabase
-          .from('user_roles')
-          .select('profile_id, roles!inner(name)')
-          .eq('org_id', targetOrgId)
-          .in('roles.name', ['org_head', 'company_admin'])
-          .limit(1)
-          .maybeSingle();
-
-        if (!targetHead?.profile_id) continue;
-
-        // review_requests 테이블에 INSERT
-        const { data: reviewReq, error: reqError } = await supabase
-          .from('review_requests')
-          .insert({
-            requester_id: user.id,
-            requester_org_id: selectedOrgId,
-            reviewer_id: targetHead.profile_id,
-            reviewer_org_id: targetOrgId,
-            title: `${currentOrg?.name || '조직'} OKR 검토 요청`,
-            message: reviewRequestMessage || `${selectedPeriodCode} 기간 OKR에 대한 검토를 요청드립니다.`,
-            status: 'pending',
-            period: selectedPeriodCode,
-          })
-          .select()
-          .single();
-
-        if (reqError) throw reqError;
-
-        // 대상 조직장에게 알림 발송
-        await supabase.from('notifications').insert({
-          recipient_id: targetHead.profile_id,
-          type: 'review_request',
-          title: `${currentOrg?.name || '조직'}에서 OKR 검토를 요청했습니다`,
-          message: reviewRequestMessage || '유관부서로서 OKR 검토 의견을 부탁드립니다.',
-          action_url: '/approval-inbox',
-          priority: 'normal',
-          org_id: selectedOrgId,
-          related_id: reviewReq.id,
-        });
-      }
-
       alert(`✅ ${reviewRequestOrgs.length}개 조직에 검토 요청을 발송했습니다.`);
       setShowReviewRequestModal(false);
       setReviewRequestOrgs([]);
       setReviewRequestMessage('');
-
     } catch (err: any) {
-      console.error('검토 요청 실패:', err);
       alert(`발송 실패: ${err.message}`);
     }
   };
@@ -916,52 +727,21 @@ export default function Wizard() {
     }
   };
 
-  // ============================================================
-  // handleSave - 임시저장 (okr_sets 연동 + 화면 유지 옵션)
-  // ============================================================
-  const handleSave = async (showAlert = true) => {
-    if (!selectedOrgId || !user?.id) {
-      alert('조직 또는 사용자 정보가 없습니다.');
+  const handleSave = async () => {
+    if (!orgId) {
+      alert('조직 ID가 없습니다. 다시 시도해주세요.');
       return;
     }
 
-    const targetOrg = organizations.find(o => o.id === selectedOrgId);
-    const companyId = targetOrg?.companyId || company?.id;
+    if (!confirm('목표를 저장하시겠습니까?')) return;
 
     setIsSaving(true);
     try {
-      // 1. okr_sets 테이블에 draft 상태로 저장/업데이트
-      const { data: existingSet } = await supabase
-        .from('okr_sets')
-        .select('id, version')
-        .eq('org_id', selectedOrgId)
-        .eq('period', selectedPeriodCode)
-        .order('version', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      const { error: setError } = await supabase
-        .from('okr_sets')
-        .upsert({
-          id: existingSet?.id || undefined,
-          org_id: selectedOrgId,
-          period: selectedPeriodCode,
-          status: 'draft',
-          version: existingSet?.version || 1,
-          submitted_by: user.id,
-          current_step: currentStep,
-          updated_at: new Date().toISOString(),
-        }, { onConflict: 'org_id,period' });
-
-      if (setError) throw setError;
-
-      // 2. objectives + KRs 저장
-      const selectedObjs = objectives.filter(o => o.selected);
-      const existingObjIds = selectedObjs
-        .filter(o => o.source && o.id && !o.id.startsWith('obj-new-') && !o.id.match(/^\d+$/))
+      const selectedObjectives = objectives.filter(o => o.selected);
+      const existingObjIds = selectedObjectives
+        .filter(o => o.source && o.id && !o.id.startsWith('obj-new-'))
         .map(o => o.id);
 
-      // 기존 데이터 비활성화
       if (existingObjIds.length > 0) {
         await supabase.from('objectives').update({ is_latest: false }).in('id', existingObjIds);
         await supabase.from('key_results').update({ is_latest: false }).in('objective_id', existingObjIds).eq('is_latest', true);
@@ -969,8 +749,8 @@ export default function Wizard() {
 
       const objIdMap: Record<string, string> = {};
 
-      for (const obj of selectedObjs) {
-        const isExisting = obj.source && obj.id && !obj.id.startsWith('obj-new-') && !obj.id.match(/^\d+$/);
+      for (const obj of selectedObjectives) {
+        const isExisting = obj.source && obj.id && !obj.id.startsWith('obj-new-');
         const prevVersion = obj.version || 0;
         const newVersion = isExisting ? prevVersion + 1 : 0;
         const originalId = isExisting ? (obj.originalObjId || obj.id) : null;
@@ -978,8 +758,7 @@ export default function Wizard() {
         const { data: savedObj, error: objError } = await supabase
           .from('objectives')
           .insert({
-            org_id: selectedOrgId,
-            company_id: companyId,
+            org_id: orgId,
             name: obj.name,
             bii_type: obj.biiType,
             perspective: obj.perspective,
@@ -989,7 +768,7 @@ export default function Wizard() {
             approval_status: 'draft',
             parent_obj_id: obj.parentObjId || null,
             cascade_type: obj.cascadeType || 'independent',
-            sort_order: selectedObjs.indexOf(obj),
+            sort_order: selectedObjectives.indexOf(obj),
             version: newVersion,
             is_latest: true,
             original_obj_id: originalId,
@@ -1002,11 +781,10 @@ export default function Wizard() {
 
         objIdMap[obj.id] = savedObj.id;
 
-        // KR 저장
         const relatedKRs = krs.filter(k => k.objectiveId === obj.id && k.selected !== false);
         
         for (const kr of relatedKRs) {
-          const isExistingKR = kr.id && !kr.id.startsWith('kr-new-') && !kr.id.startsWith('kr-ai-') && !kr.id.startsWith('kr-pool-') && !kr.id.startsWith('kr-');
+          const isExistingKR = kr.id && !kr.id.startsWith('kr-new-') && !kr.id.startsWith('kr-ai-') && !kr.id.startsWith('kr-pool-');
           const krPrevVersion = (kr as any).version || 0;
           const krNewVersion = isExistingKR ? krPrevVersion + 1 : 0;
           const krOriginalId = isExistingKR ? ((kr as any).originalKrId || kr.id) : null;
@@ -1015,7 +793,7 @@ export default function Wizard() {
             .from('key_results')
             .insert({
               objective_id: savedObj.id,
-              org_id: selectedOrgId,
+              org_id: orgId,
               name: kr.name,
               definition: kr.definition,
               formula: kr.formula,
@@ -1030,7 +808,7 @@ export default function Wizard() {
               grade_criteria: kr.gradeCriteria,
               quarterly_targets: kr.quarterlyTargets,
               current_value: 0,
-              source: 'manual',
+              source: isExistingKR ? 'manual' : 'manual',
               status: 'draft',
               version: krNewVersion,
               is_latest: true,
@@ -1040,14 +818,11 @@ export default function Wizard() {
         }
       }
 
-      // UI state 업데이트 (새 ID로)
-      setObjectives(prev => prev.map(o => objIdMap[o.id] ? { ...o, id: objIdMap[o.id], source: 'manual' } : o));
-      setKrs(prev => prev.map(k => objIdMap[k.objectiveId] ? { ...k, objectiveId: objIdMap[k.objectiveId] } : k));
-
-      if (showAlert) {
-        alert('✅ 임시 저장되었습니다.');
-      }
-      // 화면 유지 (navigate 제거됨)
+      await fetchObjectives(orgId);
+      await fetchKRs(orgId);
+      
+      alert('✅ 저장되었습니다!');
+      navigate('/okr/team'); 
 
     } catch (error: any) {
       console.error(error);
@@ -2596,11 +2371,11 @@ export default function Wizard() {
 
             <div className="flex gap-3">
               <button
-                onClick={() => handleSave(true)}
+                onClick={handleSave}
                 disabled={isSaving}
                 className="flex-1 bg-blue-600 text-white rounded-lg py-3 font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
               >
-                {isSaving ? '저장 중...' : '💾 임시 저장'}
+                {isSaving ? '저장 중...' : '✅ KR 세트 확정 (DB 저장)'}
               </button>
               <button 
                 onClick={() => setShowReviewRequestModal(true)}
@@ -2717,7 +2492,7 @@ export default function Wizard() {
                     <Send className="w-4 h-4" />
                     {approvalStatus === 'draft' ? '상위 조직에 제출' : '수정 후 재제출'}
                   </button>
-                  <button onClick={() => handleSave(true)} disabled={isSaving} className="px-6 border border-slate-300 text-slate-700 rounded-lg py-3 font-medium hover:bg-slate-50 transition-colors">
+                  <button onClick={handleSave} disabled={isSaving} className="px-6 border border-slate-300 text-slate-700 rounded-lg py-3 font-medium hover:bg-slate-50 transition-colors">
                     💾 임시 저장
                   </button>
                 </div>
@@ -2726,7 +2501,7 @@ export default function Wizard() {
                 <button onClick={() => setShowReviewRequestModal(true)} className="flex-1 border border-indigo-300 text-indigo-700 bg-indigo-50 rounded-lg py-3 font-medium hover:bg-indigo-100 transition-colors flex items-center justify-center gap-2">
                   <Users className="w-4 h-4" />유관부서 검토 요청
                 </button>
-                <button onClick={() => navigate('/okr-map')} className="flex-1 border border-slate-300 text-slate-700 rounded-lg py-3 font-medium hover:bg-slate-50 transition-colors flex items-center justify-center gap-2">
+                <button className="flex-1 border border-slate-300 text-slate-700 rounded-lg py-3 font-medium hover:bg-slate-50 transition-colors flex items-center justify-center gap-2">
                   <Link2 className="w-4 h-4" />Alignment 현황 보기
                 </button>
               </div>
@@ -2742,14 +2517,14 @@ export default function Wizard() {
                 <div className="space-y-2">
                   {objectives.filter(o => o.selected).map(obj => {
                     const linked = cascadingLinked[obj.id];
-                    const parentObj = parentOKRs.find(p => p.objectiveId === linked);
+                    const parentObj = parentOKRs.find(p => p.objective.id === linked);
                     return (
                       <div key={obj.id} className="flex items-center gap-2 text-sm">
                         <span className="text-slate-600">{obj.name.substring(0, 25)}...</span>
                         {parentObj ? (
                           <>
                             <span className="text-blue-400">←</span>
-                            <span className="text-blue-600 text-xs bg-blue-50 px-2 py-0.5 rounded">{parentObj.objectiveName.substring(0, 20)}...</span>
+                            <span className="text-blue-600 text-xs bg-blue-50 px-2 py-0.5 rounded">{parentObj.objective.name.substring(0, 20)}...</span>
                           </>
                         ) : (
                           <span className="text-xs text-slate-400 bg-slate-100 px-2 py-0.5 rounded">독립</span>
@@ -2844,4 +2619,4 @@ export default function Wizard() {
       )}
     </div>
   );
-} 
+}
