@@ -2175,6 +2175,19 @@ const handleSave = async (showAlert = true) => {
                                   <option>재무</option><option>고객</option><option>프로세스</option><option>학습성장</option>
                                 </select>
                               </div>
+                              // KR 편집 UI에 추가
+<div className="mb-3">
+  <label className="block text-xs font-medium text-slate-600 mb-1">KPI 구분</label>
+  <select
+    value={kr.kpiCategory || '전략'}
+    onChange={(e) => updateKR(objIndex, krIndex, 'kpiCategory', e.target.value)}
+    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
+  >
+    <option value="전략">전략</option>
+    <option value="고유업무">고유업무</option>
+    <option value="공통">공통</option>
+  </select>
+</div>
                             </div>
                           </div>
 
