@@ -244,88 +244,87 @@ export default function Wizard() {
   const [krs, setKrs] = useState<(KRCandidate & { selected?: boolean; parentObjId?: string | null })[]>([]);
 
   // DB 초안 로드 함수
-  const loadDraftFromDB = async (targetOrgId: string) => {
-    try {
-      const { data: objs, error: objErr } = await supabase
-        .from('objectives')
-        .select(`
-          id, name, bii_type, period, status, source, sort_order,
-          parent_obj_id, cascade_type, approval_status, perspective,
-          version, is_latest, original_obj_id
-        `)
-        .eq('org_id', targetOrgId)
-        .eq('period', selectedPeriodCode)
-        .eq('is_latest', true)
-        .in('source', ['ai_draft', 'manual'])
-        .order('sort_order');
+  // ============================================================
+// loadDraftFromDB - 저장된 진행 단계 복원
+// ============================================================
+const loadDraftFromDB = async () => {
+  if (!selectedOrgId) return;
 
-      if (objErr) throw objErr;
+  setLoading(true);
+  try {
+    // okr_sets에서 현재 기간의 저장 정보 조회
+    const { data: okrSet } = await supabase
+      .from('okr_sets')
+      .select('id, current_step, status')
+      .eq('org_id', selectedOrgId)
+      .eq('period', selectedPeriodCode)
+      .order('version', { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
-      if (objs && objs.length > 0) {
-        setHasDraft(true);
+    // objectives 조회
+    const { data: objs } = await supabase
+      .from('objectives')
+      .select(`
+        id, name, description, bii_type, sort_order, parent_objective_id, status,
+        key_results (
+          id, name, weight, target_value, unit, bii_type, 
+          kpi_category, perspective, grade_criteria
+        )
+      `)
+      .eq('org_id', selectedOrgId)
+      .eq('period', selectedPeriodCode)
+      .in('status', ['draft', 'active', 'agreed'])
+      .order('sort_order');
 
-        const loadedObjectives: ObjectiveCandidate[] = objs.map((obj: any) => ({
-          id: obj.id,
-          name: obj.name,
-          biiType: obj.bii_type || 'Improve',
-          perspective: obj.perspective || '재무',
-          selected: true,
-          parentObjId: obj.parent_obj_id,
-          cascadeType: obj.cascade_type || 'independent',
-          source: obj.source,
-          version: obj.version || 0,
-          originalObjId: obj.original_obj_id || obj.id,
-        }));
-        setObjectives(loadedObjectives);
-        setSelectedObjectiveTab(loadedObjectives[0]?.id || '');
+    if (objs && objs.length > 0) {
+      // 목표 데이터 변환 및 설정
+      const converted = objs.map(obj => ({
+        id: obj.id,
+        name: obj.name,
+        description: obj.description || '',
+        biiType: obj.bii_type,
+        sortOrder: obj.sort_order,
+        parentObjectiveId: obj.parent_objective_id,
+        keyResults: (obj.key_results || []).map((kr: any) => ({
+          id: kr.id,
+          name: kr.name,
+          weight: kr.weight,
+          targetValue: kr.target_value,
+          unit: kr.unit,
+          biiType: kr.bii_type,
+          kpiCategory: kr.kpi_category || '전략',
+          perspective: kr.perspective,
+          gradeCriteria: kr.grade_criteria,
+        })),
+      }));
 
-        const objIds = objs.map((o: any) => o.id);
-        const { data: allKRs } = await supabase
-          .from('key_results')
-          .select('*')
-          .in('objective_id', objIds)
-          .eq('is_latest', true)
-          .order('created_at');
+      setObjectives(converted);
 
-        if (allKRs && allKRs.length > 0) {
-          const loadedKRs = allKRs.map((kr: any) => ({
-            id: kr.id,
-            objectiveId: kr.objective_id,
-            name: kr.name,
-            definition: kr.definition || '',
-            formula: kr.formula || '',
-            unit: kr.unit || '%',
-            weight: kr.weight || 20,
-            targetValue: kr.target_value || 100,
-            biiType: (kr.bii_type || 'Improve') as BIIType,
-            kpiCategory: (kr.kpi_category || '전략') as any,
-            perspective: (kr.perspective || '재무') as any,
-            indicatorType: (kr.indicator_type || '결과') as any,
-            measurementCycle: (kr.measurement_cycle || '월') as any,
-            previousYear: 0,
-            poolMatch: 0,
-            gradeCriteria: kr.grade_criteria || { S: 120, A: 110, B: 100, C: 90, D: 0 },
-            quarterlyTargets: kr.quarterly_targets || { Q1: 0, Q2: 0, Q3: 0, Q4: 0 },
-            selected: true,
-            parentObjId: kr.parent_obj_id || null,
-            version: kr.version || 0,
-            originalKrId: kr.original_kr_id || kr.id,
-          }));
-          setKrs(loadedKRs);
-        }
-
-        setShowOneClickModal(false);
-        setCurrentStep(1);
+      // 저장된 단계로 복원 (없으면 Step 1)
+      if (okrSet?.current_step && okrSet.current_step > 0) {
+        setCurrentStep(okrSet.current_step);
       } else {
-        setHasDraft(false);
-        setShowOneClickModal(true);
+        // 데이터 상태에 따라 적절한 단계로 이동
+        const hasKRs = converted.some(o => o.keyResults.length > 0);
+        if (hasKRs) {
+          setCurrentStep(2); // KR이 있으면 Step 2(KR설정)부터
+        } else {
+          setCurrentStep(1); // 목표만 있으면 Step 1
+        }
       }
-    } catch (err) {
-      console.error('AI 초안 로딩 실패:', err);
-    } finally {
-      setIsLoadingDraft(false);
+    } else {
+      // 데이터 없으면 Step 0(시작)
+      setCurrentStep(0);
+      setObjectives([]);
     }
-  };
+
+  } catch (err) {
+    console.error('Draft 로드 실패:', err);
+  } finally {
+    setLoading(false);
+  }
+};
 
   const loadParentOKRs = async (targetOrgId: string) => {
     try {
