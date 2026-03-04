@@ -2746,33 +2746,33 @@ const handleSave = async (showAlert = true) => {
             </div>
 
             {/* Cascading 상태 요약 */}
-            {parentOKRs.length > 0 && (
-              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
-                <div className="flex items-center gap-2 mb-3">
-                  <GitBranch className="w-4 h-4 text-slate-500" />
-                  <span className="text-sm font-medium text-slate-700">Cascading 연결 현황</span>
-                </div>
-                <div className="space-y-2">
-                  {objectives.filter(o => o.selected).map(obj => {
-                    const linked = cascadingLinked[obj.id];
-                    const parentObj = parentOKRs.find(p => p.objectiveid === linked);
-                    return (
-                      <div key={obj.id} className="flex items-center gap-2 text-sm">
-                        <span className="text-slate-600">{obj.name.substring(0, 25)}...</span>
-                        {parentObj ? (
-                          <>
-                            <span className="text-blue-400">←</span>
-                            <span className="text-blue-600 text-xs bg-blue-50 px-2 py-0.5 rounded">{parentObj.objective.name.substring(0, 20)}...</span>
-                          </>
-                        ) : (
-                          <span className="text-xs text-slate-400 bg-slate-100 px-2 py-0.5 rounded">독립</span>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
+{parentOKRs.length > 0 && (
+  <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
+    <div className="flex items-center gap-2 mb-3">
+      <GitBranch className="w-4 h-4 text-slate-500" />
+      <span className="text-sm font-medium text-slate-700">Cascading 연결 현황</span>
+    </div>
+    <div className="space-y-2">
+      {objectives.filter(o => o.selected).map(obj => {
+        const linked = cascadingLinked[obj.id];
+        const parentObj = parentOKRs.find(p => p.objectiveId === linked);
+        return (
+          <div key={obj.id} className="flex items-center gap-2 text-sm">
+            <span className="text-slate-600">{obj.name.substring(0, 25)}...</span>
+            {parentObj ? (
+              <>
+                <span className="text-blue-400">←</span>
+                <span className="text-blue-600 text-xs bg-blue-50 px-2 py-0.5 rounded">{parentObj.objectiveName.substring(0, 20)}...</span>
+              </>
+            ) : (
+              <span className="text-xs text-slate-400 bg-slate-100 px-2 py-0.5 rounded">독립</span>
             )}
+          </div>
+        );
+      })}
+    </div>
+  </div>
+)}
 
             {/* OKR 토론/코멘트 패널 (승인 과정 논의용) */}
             <OKRCommentPanel
