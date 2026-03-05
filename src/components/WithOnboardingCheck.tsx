@@ -43,7 +43,7 @@ export default function WithOnboardingCheck({ children }: WithOnboardingCheckPro
           .select('role:roles(level)')
           .eq('profile_id', user.id);
 
-        const isCompanyAdmin = userRoles?.some(ur => ur.role?.level >= 90);
+        const isCompanyAdmin = userRoles?.some(ur => ur.role?.level >= 80);
 
         if (isCompanyAdmin && profile.company_id) {
           // 조직 존재 여부 확인
