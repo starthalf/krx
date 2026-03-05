@@ -641,7 +641,6 @@ export default function ApprovalInbox() {
                   </div>
                   <div className="flex items-center gap-3">
                     <p className="text-xs text-slate-500">{selectedSet.period} · v{selectedSet.version}</p>
-                    <button onClick={() => navigate(`/wizard/${selectedSet.org_id}`)} className="text-xs text-blue-600 hover:text-blue-700 flex items-center gap-0.5"><Eye className="w-3 h-3" /> Wizard에서 보기</button>
                   </div>
                 </div>
 
@@ -792,7 +791,6 @@ export default function ApprovalInbox() {
                   </div>
                   <div className="flex items-center gap-3">
                     <p className="text-xs text-slate-500">{selectedSet.period} · v{selectedSet.version}</p>
-                    <button onClick={() => navigate(`/wizard/${selectedSet.org_id}`)} className="text-xs text-blue-600 hover:text-blue-700 flex items-center gap-0.5"><Eye className="w-3 h-3" /> Wizard에서 보기</button>
                   </div>
                 </div>
                 <div className="max-h-[calc(100vh-300px)] overflow-y-auto">
@@ -896,7 +894,6 @@ export default function ApprovalInbox() {
                   </div>
                   <div className="flex items-center gap-3">
                     <p className="text-xs text-slate-500">{selectedSet.period} · v{selectedSet.version}</p>
-                    <button onClick={() => navigate(`/wizard/${selectedSet.org_id}`)} className="text-xs text-blue-600 hover:text-blue-700 flex items-center gap-0.5"><Eye className="w-3 h-3" /> Wizard에서 보기</button>
                   </div>
                 </div>
                 <div className="max-h-[calc(100vh-300px)] overflow-y-auto">
