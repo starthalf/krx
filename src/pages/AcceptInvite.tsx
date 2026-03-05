@@ -102,7 +102,7 @@ export default function AcceptInvite() {
       if (invitationData.role_id) {
         const { data: role } = await supabase
           .from('roles')
-          .select('display_name')
+          .select('display_name, name')
           .eq('id', invitationData.role_id)
           .single();
         roleName = role?.display_name || '';
@@ -144,7 +144,8 @@ export default function AcceptInvite() {
         setFullName(invitationData.full_name);
       }
 
-      if (!invitationData.org_id || !invitationData.role_id) {
+      // ★ role_id가 이미 지정된 경우(회사관리자 등)는 조직 목록 로드 불필요
+      if (!invitationData.role_id && !invitationData.org_id) {
         await loadOrganizations(invitationData.company_id);
       }
 
@@ -166,7 +167,8 @@ export default function AcceptInvite() {
     setOrganizations(orgs || []);
   };
 
-const needsOrgRoleSelection = !invitation?.role_id && !invitation?.org_id;
+  // ★ role_id가 이미 지정된 경우(회사관리자 등)는 소속 선택 불필요
+  const needsOrgRoleSelection = !invitation?.role_id && !invitation?.org_id;
 
   const handleAccept = async () => {
     if (!token || !invitation) return;
@@ -186,16 +188,17 @@ const needsOrgRoleSelection = !invitation?.role_id && !invitation?.org_id;
       return;
     }
 
-if (needsOrgRoleSelection) {
-  if (!selectedOrgId) {
-    alert('소속 조직을 선택해주세요');
-    return;
-  }
-  if (!selectedRoleType) {
-    alert('역할을 선택해주세요');
-    return;
-  }
-}
+    // ★ 소속/역할 선택이 필요한 경우에만 유효성 검사
+    if (needsOrgRoleSelection) {
+      if (!selectedOrgId) {
+        alert('소속 조직을 선택해주세요');
+        return;
+      }
+      if (!selectedRoleType) {
+        alert('역할을 선택해주세요');
+        return;
+      }
+    }
 
     try {
       setAccepting(true);
@@ -241,7 +244,6 @@ if (needsOrgRoleSelection) {
       }
 
       // ── ★ 2. 초대 상태를 즉시 accepted로 업데이트 ──
-      //    (이후 프로필/역할 생성에서 에러가 나도 초대는 수락 처리됨)
       console.log('✅ 초대 상태 accepted로 업데이트');
       await supabase
         .from('invitations')
@@ -280,51 +282,81 @@ if (needsOrgRoleSelection) {
       }
 
       // ── 4. user_roles 할당 ──
-     const orgId = invitation.org_id || selectedOrgId || null;  // ★ '' → null 변환
-let roleId = invitation.role_id;
+      // ★ orgId: 빈 문자열('')을 null로 확실히 변환
+      const orgId = invitation.org_id || selectedOrgId || null;
+      const effectiveOrgId = orgId && orgId.trim() !== '' ? orgId : null;
 
-if (!roleId) {
-  const { data: roleData } = await supabase
-    .from('roles')
-    .select('id')
-    .eq('name', selectedRoleType || 'team_member')
-    .single();
-  roleId = roleData?.id;
-}
+      let roleId = invitation.role_id;
 
-if (roleId) {  // ★ orgId 필수 조건 제거
-        const { data: existingRole } = await supabase
-          .from('user_roles')
+      if (!roleId) {
+        const { data: roleData } = await supabase
+          .from('roles')
           .select('id')
-          .eq('profile_id', userId)
-          .eq('org_id', orgId)
-          .maybeSingle();
+          .eq('name', selectedRoleType || 'team_member')
+          .single();
+        roleId = roleData?.id;
+      }
+
+      // ★ roleId만 있으면 진행 (회사관리자는 org 없이도 OK)
+      if (roleId) {
+        // ★ 기존 역할 체크: orgId가 null이면 .is() 사용
+        let existingRole = null;
+        if (effectiveOrgId) {
+          const { data } = await supabase
+            .from('user_roles')
+            .select('id')
+            .eq('profile_id', userId)
+            .eq('org_id', effectiveOrgId)
+            .maybeSingle();
+          existingRole = data;
+        } else {
+          const { data } = await supabase
+            .from('user_roles')
+            .select('id')
+            .eq('profile_id', userId)
+            .is('org_id', null)
+            .eq('role_id', roleId)
+            .maybeSingle();
+          existingRole = data;
+        }
 
         if (!existingRole) {
+          // ★ insert: effectiveOrgId가 null이면 org_id 컬럼에 null 저장
+          const insertData: any = {
+            profile_id: userId,
+            role_id: roleId,
+            granted_by: userId,
+          };
+          // org_id가 있을 때만 포함 (null이면 아예 안 보내서 DB default 사용)
+          if (effectiveOrgId) {
+            insertData.org_id = effectiveOrgId;
+          }
+
           const { error: roleInsertError } = await supabase
             .from('user_roles')
-       .insert({
-  profile_id: userId,
-  org_id: orgId || null,  // ★ null이면 컬럼에 null 저장
-  role_id: roleId,
-  granted_by: userId,
-})
+            .insert(insertData);
 
           if (roleInsertError) {
             console.error('user_roles insert failed:', roleInsertError);
             throw new Error('역할 할당에 실패했습니다: ' + roleInsertError.message);
           }
+          console.log('✅ user_roles 할당 완료:', { roleId, orgId: effectiveOrgId });
         }
       }
 
       // ── 5. onboarding 상태 설정 ──
+      // ★ 방금 insert한 역할 포함해서 다시 조회
       const { data: userRoles } = await supabase
         .from('user_roles')
         .select('roles!inner(level)')
         .eq('profile_id', userId);
 
+      console.log('📋 userRoles 조회 결과:', userRoles);
+
       const maxLevel = Math.max(...(userRoles?.map((r: any) => r.roles?.level || 0) || [0]));
       const isCompanyAdmin = maxLevel >= 90;
+
+      console.log('🔑 maxLevel:', maxLevel, 'isCompanyAdmin:', isCompanyAdmin);
 
       await supabase
         .from('profiles')
@@ -343,9 +375,11 @@ if (roleId) {  // ★ orgId 필수 조건 제거
       }
 
       if (isCompanyAdmin) {
+        console.log('🚀 회사관리자 → onboarding으로 이동');
         alert('가입이 완료되었습니다! 조직 구조를 설정해주세요.');
         navigate('/onboarding');
       } else {
+        console.log('🚀 일반 사용자 → dashboard로 이동');
         alert('가입 및 초대 수락이 완료되었습니다!');
         navigate('/dashboard');
       }
