@@ -141,60 +141,74 @@ export default function ApprovalInbox() {
     } catch (err) { console.warn('사이클 조회 실패:', err); }
   };
 
-  // ── OKR Sets 조회 ──
+  // ── 내가 조직장인 조직 + 직속 하위 조직 ID 캐시 ──
+  const [myVisibleOrgIds, setMyVisibleOrgIds] = useState<string[]>([]);
+  const [allOkrSets, setAllOkrSets] = useState<OKRSet[]>([]);
+
+  const fetchMyVisibleOrgs = async () => {
+    if (!user?.id) return;
+    try {
+      const { data: myRoles } = await supabase
+        .from('user_roles')
+        .select('org_id, roles!inner(level)')
+        .eq('profile_id', user.id);
+
+      const myLeaderOrgIds = (myRoles || [])
+        .filter((r: any) => r.roles?.level >= 70)
+        .map((r: any) => r.org_id);
+
+      if (myLeaderOrgIds.length > 0) {
+        const childOrgIds = organizations
+          .filter(o => myLeaderOrgIds.includes(o.parentOrgId || ''))
+          .map(o => o.id);
+        setMyVisibleOrgIds([...myLeaderOrgIds, ...childOrgIds]);
+      }
+    } catch (err) { console.warn('조직 권한 조회 실패:', err); }
+  };
+
+  // ── OKR Sets 전체 조회 (탭과 무관하게 한 번에) ──
   const fetchOKRSets = async () => {
     if (!user?.id) return;
     setLoading(true);
     try {
-      let query = supabase.from('okr_sets').select('*').order('submitted_at', { ascending: false });
-      if (activeTab === 'pending') {
-        // 내가 제출한 건은 내 승인대기함에 보이지 않게
-        query = query.in('status', ['submitted', 'under_review']).neq('submitted_by', user.id);
-      }
-      else if (activeTab === 'completed') {
-        // 내가 제출한 건은 처리완료에서 제외 (내 제출 현황에서만 표시)
-        query = query.in('status', ['approved', 'rejected', 'revision_requested', 'finalized']).neq('submitted_by', user.id);
-      }
-      else if (activeTab === 'my_submissions') {
-        query = query.eq('submitted_by', user.id);
-      }
-
-      const { data, error } = await query;
+      const { data, error } = await supabase
+        .from('okr_sets')
+        .select('*')
+        .order('submitted_at', { ascending: false });
       if (error) throw error;
 
-      let filtered = data || [];
-
-      // pending/completed 탭: 내가 관리하는 직속 하위 조직의 건만 표시
-      if (activeTab === 'pending' || activeTab === 'completed') {
-        // 내가 조직장인 조직 목록
-        const { data: myRoles } = await supabase
-          .from('user_roles')
-          .select('org_id, roles!inner(level)')
-          .eq('profile_id', user.id);
-        
-        const myLeaderOrgIds = (myRoles || [])
-          .filter((r: any) => r.roles?.level >= 70)
-          .map((r: any) => r.org_id);
-
-        if (myLeaderOrgIds.length > 0) {
-          // 내가 조직장인 조직의 직속 하위 조직만 필터
-          const childOrgIds = organizations
-            .filter(o => myLeaderOrgIds.includes(o.parentOrgId || ''))
-            .map(o => o.id);
-          
-          // 내가 조직장인 조직 자체 + 직속 하위 조직의 제출건만 표시
-          const visibleOrgIds = [...myLeaderOrgIds, ...childOrgIds];
-          filtered = filtered.filter(set => visibleOrgIds.includes(set.org_id));
-        }
-      }
-
-      setOkrSets(filtered.map(set => {
+      const enriched = (data || []).map(set => {
         const org = organizations.find(o => o.id === set.org_id);
         return { ...set, org_name: org?.name || '알 수 없는 조직', org_level: org?.level || '' };
-      }));
+      });
+
+      setAllOkrSets(enriched);
     } catch (err) { console.warn('OKR Set 조회 실패:', err); }
     finally { setLoading(false); }
   };
+
+  // ── 탭별 필터링 (렌더링 시점에 계산) ──
+  const pendingOkrSets = allOkrSets.filter(s =>
+    ['submitted', 'under_review'].includes(s.status) &&
+    s.submitted_by !== user?.id &&
+    (myVisibleOrgIds.length === 0 || myVisibleOrgIds.includes(s.org_id))
+  );
+
+  const completedOkrSets = allOkrSets.filter(s =>
+    ['approved', 'rejected', 'revision_requested', 'finalized'].includes(s.status) &&
+    s.submitted_by !== user?.id &&
+    (myVisibleOrgIds.length === 0 || myVisibleOrgIds.includes(s.org_id))
+  );
+
+  const mySubmissionSets = allOkrSets.filter(s =>
+    s.submitted_by === user?.id
+  );
+
+  // 현재 탭에 표시할 OKR Sets
+  const okrSets = activeTab === 'pending' ? pendingOkrSets
+    : activeTab === 'completed' ? completedOkrSets
+    : activeTab === 'my_submissions' ? mySubmissionSets
+    : [];
 
   // ── 유관부서 검토 요청 조회 ──
   const fetchReviewRequests = async () => {
@@ -272,7 +286,8 @@ export default function ApprovalInbox() {
   };
 
   useEffect(() => { if (company?.id) fetchActiveCycle(); }, [company?.id]);
-  useEffect(() => { fetchOKRSets(); fetchReviewRequests(); }, [user?.id, activeTab, organizations]);
+  useEffect(() => { fetchMyVisibleOrgs(); }, [user?.id, organizations]);
+  useEffect(() => { fetchOKRSets(); fetchReviewRequests(); }, [user?.id, organizations]);
 
   // ── OKR 상세 로딩 (okr_sets) ──
   const loadOKRDetail = async (orgId: string, period?: string): Promise<OKRDetail> => {
@@ -379,16 +394,13 @@ export default function ApprovalInbox() {
     return `${Math.floor(hours / 24)}일 전`;
   };
 
-  // ── 통합 리스트 생성 ──
+  // ── 통합 리스트 생성 (탭과 무관하게 안정적 카운트) ──
   const pendingReviewRequests = reviewRequests.filter(r => r.status === 'pending');
   const completedReviewRequests = reviewRequests.filter(r => r.status === 'completed');
 
-  const pendingOKRCount = okrSets.filter(s => ['submitted', 'under_review'].includes(s.status)).length;
-  const totalPendingCount = (activeTab === 'pending' ? pendingOKRCount : 0) + pendingReviewRequests.length;
-
   // 검토대기 탭: OKR 제출건 + 유관부서 검토요청(pending) 통합
   const pendingListItems: ListItem[] = [
-    ...okrSets.filter(s => ['submitted', 'under_review'].includes(s.status)).map(set => ({
+    ...pendingOkrSets.map(set => ({
       type: 'okr_set' as ListItemType,
       id: set.id,
       sortDate: set.submitted_at || set.id,
@@ -404,7 +416,7 @@ export default function ApprovalInbox() {
 
   // 처리완료 탭: 완료된 OKR + 완료된 유관부서 검토
   const completedListItems: ListItem[] = [
-    ...okrSets.filter(s => ['approved', 'rejected', 'revision_requested', 'finalized'].includes(s.status)).map(set => ({
+    ...completedOkrSets.map(set => ({
       type: 'okr_set' as ListItemType,
       id: set.id,
       sortDate: set.reviewed_at || set.submitted_at || set.id,
