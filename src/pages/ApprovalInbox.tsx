@@ -147,13 +147,47 @@ export default function ApprovalInbox() {
     setLoading(true);
     try {
       let query = supabase.from('okr_sets').select('*').order('submitted_at', { ascending: false });
-      if (activeTab === 'pending') query = query.in('status', ['submitted', 'under_review']);
-      else if (activeTab === 'completed') query = query.in('status', ['approved', 'rejected', 'revision_requested', 'finalized']);
-      else if (activeTab === 'my_submissions') query = query.eq('submitted_by', user.id);
+      if (activeTab === 'pending') {
+        // 내가 제출한 건은 내 승인대기함에 보이지 않게
+        query = query.in('status', ['submitted', 'under_review']).neq('submitted_by', user.id);
+      }
+      else if (activeTab === 'completed') {
+        query = query.in('status', ['approved', 'rejected', 'revision_requested', 'finalized']);
+      }
+      else if (activeTab === 'my_submissions') {
+        query = query.eq('submitted_by', user.id);
+      }
 
       const { data, error } = await query;
       if (error) throw error;
-      setOkrSets((data || []).map(set => {
+
+      let filtered = data || [];
+
+      // pending/completed 탭: 내가 관리하는 직속 하위 조직의 건만 표시
+      if (activeTab === 'pending' || activeTab === 'completed') {
+        // 내가 조직장인 조직 목록
+        const { data: myRoles } = await supabase
+          .from('user_roles')
+          .select('org_id, roles!inner(level)')
+          .eq('profile_id', user.id);
+        
+        const myLeaderOrgIds = (myRoles || [])
+          .filter((r: any) => r.roles?.level >= 70)
+          .map((r: any) => r.org_id);
+
+        if (myLeaderOrgIds.length > 0) {
+          // 내가 조직장인 조직의 직속 하위 조직만 필터
+          const childOrgIds = organizations
+            .filter(o => myLeaderOrgIds.includes(o.parentOrgId || ''))
+            .map(o => o.id);
+          
+          // 내가 조직장인 조직 자체 + 직속 하위 조직의 제출건만 표시
+          const visibleOrgIds = [...myLeaderOrgIds, ...childOrgIds];
+          filtered = filtered.filter(set => visibleOrgIds.includes(set.org_id));
+        }
+      }
+
+      setOkrSets(filtered.map(set => {
         const org = organizations.find(o => o.id === set.org_id);
         return { ...set, org_name: org?.name || '알 수 없는 조직', org_level: org?.level || '' };
       }));
