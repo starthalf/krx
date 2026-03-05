@@ -796,22 +796,7 @@ export default function Wizard() {
         }
       }
 
-      // CEO(전사 레벨) 알림
-      const companyOrg = organizations.find(o => o.level === '전사');
-      if (companyOrg && companyOrg.id !== parentOrg?.id) {
-        const { data: ceoRoles } = await supabase
-          .from('user_roles').select('profile_id, roles!inner(level)').eq('org_id', companyOrg.id);
-        const ceos = ceoRoles?.filter((m: any) => m.roles?.level >= 90) || [];
-        for (const ceo of ceos) {
-          await supabase.from('notifications').insert({
-            recipient_id: ceo.profile_id, sender_id: user.id, sender_name: senderName,
-            type: 'okr_submitted', title: `📋 ${currentOrgName} OKR 제출됨`,
-            message: `${currentOrgName}에서 ${selectedPeriodCode} OKR을 제출했습니다.`,
-            priority: 'normal', action_url: '/approval-inbox', org_id: orgId,
-          });
-        }
-      }
-
+     
       setApprovalStatus('submitted');
       setSubmittedAt(now);
       setToastMessage('✅ 제출되었습니다. 상위 조직의 검토를 기다려주세요.');
