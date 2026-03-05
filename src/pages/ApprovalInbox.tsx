@@ -1,5 +1,5 @@
 // src/pages/ApprovalInbox.tsx
-// 승인 대기함 — 유관부서 검토요청 전용 탭 + OKR 상세 연동
+// 승인 대기함 — 유관부서 검토요청을 검토대기 탭에 통합 + 완료건은 처리완료 탭으로
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -14,7 +14,7 @@ import { getBIIColor } from '../utils/helpers';
 import type { BIIType } from '../types';
 import OKRCommentPanel from '../components/OKRCommentPanel';
 
-type TabType = 'pending' | 'peer_review' | 'completed' | 'my_submissions';
+type TabType = 'pending' | 'completed' | 'my_submissions';
 
 interface OKRSet {
   id: string;
@@ -89,6 +89,16 @@ interface ActiveCycle {
   isOverdue: boolean;
 }
 
+// 통합 리스트 아이템 타입
+type ListItemType = 'okr_set' | 'review_request';
+interface ListItem {
+  type: ListItemType;
+  id: string;
+  sortDate: string; // 정렬용 날짜
+  okrSet?: OKRSet;
+  reviewRequest?: ReviewRequest;
+}
+
 export default function ApprovalInbox() {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -104,7 +114,7 @@ export default function ApprovalInbox() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [activeCycle, setActiveCycle] = useState<ActiveCycle | null>(null);
 
-  // 유관부서 검토 전용
+  // 유관부서 검토 상세
   const [selectedReviewReq, setSelectedReviewReq] = useState<ReviewRequest | null>(null);
   const [reviewReqOKRDetail, setReviewReqOKRDetail] = useState<OKRDetail | null>(null);
   const [reviewReqDetailLoading, setReviewReqDetailLoading] = useState(false);
@@ -165,7 +175,7 @@ export default function ApprovalInbox() {
   };
 
   useEffect(() => { if (company?.id) fetchActiveCycle(); }, [company?.id]);
-  useEffect(() => { if (activeTab !== 'peer_review') fetchOKRSets(); fetchReviewRequests(); }, [user?.id, activeTab, organizations]);
+  useEffect(() => { fetchOKRSets(); fetchReviewRequests(); }, [user?.id, activeTab, organizations]);
 
   // ── OKR 상세 로딩 (okr_sets) ──
   const loadOKRDetail = async (orgId: string, period?: string): Promise<OKRDetail> => {
@@ -225,7 +235,6 @@ export default function ApprovalInbox() {
     try {
       const { error } = await supabase.from('review_requests').update({ status: 'completed', response: reviewResponseText, responded_at: new Date().toISOString() }).eq('id', selectedReviewReq.id);
       if (error) throw error;
-      // 요청자에게 알림 (실패 무시)
       try {
         const { data: myProfile } = await supabase.from('profiles').select('full_name').eq('id', user!.id).single();
         const myOrg = organizations.find(o => o.id === selectedReviewReq.reviewer_org_id);
@@ -239,6 +248,7 @@ export default function ApprovalInbox() {
   const handleQuickResponse = async (reqId: string) => {
     try {
       await supabase.from('review_requests').update({ status: 'completed', response: '확인했습니다.', responded_at: new Date().toISOString() }).eq('id', reqId);
+      setSelectedReviewReq(null); setReviewReqOKRDetail(null);
       fetchReviewRequests();
     } catch (err: any) { alert(`실패: ${err.message}`); }
   };
@@ -272,11 +282,52 @@ export default function ApprovalInbox() {
     return `${Math.floor(hours / 24)}일 전`;
   };
 
+  // ── 통합 리스트 생성 ──
+  const pendingReviewRequests = reviewRequests.filter(r => r.status === 'pending');
+  const completedReviewRequests = reviewRequests.filter(r => r.status === 'completed');
+
   const pendingOKRCount = okrSets.filter(s => ['submitted', 'under_review'].includes(s.status)).length;
-  const pendingReviewCount = reviewRequests.filter(r => r.status === 'pending').length;
+  const totalPendingCount = (activeTab === 'pending' ? pendingOKRCount : 0) + pendingReviewRequests.length;
+
+  // 검토대기 탭: OKR 제출건 + 유관부서 검토요청(pending) 통합
+  const pendingListItems: ListItem[] = [
+    ...okrSets.filter(s => ['submitted', 'under_review'].includes(s.status)).map(set => ({
+      type: 'okr_set' as ListItemType,
+      id: set.id,
+      sortDate: set.submitted_at || set.id,
+      okrSet: set,
+    })),
+    ...pendingReviewRequests.map(req => ({
+      type: 'review_request' as ListItemType,
+      id: req.id,
+      sortDate: req.created_at,
+      reviewRequest: req,
+    })),
+  ].sort((a, b) => new Date(b.sortDate).getTime() - new Date(a.sortDate).getTime());
+
+  // 처리완료 탭: 완료된 OKR + 완료된 유관부서 검토
+  const completedListItems: ListItem[] = [
+    ...okrSets.filter(s => ['approved', 'rejected', 'revision_requested', 'finalized'].includes(s.status)).map(set => ({
+      type: 'okr_set' as ListItemType,
+      id: set.id,
+      sortDate: set.reviewed_at || set.submitted_at || set.id,
+      okrSet: set,
+    })),
+    ...completedReviewRequests.map(req => ({
+      type: 'review_request' as ListItemType,
+      id: req.id,
+      sortDate: req.responded_at || req.created_at,
+      reviewRequest: req,
+    })),
+  ].sort((a, b) => new Date(b.sortDate).getTime() - new Date(a.sortDate).getTime());
+
+  const completedCount = completedListItems.length;
 
   const dDayColor = !activeCycle ? '' : activeCycle.isOverdue ? 'text-red-600' : activeCycle.daysRemaining <= 3 ? 'text-amber-600' : 'text-blue-600';
   const dDayText = !activeCycle ? '' : activeCycle.isOverdue ? `마감 ${Math.abs(activeCycle.daysRemaining)}일 초과` : activeCycle.daysRemaining === 0 ? '오늘 마감' : `D-${activeCycle.daysRemaining}`;
+
+  // 현재 어떤 것이 선택되어 있는지
+  const hasSelection = selectedSet || selectedReviewReq;
 
   // ── OKR 상세 렌더 (공용) ──
   const renderOKRDetail = (detail: OKRDetail | null, isLoading: boolean) => {
@@ -331,6 +382,79 @@ export default function ApprovalInbox() {
     );
   };
 
+  // ── 리스트 아이템 렌더링 ──
+  const renderListItem = (item: ListItem) => {
+    if (item.type === 'okr_set' && item.okrSet) {
+      const set = item.okrSet;
+      return (
+        <div key={set.id} onClick={() => loadDetail(set)}
+          className={`bg-white border-2 rounded-xl p-4 cursor-pointer transition-all hover:shadow-md ${selectedSet?.id === set.id ? 'border-blue-500 shadow-md' : 'border-slate-200'}`}>
+          <div className="flex items-start justify-between mb-2">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                <FileCheck className="w-4 h-4 text-blue-600" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold text-slate-900">{set.org_name}</span>
+                  <span className="text-xs text-slate-400">{set.org_level}</span>
+                </div>
+                <span className="text-xs text-slate-500">{set.period}</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              {getStatusBadge(set.status)}
+              {set.version > 1 && <span className="text-[10px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded">v{set.version}</span>}
+            </div>
+          </div>
+          <div className="flex items-center gap-4 text-xs text-slate-400">
+            {set.submitted_at && <span className="flex items-center gap-1"><Send className="w-3 h-3" />제출: {timeFormat(set.submitted_at)}</span>}
+            {set.reviewed_at && <span className="flex items-center gap-1"><FileCheck className="w-3 h-3" />검토: {timeFormat(set.reviewed_at)}</span>}
+          </div>
+        </div>
+      );
+    }
+
+    if (item.type === 'review_request' && item.reviewRequest) {
+      const req = item.reviewRequest;
+      const isPending = req.status === 'pending';
+      return (
+        <div key={req.id} onClick={() => loadReviewReqDetail(req)}
+          className={`bg-white border-2 rounded-xl p-4 cursor-pointer transition-all hover:shadow-md ${
+            selectedReviewReq?.id === req.id 
+              ? 'border-violet-500 shadow-md' 
+              : isPending ? 'border-slate-200' : 'border-slate-200 opacity-70'
+          }`}>
+          <div className="flex items-start justify-between mb-2">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 bg-violet-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                <Users className="w-4 h-4 text-violet-600" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold text-slate-900">{req.requester_org_name}</span>
+                  <span className="text-xs text-slate-400">{req.requester_org_level}</span>
+                </div>
+                <span className="text-xs text-violet-600 font-medium">유관부서 검토</span>
+              </div>
+            </div>
+            {isPending
+              ? <span className="text-xs text-violet-600 bg-violet-50 px-2 py-0.5 rounded-full font-medium">검토 대기</span>
+              : <span className="text-xs text-green-600 bg-green-50 px-2 py-0.5 rounded-full font-medium">✅ 완료</span>
+            }
+          </div>
+          <p className="text-sm text-slate-600 mb-1.5 line-clamp-1">{isPending ? req.message : req.response}</p>
+          <div className="flex items-center gap-3 text-xs text-slate-400">
+            <span>{req.period}</span>
+            <span>{relativeTime(isPending ? req.created_at : (req.responded_at || req.created_at))}</span>
+          </div>
+        </div>
+      );
+    }
+
+    return null;
+  };
+
   // ═══════════════════════════ RENDER ═══════════════════════════
   return (
     <div className="p-6 max-w-6xl mx-auto">
@@ -361,12 +485,11 @@ export default function ApprovalInbox() {
         </div>
       )}
 
-      {/* 탭 */}
+      {/* 탭 — peer_review 탭 제거 */}
       <div className="flex gap-1 mb-6 bg-slate-100 rounded-lg p-1 w-fit">
         {([
-          { key: 'pending' as TabType, label: '검토 대기', count: pendingOKRCount, icon: FileCheck },
-          { key: 'peer_review' as TabType, label: '유관부서 검토', count: pendingReviewCount, icon: Users },
-          { key: 'completed' as TabType, label: '처리 완료', icon: CheckCheck },
+          { key: 'pending' as TabType, label: '검토 대기', count: pendingListItems.length, icon: FileCheck },
+          { key: 'completed' as TabType, label: '처리 완료', count: completedCount > 0 ? completedCount : undefined, icon: CheckCheck },
           { key: 'my_submissions' as TabType, label: '내 제출 현황', icon: Send },
         ]).map(tab => (
           <button key={tab.key} onClick={() => { setActiveTab(tab.key); setSelectedSet(null); setSelectedReviewReq(null); }}
@@ -374,175 +497,33 @@ export default function ApprovalInbox() {
             <tab.icon className="w-3.5 h-3.5" />
             {tab.label}
             {tab.count !== undefined && tab.count > 0 && (
-              <span className={`text-[10px] font-bold w-5 h-5 rounded-full flex items-center justify-center ${tab.key === 'peer_review' ? 'bg-violet-500 text-white' : 'bg-red-500 text-white'}`}>{tab.count}</span>
+              <span className="text-[10px] font-bold w-5 h-5 rounded-full flex items-center justify-center bg-red-500 text-white">{tab.count}</span>
             )}
           </button>
         ))}
       </div>
 
-      {/* ═══════ 유관부서 검토 탭 ═══════ */}
-      {activeTab === 'peer_review' && (
+      {/* ═══════ 검토 대기 탭 (OKR 제출 + 유관부서 검토 통합) ═══════ */}
+      {activeTab === 'pending' && (
         <div className="grid grid-cols-12 gap-6">
-          <div className={selectedReviewReq ? 'col-span-4' : 'col-span-12'}>
-            {reviewRequests.length === 0 ? (
-              <div className="text-center py-16"><Users className="w-12 h-12 text-slate-300 mx-auto mb-3" /><p className="text-slate-500 font-medium">유관부서 검토 요청이 없습니다</p><p className="text-xs text-slate-400 mt-2">다른 조직에서 OKR 검토를 요청하면 여기에 표시됩니다</p></div>
-            ) : (
-              <div className="space-y-2">
-                {/* 대기 중 */}
-                {reviewRequests.filter(r => r.status === 'pending').length > 0 && (
-                  <div>
-                    <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 px-1">대기 중 ({reviewRequests.filter(r => r.status === 'pending').length})</h3>
-                    {reviewRequests.filter(r => r.status === 'pending').map(req => (
-                      <div key={req.id} onClick={() => loadReviewReqDetail(req)}
-                        className={`bg-white border-2 rounded-xl p-4 cursor-pointer transition-all hover:shadow-md mb-2 ${selectedReviewReq?.id === req.id ? 'border-violet-500 shadow-md' : 'border-slate-200'}`}>
-                        <div className="flex items-start justify-between mb-2">
-                          <div className="flex items-center gap-2">
-                            <div className="w-8 h-8 bg-violet-100 rounded-lg flex items-center justify-center"><Users className="w-4 h-4 text-violet-600" /></div>
-                            <div>
-                              <span className="font-semibold text-slate-900 text-sm">{req.requester_org_name}</span>
-                              <span className="text-xs text-slate-400 ml-1.5">{req.requester_org_level}</span>
-                            </div>
-                          </div>
-                          <span className="text-xs text-violet-600 bg-violet-50 px-2 py-0.5 rounded-full font-medium">검토 대기</span>
-                        </div>
-                        <p className="text-sm text-slate-700 mb-1.5 line-clamp-2">{req.message}</p>
-                        <div className="flex items-center gap-3 text-xs text-slate-400"><span>{req.period}</span><span>{relativeTime(req.created_at)}</span></div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {/* 완료 */}
-                {reviewRequests.filter(r => r.status === 'completed').length > 0 && (
-                  <div className="mt-4">
-                    <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 px-1">완료 ({reviewRequests.filter(r => r.status === 'completed').length})</h3>
-                    {reviewRequests.filter(r => r.status === 'completed').map(req => (
-                      <div key={req.id} onClick={() => loadReviewReqDetail(req)}
-                        className={`bg-white border rounded-xl p-4 cursor-pointer transition-all hover:shadow-sm mb-2 opacity-70 ${selectedReviewReq?.id === req.id ? 'border-violet-400' : 'border-slate-200'}`}>
-                        <div className="flex items-center justify-between mb-1.5">
-                          <span className="font-medium text-slate-700 text-sm">{req.requester_org_name}</span>
-                          <span className="text-xs text-green-600 bg-green-50 px-2 py-0.5 rounded-full font-medium">✅ 완료</span>
-                        </div>
-                        <p className="text-xs text-slate-500 line-clamp-1">{req.response}</p>
-                        <span className="text-xs text-slate-400">{relativeTime(req.responded_at || req.created_at)}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* 오른쪽: 검토 요청 상세 + OKR */}
-          {selectedReviewReq && (
-            <div className="col-span-8">
-              <div className="bg-white border border-slate-200 rounded-xl overflow-hidden sticky top-6">
-                {/* 헤더 */}
-                <div className="px-6 py-4 border-b border-slate-100 bg-gradient-to-r from-violet-50 to-indigo-50">
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-violet-100 rounded-xl flex items-center justify-center"><Users className="w-5 h-5 text-violet-600" /></div>
-                      <div>
-                        <h3 className="text-lg font-bold text-slate-900">{selectedReviewReq.requester_org_name}</h3>
-                        <p className="text-xs text-slate-500">
-                          {selectedReviewReq.period}
-                          {selectedReviewReq.requester_name && ` · 요청자: ${selectedReviewReq.requester_name}`}
-                          {' · '}{relativeTime(selectedReviewReq.created_at)}
-                        </p>
-                      </div>
-                    </div>
-                    <button onClick={() => { setSelectedReviewReq(null); setReviewReqOKRDetail(null); }} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
-                  </div>
-                  <div className="bg-white/70 border border-violet-200 rounded-lg p-3 mt-2">
-                    <div className="flex items-center gap-1.5 mb-1"><MessageSquare className="w-3.5 h-3.5 text-violet-500" /><span className="text-xs font-medium text-violet-700">검토 요청 메시지</span></div>
-                    <p className="text-sm text-slate-700">{selectedReviewReq.message}</p>
-                  </div>
-                </div>
-
-                {/* OKR 내용 */}
-                <div className="max-h-[calc(100vh-420px)] overflow-y-auto px-6 py-5">
-                  <h4 className="text-sm font-semibold text-slate-700 mb-4 flex items-center gap-2">
-                    <Target className="w-4 h-4 text-slate-400" />{selectedReviewReq.requester_org_name}의 OKR
-                  </h4>
-                  {renderOKRDetail(reviewReqOKRDetail, reviewReqDetailLoading)}
-
-                  {/* 이전 응답 */}
-                  {selectedReviewReq.status === 'completed' && selectedReviewReq.response && (
-                    <div className="mt-6 bg-green-50 border border-green-200 rounded-lg p-4">
-                      <div className="flex items-center gap-2 mb-2"><Check className="w-4 h-4 text-green-600" /><span className="text-sm font-medium text-green-800">내 검토 의견</span><span className="text-xs text-green-600">{timeFormat(selectedReviewReq.responded_at)}</span></div>
-                      <p className="text-sm text-green-700">{selectedReviewReq.response}</p>
-                    </div>
-                  )}
-                </div>
-
-                {/* 의견 작성 (pending만) */}
-                {selectedReviewReq.status === 'pending' && (
-                  <div className="px-6 py-4 border-t border-slate-100 bg-slate-50">
-                    <label className="block text-sm font-medium text-slate-700 mb-2">검토 의견 작성</label>
-                    <textarea value={reviewResponseText} onChange={(e) => setReviewResponseText(e.target.value)}
-                      placeholder="OKR에 대한 피드백, 연관성 검토 의견, 조정 제안 등을 작성해주세요..."
-                      className="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm resize-none focus:ring-2 focus:ring-violet-500 outline-none" rows={3} />
-                    <div className="flex gap-2 mt-3">
-                      <button onClick={handleReviewResponse} disabled={reviewResponseLoading || !reviewResponseText.trim()}
-                        className="flex-1 bg-violet-600 text-white rounded-lg py-2.5 font-medium hover:bg-violet-700 disabled:opacity-50 flex items-center justify-center gap-2 transition-colors">
-                        {reviewResponseLoading ? <><RefreshCw className="w-4 h-4 animate-spin" /> 전송 중...</> : <><Send className="w-4 h-4" /> 의견 전송</>}
-                      </button>
-                      <button onClick={() => handleQuickResponse(selectedReviewReq.id)}
-                        className="px-4 border border-slate-300 text-slate-600 rounded-lg py-2.5 hover:bg-slate-100 text-sm font-medium transition-colors">확인 완료</button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ═══════ 기존 탭 (pending / completed / my_submissions) ═══════ */}
-      {activeTab !== 'peer_review' && (
-        <div className="grid grid-cols-12 gap-6">
-          <div className={selectedSet ? 'col-span-5' : 'col-span-12'}>
-            {/* pending 탭에 유관부서 검토 미니배너 */}
-            {activeTab === 'pending' && pendingReviewCount > 0 && (
-              <button onClick={() => setActiveTab('peer_review')}
-                className="w-full bg-violet-50 border border-violet-200 rounded-xl p-3.5 mb-4 text-left hover:bg-violet-100 transition-colors group">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-8 h-8 bg-violet-100 rounded-lg flex items-center justify-center group-hover:bg-violet-200 transition-colors"><Users className="w-4 h-4 text-violet-600" /></div>
-                    <div><span className="text-sm font-medium text-violet-900">유관부서 검토 요청</span><span className="text-xs text-violet-600 ml-2">{pendingReviewCount}건 대기</span></div>
-                  </div>
-                  <ChevronRight className="w-4 h-4 text-violet-400 group-hover:text-violet-600 transition-colors" />
-                </div>
-              </button>
-            )}
-
+          {/* 왼쪽: 통합 리스트 */}
+          <div className={hasSelection ? 'col-span-5' : 'col-span-12'}>
             {loading ? (
               <div className="text-center py-12 text-slate-500 text-sm">불러오는 중...</div>
-            ) : okrSets.length === 0 ? (
+            ) : pendingListItems.length === 0 ? (
               <div className="text-center py-16">
                 <Inbox className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-                <p className="text-slate-500 font-medium">{activeTab === 'pending' ? '검토 대기 중인 OKR이 없습니다' : activeTab === 'completed' ? '처리 완료된 건이 없습니다' : '제출한 OKR이 없습니다'}</p>
-                {activeTab === 'pending' && <p className="text-xs text-slate-400 mt-2">조직들이 OKR을 제출하면 여기에 표시됩니다</p>}
+                <p className="text-slate-500 font-medium">검토 대기 중인 항목이 없습니다</p>
+                <p className="text-xs text-slate-400 mt-2">조직들이 OKR을 제출하거나 유관부서 검토를 요청하면 여기에 표시됩니다</p>
               </div>
             ) : (
               <div className="space-y-3">
-                {okrSets.map(set => (
-                  <div key={set.id} onClick={() => loadDetail(set)}
-                    className={`bg-white border-2 rounded-xl p-4 cursor-pointer transition-all hover:shadow-md ${selectedSet?.id === set.id ? 'border-blue-500 shadow-md' : 'border-slate-200'}`}>
-                    <div className="flex items-start justify-between mb-2">
-                      <div><div className="flex items-center gap-2"><span className="font-semibold text-slate-900">{set.org_name}</span><span className="text-xs text-slate-400">{set.org_level}</span></div><span className="text-xs text-slate-500">{set.period}</span></div>
-                      <div className="flex items-center gap-2">{getStatusBadge(set.status)}{set.version > 1 && <span className="text-[10px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded">v{set.version}</span>}</div>
-                    </div>
-                    <div className="flex items-center gap-4 text-xs text-slate-400">
-                      {set.submitted_at && <span className="flex items-center gap-1"><Send className="w-3 h-3" />제출: {timeFormat(set.submitted_at)}</span>}
-                      {set.reviewed_at && <span className="flex items-center gap-1"><FileCheck className="w-3 h-3" />검토: {timeFormat(set.reviewed_at)}</span>}
-                    </div>
-                  </div>
-                ))}
+                {pendingListItems.map(item => renderListItem(item))}
               </div>
             )}
           </div>
 
-          {/* 상세 패널 */}
+          {/* 오른쪽: OKR Set 상세 */}
           {selectedSet && (
             <div className="col-span-7">
               <div className="bg-white border border-slate-200 rounded-xl overflow-hidden sticky top-6">
@@ -599,13 +580,230 @@ export default function ApprovalInbox() {
                   </div>
                 </div>
 
-                {activeTab === 'pending' && ['submitted', 'under_review'].includes(selectedSet.status) && (
+                {['submitted', 'under_review'].includes(selectedSet.status) && (
                   <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 flex gap-3">
                     <button onClick={() => { setActionType('approve'); setShowActionModal(true); setActionComment(''); }} className="flex-1 bg-green-600 text-white rounded-lg py-2.5 font-medium hover:bg-green-700 flex items-center justify-center gap-2"><Check className="w-4 h-4" /> 승인</button>
                     <button onClick={() => { setActionType('revision_request'); setShowActionModal(true); setActionComment(''); }} className="flex-1 bg-amber-500 text-white rounded-lg py-2.5 font-medium hover:bg-amber-600 flex items-center justify-center gap-2"><MessageSquare className="w-4 h-4" /> 수정 요청</button>
                     <button onClick={() => { setActionType('reject'); setShowActionModal(true); setActionComment(''); }} className="px-4 bg-red-600 text-white rounded-lg py-2.5 font-medium hover:bg-red-700 flex items-center justify-center gap-2"><X className="w-4 h-4" /> 반려</button>
                   </div>
                 )}
+              </div>
+            </div>
+          )}
+
+          {/* 오른쪽: 유관부서 검토 요청 상세 */}
+          {selectedReviewReq && (
+            <div className="col-span-7">
+              <div className="bg-white border border-slate-200 rounded-xl overflow-hidden sticky top-6">
+                {/* 헤더 */}
+                <div className="px-6 py-4 border-b border-slate-100 bg-gradient-to-r from-violet-50 to-indigo-50">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-violet-100 rounded-xl flex items-center justify-center"><Users className="w-5 h-5 text-violet-600" /></div>
+                      <div>
+                        <h3 className="text-lg font-bold text-slate-900">{selectedReviewReq.requester_org_name}</h3>
+                        <p className="text-xs text-slate-500">
+                          {selectedReviewReq.period}
+                          {selectedReviewReq.requester_name && ` · 요청자: ${selectedReviewReq.requester_name}`}
+                          {' · '}{relativeTime(selectedReviewReq.created_at)}
+                        </p>
+                      </div>
+                    </div>
+                    <button onClick={() => { setSelectedReviewReq(null); setReviewReqOKRDetail(null); }} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
+                  </div>
+                  <div className="bg-white/70 border border-violet-200 rounded-lg p-3 mt-2">
+                    <div className="flex items-center gap-1.5 mb-1"><MessageSquare className="w-3.5 h-3.5 text-violet-500" /><span className="text-xs font-medium text-violet-700">검토 요청 메시지</span></div>
+                    <p className="text-sm text-slate-700">{selectedReviewReq.message}</p>
+                  </div>
+                </div>
+
+                {/* OKR 내용 */}
+                <div className="max-h-[calc(100vh-420px)] overflow-y-auto px-6 py-5">
+                  <h4 className="text-sm font-semibold text-slate-700 mb-4 flex items-center gap-2">
+                    <Target className="w-4 h-4 text-slate-400" />{selectedReviewReq.requester_org_name}의 OKR
+                  </h4>
+                  {renderOKRDetail(reviewReqOKRDetail, reviewReqDetailLoading)}
+
+                  {/* 이전 응답 (완료 상태) */}
+                  {selectedReviewReq.status === 'completed' && selectedReviewReq.response && (
+                    <div className="mt-6 bg-green-50 border border-green-200 rounded-lg p-4">
+                      <div className="flex items-center gap-2 mb-2"><Check className="w-4 h-4 text-green-600" /><span className="text-sm font-medium text-green-800">내 검토 의견</span><span className="text-xs text-green-600">{timeFormat(selectedReviewReq.responded_at)}</span></div>
+                      <p className="text-sm text-green-700">{selectedReviewReq.response}</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* 의견 작성 (pending만) */}
+                {selectedReviewReq.status === 'pending' && (
+                  <div className="px-6 py-4 border-t border-slate-100 bg-slate-50">
+                    <label className="block text-sm font-medium text-slate-700 mb-2">검토 의견 작성</label>
+                    <textarea value={reviewResponseText} onChange={(e) => setReviewResponseText(e.target.value)}
+                      placeholder="OKR에 대한 피드백, 연관성 검토 의견, 조정 제안 등을 작성해주세요..."
+                      className="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm resize-none focus:ring-2 focus:ring-violet-500 outline-none" rows={3} />
+                    <div className="flex gap-2 mt-3">
+                      <button onClick={handleReviewResponse} disabled={reviewResponseLoading || !reviewResponseText.trim()}
+                        className="flex-1 bg-violet-600 text-white rounded-lg py-2.5 font-medium hover:bg-violet-700 disabled:opacity-50 flex items-center justify-center gap-2 transition-colors">
+                        {reviewResponseLoading ? <><RefreshCw className="w-4 h-4 animate-spin" /> 전송 중...</> : <><Send className="w-4 h-4" /> 의견 전송</>}
+                      </button>
+                      <button onClick={() => handleQuickResponse(selectedReviewReq.id)}
+                        className="px-4 border border-slate-300 text-slate-600 rounded-lg py-2.5 hover:bg-slate-100 text-sm font-medium transition-colors">확인 완료</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ═══════ 처리 완료 탭 (OKR 완료 + 유관부서 검토 완료 통합) ═══════ */}
+      {activeTab === 'completed' && (
+        <div className="grid grid-cols-12 gap-6">
+          <div className={hasSelection ? 'col-span-5' : 'col-span-12'}>
+            {loading ? (
+              <div className="text-center py-12 text-slate-500 text-sm">불러오는 중...</div>
+            ) : completedListItems.length === 0 ? (
+              <div className="text-center py-16">
+                <CheckCheck className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+                <p className="text-slate-500 font-medium">처리 완료된 건이 없습니다</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {completedListItems.map(item => renderListItem(item))}
+              </div>
+            )}
+          </div>
+
+          {/* 상세 패널 — OKR Set */}
+          {selectedSet && (
+            <div className="col-span-7">
+              <div className="bg-white border border-slate-200 rounded-xl overflow-hidden sticky top-6">
+                <div className="px-6 py-4 border-b border-slate-100 bg-slate-50">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-3"><h3 className="text-lg font-bold text-slate-900">{selectedSet.org_name}</h3>{getStatusBadge(selectedSet.status)}</div>
+                    <button onClick={() => { setSelectedSet(null); setOkrDetail(null); }} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <p className="text-xs text-slate-500">{selectedSet.period} · v{selectedSet.version}</p>
+                    <button onClick={() => navigate(`/wizard/${selectedSet.org_id}`)} className="text-xs text-blue-600 hover:text-blue-700 flex items-center gap-0.5"><Eye className="w-3 h-3" /> Wizard에서 보기</button>
+                  </div>
+                </div>
+                <div className="max-h-[calc(100vh-300px)] overflow-y-auto">
+                  <div className="p-6 space-y-6">
+                    {renderOKRDetail(okrDetail, detailLoading)}
+                    {selectedSet.review_comment && (
+                      <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                        <div className="flex items-center gap-2 mb-1"><MessageSquare className="w-4 h-4 text-amber-600" /><span className="text-sm font-medium text-amber-800">검토 의견</span></div>
+                        <p className="text-sm text-amber-700">{selectedSet.review_comment}</p>
+                      </div>
+                    )}
+                    <OKRCommentPanel okrSetId={selectedSet.id} />
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 상세 패널 — 유관부서 검토 완료건 */}
+          {selectedReviewReq && (
+            <div className="col-span-7">
+              <div className="bg-white border border-slate-200 rounded-xl overflow-hidden sticky top-6">
+                <div className="px-6 py-4 border-b border-slate-100 bg-gradient-to-r from-violet-50 to-indigo-50">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-violet-100 rounded-xl flex items-center justify-center"><Users className="w-5 h-5 text-violet-600" /></div>
+                      <div>
+                        <h3 className="text-lg font-bold text-slate-900">{selectedReviewReq.requester_org_name}</h3>
+                        <p className="text-xs text-slate-500">
+                          {selectedReviewReq.period}
+                          {selectedReviewReq.requester_name && ` · 요청자: ${selectedReviewReq.requester_name}`}
+                          {' · '}{relativeTime(selectedReviewReq.created_at)}
+                        </p>
+                      </div>
+                    </div>
+                    <button onClick={() => { setSelectedReviewReq(null); setReviewReqOKRDetail(null); }} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
+                  </div>
+                  <div className="bg-white/70 border border-violet-200 rounded-lg p-3 mt-2">
+                    <div className="flex items-center gap-1.5 mb-1"><MessageSquare className="w-3.5 h-3.5 text-violet-500" /><span className="text-xs font-medium text-violet-700">검토 요청 메시지</span></div>
+                    <p className="text-sm text-slate-700">{selectedReviewReq.message}</p>
+                  </div>
+                </div>
+                <div className="max-h-[calc(100vh-420px)] overflow-y-auto px-6 py-5">
+                  <h4 className="text-sm font-semibold text-slate-700 mb-4 flex items-center gap-2">
+                    <Target className="w-4 h-4 text-slate-400" />{selectedReviewReq.requester_org_name}의 OKR
+                  </h4>
+                  {renderOKRDetail(reviewReqOKRDetail, reviewReqDetailLoading)}
+                  {selectedReviewReq.response && (
+                    <div className="mt-6 bg-green-50 border border-green-200 rounded-lg p-4">
+                      <div className="flex items-center gap-2 mb-2"><Check className="w-4 h-4 text-green-600" /><span className="text-sm font-medium text-green-800">내 검토 의견</span><span className="text-xs text-green-600">{timeFormat(selectedReviewReq.responded_at)}</span></div>
+                      <p className="text-sm text-green-700">{selectedReviewReq.response}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ═══════ 내 제출 현황 탭 ═══════ */}
+      {activeTab === 'my_submissions' && (
+        <div className="grid grid-cols-12 gap-6">
+          <div className={selectedSet ? 'col-span-5' : 'col-span-12'}>
+            {loading ? (
+              <div className="text-center py-12 text-slate-500 text-sm">불러오는 중...</div>
+            ) : okrSets.length === 0 ? (
+              <div className="text-center py-16">
+                <Send className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+                <p className="text-slate-500 font-medium">제출한 OKR이 없습니다</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {okrSets.map(set => (
+                  <div key={set.id} onClick={() => loadDetail(set)}
+                    className={`bg-white border-2 rounded-xl p-4 cursor-pointer transition-all hover:shadow-md ${selectedSet?.id === set.id ? 'border-blue-500 shadow-md' : 'border-slate-200'}`}>
+                    <div className="flex items-start justify-between mb-2">
+                      <div>
+                        <div className="flex items-center gap-2"><span className="font-semibold text-slate-900">{set.org_name}</span><span className="text-xs text-slate-400">{set.org_level}</span></div>
+                        <span className="text-xs text-slate-500">{set.period}</span>
+                      </div>
+                      <div className="flex items-center gap-2">{getStatusBadge(set.status)}{set.version > 1 && <span className="text-[10px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded">v{set.version}</span>}</div>
+                    </div>
+                    <div className="flex items-center gap-4 text-xs text-slate-400">
+                      {set.submitted_at && <span className="flex items-center gap-1"><Send className="w-3 h-3" />제출: {timeFormat(set.submitted_at)}</span>}
+                      {set.reviewed_at && <span className="flex items-center gap-1"><FileCheck className="w-3 h-3" />검토: {timeFormat(set.reviewed_at)}</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {selectedSet && (
+            <div className="col-span-7">
+              <div className="bg-white border border-slate-200 rounded-xl overflow-hidden sticky top-6">
+                <div className="px-6 py-4 border-b border-slate-100 bg-slate-50">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-3"><h3 className="text-lg font-bold text-slate-900">{selectedSet.org_name}</h3>{getStatusBadge(selectedSet.status)}</div>
+                    <button onClick={() => { setSelectedSet(null); setOkrDetail(null); }} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <p className="text-xs text-slate-500">{selectedSet.period} · v{selectedSet.version}</p>
+                    <button onClick={() => navigate(`/wizard/${selectedSet.org_id}`)} className="text-xs text-blue-600 hover:text-blue-700 flex items-center gap-0.5"><Eye className="w-3 h-3" /> Wizard에서 보기</button>
+                  </div>
+                </div>
+                <div className="max-h-[calc(100vh-300px)] overflow-y-auto">
+                  <div className="p-6 space-y-6">
+                    {renderOKRDetail(okrDetail, detailLoading)}
+                    {selectedSet.review_comment && (
+                      <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                        <div className="flex items-center gap-2 mb-1"><MessageSquare className="w-4 h-4 text-amber-600" /><span className="text-sm font-medium text-amber-800">검토 의견</span></div>
+                        <p className="text-sm text-amber-700">{selectedSet.review_comment}</p>
+                      </div>
+                    )}
+                    <OKRCommentPanel okrSetId={selectedSet.id} />
+                  </div>
+                </div>
               </div>
             </div>
           )}
