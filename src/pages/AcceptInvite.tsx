@@ -354,7 +354,7 @@ export default function AcceptInvite() {
       console.log('📋 userRoles 조회 결과:', userRoles);
 
       const maxLevel = Math.max(...(userRoles?.map((r: any) => r.roles?.level || 0) || [0]));
-      const isCompanyAdmin = maxLevel >= 90;
+      const isCompanyAdmin = maxLevel >= 80;
 
       console.log('🔑 maxLevel:', maxLevel, 'isCompanyAdmin:', isCompanyAdmin);
 
