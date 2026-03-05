@@ -4,7 +4,7 @@
 // [2] 테이블 우측 액션 버튼 (OKR 확인 / 승인 / 수정요청 / 검토의견)
 // [3] OKR 상세는 모달
 // [4] okr_sets / approval_history 연동
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   Megaphone, Send, Clock, Check, AlertTriangle, RefreshCw,
   Zap, Search, ChevronRight, CheckCircle2, XCircle, FileEdit,
@@ -116,7 +116,7 @@ export default function OKRSetupStatus() {
   const canApprove = (id:string) => roleLevel >= 90 || isDirect(id);
 
   /* ─── 사이클 목록 조회 ─────────────────────────────── */
-  const fetchCycles = useCallback(async()=>{
+  const fetchCycles = async()=>{
     if(!company?.id) return;
     try {
       const { data, error } = await supabase.from('okr_planning_cycles').select('*')
@@ -140,10 +140,10 @@ export default function OKRSetupStatus() {
         }
       } else { setAllCycles([]); setCycle(null); }
     } catch(e){ console.warn('사이클 조회 실패:',e); }
-  },[company?.id, currentPeriod]);
+  };
 
   /* ─── 조직 상태 조회 ───────────────────────────────── */
-  const fetchStatuses = useCallback(async()=>{
+  const fetchStatuses = async()=>{
     setLoading(true);
     const period = cycle?.period || currentPeriod;
     try {
@@ -214,11 +214,12 @@ export default function OKRSetupStatus() {
       }
     } catch(e){ console.warn('조직 상태 조회 실패:',e); }
     finally { setLoading(false); }
-  },[cycle, organizations, currentPeriod]);
+  };
 
-  // company가 비동기로 로드되므로 company.id 변경 시 반드시 재실행
-  useEffect(()=>{ fetchCycles(); },[company?.id, currentPeriod]);
-  useEffect(()=>{ if(organizations.length>0 && (cycle || !company?.id)) fetchStatuses(); },[organizations, cycle, fetchStatuses]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(()=>{ fetchCycles(); }, [company?.id]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(()=>{ if(organizations.length>0) fetchStatuses(); }, [cycle?.id, organizations.length]);
 
   /* ─── OKR 상세 로드 ─────────────────────────────────── */
   const openDetail = async(org: OrgStatus)=>{
