@@ -166,7 +166,7 @@ export default function AcceptInvite() {
     setOrganizations(orgs || []);
   };
 
-  const needsOrgRoleSelection = !invitation?.org_id || !invitation?.role_id;
+const needsOrgRoleSelection = !invitation?.role_id && !invitation?.org_id;
 
   const handleAccept = async () => {
     if (!token || !invitation) return;
@@ -186,16 +186,16 @@ export default function AcceptInvite() {
       return;
     }
 
-    if (needsOrgRoleSelection) {
-      if (!selectedOrgId) {
-        alert('소속 조직을 선택해주세요');
-        return;
-      }
-      if (!selectedRoleType) {
-        alert('역할을 선택해주세요');
-        return;
-      }
-    }
+if (needsOrgRoleSelection) {
+  if (!selectedOrgId) {
+    alert('소속 조직을 선택해주세요');
+    return;
+  }
+  if (!selectedRoleType) {
+    alert('역할을 선택해주세요');
+    return;
+  }
+}
 
     try {
       setAccepting(true);
