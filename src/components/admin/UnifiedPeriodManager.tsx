@@ -331,12 +331,10 @@ export default function UnifiedPeriodManager() {
   };
 
   // ─── 초기화 가능 여부 판단 ──────────────────────────────
-  const canResetPlanning = (p: FiscalPeriod): boolean => {
-    // 수립이 시작되었지만 아직 완전히 실행 중이 아닌 경우
-    // 또는 수립이 완료되었지만 다시 시작하고 싶은 경우
-    return ['setup', 'drafting', 'completed'].includes(p.planning_status) &&
-      ['upcoming', 'planning'].includes(p.status);
-  };
+const canResetPlanning = (p: FiscalPeriod): boolean => {
+  return ['setup', 'drafting', 'in_progress', 'completed'].includes(p.planning_status) &&
+    ['upcoming', 'planning'].includes(p.status);
+};
 
   // ─── Hierarchy ─────────────────────────────────────────
 
