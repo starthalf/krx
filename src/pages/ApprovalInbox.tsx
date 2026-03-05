@@ -79,7 +79,7 @@ interface ReviewRequest {
   requester_org_name?: string;
   requester_org_level?: string;
   requester_name?: string;
-  requester_position?: string;
+  requester_org_role?: string;
 }
 
 interface ActiveCycle {
@@ -169,18 +169,26 @@ export default function ApprovalInbox() {
       if (data && data.length > 0) {
         // 요청자 프로필 일괄 조회 (이름 + 직책)
         const requesterIds = [...new Set(data.map((r: any) => r.requester_id).filter(Boolean))];
-        let profileMap: Record<string, { full_name: string; position: string }> = {};
+        let profileMap: Record<string, { full_name: string; org_role: string }> = {};
         if (requesterIds.length > 0) {
           const { data: profiles } = await supabase
             .from('profiles')
-            .select('id, full_name, position')
+            .select('id, full_name, org_role')
             .in('id', requesterIds);
           if (profiles) {
             profileMap = Object.fromEntries(
-              profiles.map((p: any) => [p.id, { full_name: p.full_name || '', position: p.position || '' }])
+              profiles.map((p: any) => [p.id, { full_name: p.full_name || '', org_role: p.org_role || '' }])
             );
           }
         }
+
+        const orgRoleLabel: Record<string, string> = {
+          ceo: 'CEO',
+          executive: '임원',
+          head: '본부장',
+          sub_head: '팀장',
+          member: '팀원',
+        };
 
         setReviewRequests(data.map((req: any) => {
           const reqOrg = organizations.find(o => o.id === req.requester_org_id);
@@ -190,7 +198,7 @@ export default function ApprovalInbox() {
             requester_org_name: reqOrg?.name || '알 수 없는 조직',
             requester_org_level: reqOrg?.level || '',
             requester_name: profile?.full_name || '',
-            requester_position: profile?.position || '',
+            requester_org_role: profile?.org_role ? (orgRoleLabel[profile.org_role] || profile.org_role) : '',
           };
         }));
       } else {
@@ -466,7 +474,7 @@ export default function ApprovalInbox() {
                     <>
                       <span className="text-xs text-slate-300">·</span>
                       <span className="text-xs text-slate-500">
-                        {req.requester_name}{req.requester_position ? ` ${req.requester_position}` : ''}
+                        {req.requester_name}{req.requester_org_role ? ` ${req.requester_org_role}` : ''}
                       </span>
                     </>
                   )}
