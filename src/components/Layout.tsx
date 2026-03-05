@@ -6,27 +6,26 @@ import TopBar from './TopBar';
 import CycleBanner from './CycleBanner';
 import { useAuth } from '../contexts/AuthContext';
 import { useStore } from '../store/useStore';
+import { supabase } from '../lib/supabase';
 
 export default function Layout() {
   const { profile } = useAuth();
-  const { fetchOrganizations, organizations, loading, error } = useStore();
+  const { fetchOrganizations, organizations, company, loading, error } = useStore();
 
   // ★ FIX: 이미 fetch한 company_id를 추적하여 중복 호출 방지
   const lastFetchedCompanyIdRef = useRef<string | null>(null);
   const isFetchingRef = useRef(false);
 
-  // 디버깅 로그 — 개발 중에만 사용, 의존성 최소화
+  // 디버깅 로그
   useEffect(() => {
     console.log('=== Layout Debug ===');
     console.log('profile:', profile);
     console.log('company_id:', profile?.company_id);
+    console.log('company in store:', company?.id);
     console.log('organizations count:', organizations.length);
-    console.log('loading:', loading);
-    console.log('error:', error);
-  }, [profile?.company_id, organizations.length, loading, error]);
-  // ★ FIX: profile 객체 전체 대신 company_id만 + 나머지는 primitive 값만
+  }, [profile?.company_id, company?.id, organizations.length]);
 
-  // 앱 진입 시 조직 데이터 로딩
+  // 앱 진입 시 company + 조직 데이터 로딩
   useEffect(() => {
     const companyId = profile?.company_id;
     if (!companyId) {
@@ -44,13 +43,40 @@ export default function Layout() {
       return;
     }
 
-    console.log('🚀 Triggering fetchOrganizations for company:', companyId);
+    console.log('🚀 Triggering fetchOrganizations + loadCompany for:', companyId);
     isFetchingRef.current = true;
     lastFetchedCompanyIdRef.current = companyId;
 
-    fetchOrganizations(companyId).finally(() => {
-      isFetchingRef.current = false;
-    });
+    const loadAll = async () => {
+      try {
+        // ★ company가 store에 없으면 로드하여 세팅
+        if (!company || company.id !== companyId) {
+          const { data: companyData } = await supabase
+            .from('companies')
+            .select('*')
+            .eq('id', companyId)
+            .single();
+
+          if (companyData) {
+            console.log('✅ Company loaded into store:', companyData.name);
+            useStore.getState().setCompany({
+              id: companyData.id,
+              name: companyData.name,
+              industry: companyData.industry,
+              size: companyData.size,
+              vision: companyData.vision || '',
+            } as any);
+          }
+        }
+
+        // organizations 로드
+        await fetchOrganizations(companyId);
+      } finally {
+        isFetchingRef.current = false;
+      }
+    };
+
+    loadAll();
   }, [profile?.company_id]); // profile.company_id가 변경될 때만 실행
 
   return (
