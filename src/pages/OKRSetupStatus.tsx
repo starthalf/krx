@@ -583,14 +583,14 @@ export default function OKRSetupStatus() {
         </div>
         <div className="flex items-center gap-3">
           {/* 사이클 선택 */}
-          {allCycles.length > 1 && (
+          {allCycles.length > 0 && (
             <select
               value={activeCycle?.id || ''}
               onChange={e => {
                 const cycle = allCycles.find(c => c.id === e.target.value);
                 if (cycle) setActiveCycle(cycle);
               }}
-              className="border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-700 bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+              className="border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-700 bg-white focus:ring-2 focus:ring-blue-500 outline-none min-w-[180px]"
             >
               {allCycles.map(c => (
                 <option key={c.id} value={c.id}>
@@ -695,10 +695,8 @@ export default function OKRSetupStatus() {
         </div>
       )}
 
-      {/* ═══ 테이블 + 상세 패널 레이아웃 ═══ */}
-      <div className={`grid gap-6 ${selectedOrg ? 'grid-cols-12' : ''}`}>
-        {/* 테이블 */}
-        <div className={selectedOrg ? 'col-span-5' : ''}>
+      {/* ═══ 테이블 ═══ */}
+      <div>
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
             <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between gap-4 flex-wrap">
               <div className="flex items-center gap-3 flex-1 min-w-0">
@@ -707,26 +705,23 @@ export default function OKRSetupStatus() {
                   <input type="text" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="조직명 또는 조직장 검색..."
                     className="w-full pl-9 pr-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
                 </div>
-                {!selectedOrg && (
-                  <div className="flex gap-1.5">
-                    <button onClick={() => selectByStatus('incomplete')} className="px-3 py-1.5 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-lg hover:bg-amber-100">미완료만</button>
-                    <button onClick={() => selectByStatus('all')} className="px-3 py-1.5 text-xs font-medium text-slate-600 bg-slate-50 border border-slate-200 rounded-lg hover:bg-slate-100">전체</button>
-                    <button onClick={() => selectByStatus('none')} className="px-3 py-1.5 text-xs font-medium text-slate-600 bg-slate-50 border border-slate-200 rounded-lg hover:bg-slate-100">해제</button>
-                  </div>
-                )}
+                <div className="flex gap-1.5">
+                  <button onClick={() => selectByStatus('incomplete')} className="px-3 py-1.5 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-lg hover:bg-amber-100">미완료만</button>
+                  <button onClick={() => selectByStatus('all')} className="px-3 py-1.5 text-xs font-medium text-slate-600 bg-slate-50 border border-slate-200 rounded-lg hover:bg-slate-100">전체</button>
+                  <button onClick={() => selectByStatus('none')} className="px-3 py-1.5 text-xs font-medium text-slate-600 bg-slate-50 border border-slate-200 rounded-lg hover:bg-slate-100">해제</button>
+                </div>
               </div>
-              {!selectedOrg && (
-                <div className="flex items-center gap-2">
-                  <button onClick={() => setShowMsgInput(!showMsgInput)} className="px-3 py-2 border border-slate-300 text-slate-600 rounded-lg hover:bg-slate-50 text-sm">✏️ 메시지</button>
+              <div className="flex items-center gap-2">
+                <button onClick={() => setShowMsgInput(!showMsgInput)} className="px-3 py-2 border border-slate-300 text-slate-600 rounded-lg hover:bg-slate-50 text-sm">✏️ 메시지</button>
                   <button onClick={handleBulkNudge} disabled={selectedCount === 0 || sending}
                     className="px-5 py-2 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-lg font-medium hover:from-orange-600 hover:to-red-600 disabled:opacity-50 flex items-center gap-2 text-sm">
                     {sending ? <><RefreshCw className="w-4 h-4 animate-spin" /> 전송 중...</> : <><Zap className="w-4 h-4" /> {selectedCount}개 독촉 발송</>}
                   </button>
                 </div>
-              )}
+              </div>
             </div>
 
-            {showMsgInput && !selectedOrg && (
+            {showMsgInput && (
               <div className="px-6 py-3 border-b border-slate-100 bg-orange-50/50">
                 <label className="text-xs font-medium text-slate-600 mb-1.5 block">독촉 메시지 (선택)</label>
                 <textarea value={nudgeMessage} onChange={e => setNudgeMessage(e.target.value)} placeholder="기본: OKR 수립 기한이 임박했습니다..."
@@ -743,63 +738,87 @@ export default function OKRSetupStatus() {
                 <table className="w-full">
                   <thead>
                     <tr className="border-b border-slate-100">
-                      {!selectedOrg && (
-                        <th className="pl-6 pr-2 py-3 w-10">
-                          <input type="checkbox"
-                            checked={filteredOrgs.filter(o => o.headId && o.okrStatus !== 'finalized' && o.okrStatus !== 'approved').length > 0 &&
-                              filteredOrgs.filter(o => o.headId && o.okrStatus !== 'finalized' && o.okrStatus !== 'approved').every(o => o.selected)}
-                            onChange={() => { const nudgeable = filteredOrgs.filter(o => o.headId && o.okrStatus !== 'finalized' && o.okrStatus !== 'approved'); selectByStatus(nudgeable.every(o => o.selected) ? 'none' : 'all'); }}
-                            className="w-4 h-4 rounded border-slate-300 text-orange-600" />
-                        </th>
-                      )}
+                      <th className="pl-6 pr-2 py-3 w-10">
+                        <input type="checkbox"
+                          checked={filteredOrgs.filter(o => o.headId && o.okrStatus !== 'finalized' && o.okrStatus !== 'approved').length > 0 &&
+                            filteredOrgs.filter(o => o.headId && o.okrStatus !== 'finalized' && o.okrStatus !== 'approved').every(o => o.selected)}
+                          onChange={() => { const nudgeable = filteredOrgs.filter(o => o.headId && o.okrStatus !== 'finalized' && o.okrStatus !== 'approved'); selectByStatus(nudgeable.every(o => o.selected) ? 'none' : 'all'); }}
+                          className="w-4 h-4 rounded border-slate-300 text-orange-600" />
+                      </th>
                       <th className="px-3 py-3 text-left text-xs font-semibold text-slate-500 uppercase">조직</th>
                       <th className="px-3 py-3 text-center text-xs font-semibold text-slate-500 uppercase">상태</th>
-                      {!selectedOrg && <th className="px-3 py-3 text-left text-xs font-semibold text-slate-500 uppercase">조직장</th>}
-                      {!selectedOrg && <th className="px-3 py-3 text-center text-xs font-semibold text-slate-500 uppercase">OKR</th>}
-                      {!selectedOrg && <th className="px-3 py-3 text-center text-xs font-semibold text-slate-500 uppercase">마지막 독촉</th>}
+                      <th className="px-3 py-3 text-left text-xs font-semibold text-slate-500 uppercase">조직장</th>
+                      <th className="px-3 py-3 text-center text-xs font-semibold text-slate-500 uppercase">OKR</th>
+                      <th className="px-3 py-3 text-center text-xs font-semibold text-slate-500 uppercase">마지막 독촉</th>
+                      <th className="pr-6 pl-3 py-3 text-center text-xs font-semibold text-slate-500 uppercase">액션</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-50">
                     {filteredOrgs.map(org => {
                       const c = STATUS_CONFIG[org.okrStatus]; const Icon = c.icon;
                       const canNudge = org.headId && org.okrStatus !== 'finalized' && org.okrStatus !== 'approved';
-                      const isSelected = selectedOrg?.id === org.id;
+                      const isDirect = isDirectChild(org.id);
                       return (
-                        <tr key={org.id}
-                          onClick={() => { if (org.okrStatus !== 'not_started') loadOrgDetail(org); }}
-                          className={`transition-colors ${isSelected ? 'bg-blue-50' : org.selected && !selectedOrg ? 'bg-orange-50/50' : 'hover:bg-slate-50/50'} ${org.okrStatus !== 'not_started' ? 'cursor-pointer' : ''}`}>
-                          {!selectedOrg && (
-                            <td className="pl-6 pr-2 py-3" onClick={e => e.stopPropagation()}>
-                              <input type="checkbox" checked={org.selected} onChange={() => toggleSelect(org.id)}
-                                disabled={!canNudge} className="w-4 h-4 rounded border-slate-300 text-orange-600 disabled:opacity-30" />
-                            </td>
-                          )}
+                        <tr key={org.id} className={`transition-colors ${org.selected ? 'bg-orange-50/50' : 'hover:bg-slate-50/50'}`}>
+                          <td className="pl-6 pr-2 py-3">
+                            <input type="checkbox" checked={org.selected} onChange={() => toggleSelect(org.id)}
+                              disabled={!canNudge} className="w-4 h-4 rounded border-slate-300 text-orange-600 disabled:opacity-30" />
+                          </td>
                           <td className="px-3 py-3">
                             <span className="text-sm font-semibold text-slate-800">{org.name}</span>
                             <span className="ml-2 text-xs text-slate-400">{org.level}</span>
-                            {selectedOrg && org.headName && <div className="text-xs text-slate-400 mt-0.5">{org.headName}</div>}
                           </td>
                           <td className="px-3 py-3 text-center">
                             <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium border ${c.cls}`}>
                               <Icon className="w-3 h-3" />{c.label}
                             </span>
                           </td>
-                          {!selectedOrg && (
-                            <td className="px-3 py-3">
-                              {org.headName ? <span className="text-sm text-slate-600">{org.headName}</span>
-                                : <span className="text-xs text-red-400 flex items-center gap-1"><AlertTriangle className="w-3 h-3" />미지정</span>}
-                            </td>
-                          )}
-                          {!selectedOrg && (
-                            <td className="px-3 py-3 text-center text-sm text-slate-600">
-                              {org.objectiveCount > 0 ? <>{org.objectiveCount} <span className="text-slate-400">O</span> / {org.krCount} <span className="text-slate-400">KR</span></> : <span className="text-slate-300">—</span>}
-                            </td>
-                          )}
-                          {!selectedOrg && (
-                            <td className="px-3 py-3 text-center">
-                              {timeAgo(org.lastNudgedAt) ? <span className="text-xs text-orange-500 flex items-center justify-center gap-1"><Clock className="w-3 h-3" />{timeAgo(org.lastNudgedAt)}</span> : <span className="text-xs text-slate-300">—</span>}
-                            </td>
-                          )}
+                          <td className="px-3 py-3">
+                            {org.headName ? <span className="text-sm text-slate-600">{org.headName}</span>
+                              : <span className="text-xs text-red-400 flex items-center gap-1"><AlertTriangle className="w-3 h-3" />미지정</span>}
+                          </td>
+                          <td className="px-3 py-3 text-center text-sm text-slate-600">
+                            {org.objectiveCount > 0 ? <>{org.objectiveCount} <span className="text-slate-400">O</span> / {org.krCount} <span className="text-slate-400">KR</span></> : <span className="text-slate-300">—</span>}
+                          </td>
+                          <td className="px-3 py-3 text-center">
+                            {timeAgo(org.lastNudgedAt) ? <span className="text-xs text-orange-500 flex items-center justify-center gap-1"><Clock className="w-3 h-3" />{timeAgo(org.lastNudgedAt)}</span> : <span className="text-xs text-slate-300">—</span>}
+                          </td>
+                          <td className="pr-6 pl-3 py-3">
+                            <div className="flex items-center justify-end gap-1.5">
+                              {/* OKR 확인: 미착수 아닌 모든 조직 */}
+                              {org.okrStatus !== 'not_started' && (
+                                <button onClick={() => loadOrgDetail(org)}
+                                  className="px-2.5 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors flex items-center gap-1">
+                                  <Eye className="w-3 h-3" /> OKR 확인
+                                </button>
+                              )}
+                              {/* 직속 하위 + 제출됨: 승인 */}
+                              {isDirect && org.okrStatus === 'submitted' && (
+                                <button onClick={() => { setSelectedOrg(org); setActionType('approve'); setShowActionModal(true); setActionComment(''); }}
+                                  className="px-2.5 py-1.5 text-xs font-medium text-green-600 bg-green-50 border border-green-200 rounded-lg hover:bg-green-100 transition-colors flex items-center gap-1">
+                                  <Check className="w-3 h-3" /> 승인
+                                </button>
+                              )}
+                              {/* 직속 하위 + 제출됨: 수정요청 */}
+                              {isDirect && org.okrStatus === 'submitted' && (
+                                <button onClick={() => { setSelectedOrg(org); setActionType('revision_request'); setShowActionModal(true); setActionComment(''); }}
+                                  className="px-2.5 py-1.5 text-xs font-medium text-amber-600 bg-amber-50 border border-amber-200 rounded-lg hover:bg-amber-100 transition-colors flex items-center gap-1">
+                                  <MessageSquare className="w-3 h-3" /> 수정요청
+                                </button>
+                              )}
+                              {/* 비직속 + OKR있음: 검토의견 */}
+                              {!isDirect && org.okrStatus !== 'not_started' && org.okrSetId && (
+                                <button onClick={() => loadOrgDetail(org)}
+                                  className="px-2.5 py-1.5 text-xs font-medium text-violet-600 bg-violet-50 border border-violet-200 rounded-lg hover:bg-violet-100 transition-colors flex items-center gap-1">
+                                  <MessageSquare className="w-3 h-3" /> 검토의견
+                                </button>
+                              )}
+                              {/* 미착수 */}
+                              {org.okrStatus === 'not_started' && (
+                                <span className="text-xs text-slate-300">—</span>
+                              )}
+                            </div>
+                          </td>
                         </tr>
                       );
                     })}
@@ -808,84 +827,83 @@ export default function OKRSetupStatus() {
               )}
             </div>
 
-            {lastSentAt && !selectedOrg && (
+            {lastSentAt && (
               <div className="px-6 py-2.5 border-t border-slate-100 bg-slate-50 text-xs text-slate-400 flex items-center gap-2">
                 <Check className="w-3.5 h-3.5 text-green-500" />마지막 발송: {new Date(lastSentAt).toLocaleString('ko-KR')}
               </div>
             )}
           </div>
-        </div>
+      </div>
 
-        {/* ═══ 상세 패널 ═══ */}
-        {selectedOrg && (
-          <div className="col-span-7">
-            <div className="bg-white border border-slate-200 rounded-xl overflow-hidden sticky top-6">
-              {/* 헤더 */}
-              <div className="px-6 py-4 border-b border-slate-100 bg-slate-50">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-3">
-                    <h3 className="text-lg font-bold text-slate-900">{selectedOrg.name}</h3>
-                    {(() => { const c = STATUS_CONFIG[selectedOrg.okrStatus]; return <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium border ${c.cls}`}><c.icon className="w-3 h-3" />{c.label}</span>; })()}
+      {/* ═══ OKR 상세 모달 ═══ */}
+      {selectedOrg && !showActionModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-40">
+          <div className="bg-white rounded-2xl w-full max-w-3xl mx-4 max-h-[85vh] flex flex-col overflow-hidden">
+            {/* 모달 헤더 */}
+            <div className="px-6 py-4 border-b border-slate-100 bg-slate-50 flex-shrink-0">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-3">
+                  <h3 className="text-lg font-bold text-slate-900">{selectedOrg.name}</h3>
+                  {(() => { const c = STATUS_CONFIG[selectedOrg.okrStatus]; return <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium border ${c.cls}`}><c.icon className="w-3 h-3" />{c.label}</span>; })()}
+                </div>
+                <button onClick={() => { setSelectedOrg(null); setOkrDetail(null); setReviewComment(''); }} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
+              </div>
+              <div className="flex items-center gap-3 text-xs text-slate-500">
+                <span>{activeCycle?.period || currentPeriod}</span>
+                {selectedOrg.headName && <span>조직장: {selectedOrg.headName}</span>}
+                {selectedOrg.submittedAt && <span>제출: {timeFormat(selectedOrg.submittedAt)}</span>}
+                {isDirectChild(selectedOrg.id)
+                  ? <span className="text-blue-600 font-medium">직속 하위</span>
+                  : <span className="text-slate-400">비직속 하위</span>
+                }
+              </div>
+            </div>
+
+            {/* 모달 본문 */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+              {renderOKRDetail()}
+
+              {/* 승인 이력 */}
+              {approvalHistory.length > 0 && (
+                <div className="border-t border-slate-100 pt-4">
+                  <h4 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2"><Clock className="w-4 h-4" />처리 이력</h4>
+                  <div className="space-y-3">
+                    {approvalHistory.map((h) => {
+                      const actionMap: Record<string, { icon: any; color: string; label: string }> = {
+                        created: { icon: FileEdit, color: 'text-slate-400', label: '생성' },
+                        submitted: { icon: Send, color: 'text-blue-500', label: '제출' },
+                        approved: { icon: Check, color: 'text-green-500', label: '승인' },
+                        rejected: { icon: X, color: 'text-red-500', label: '반려' },
+                        revision_requested: { icon: MessageSquare, color: 'text-amber-500', label: '수정요청' },
+                        revised: { icon: RefreshCw, color: 'text-indigo-500', label: '수정 완료' },
+                        finalized: { icon: CheckCircle2, color: 'text-green-600', label: '최종확정' },
+                        comment: { icon: MessageSquare, color: 'text-violet-500', label: '검토 의견' },
+                      };
+                      const info = actionMap[h.action] || { icon: Clock, color: 'text-slate-400', label: h.action };
+                      const IconComp = info.icon;
+                      return (
+                        <div key={h.id} className="flex gap-3">
+                          <div className="w-7 h-7 rounded-full bg-slate-100 flex items-center justify-center flex-shrink-0"><IconComp className={`w-3.5 h-3.5 ${info.color}`} /></div>
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2"><span className="text-sm font-medium text-slate-700">{info.label}</span><span className="text-xs text-slate-400">by {h.actor_name}</span><span className="text-xs text-slate-400">{timeFormat(h.created_at)}</span></div>
+                            {h.comment && <p className="text-xs text-slate-500 mt-1 bg-slate-50 rounded p-2">{h.comment}</p>}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
-                  <button onClick={() => { setSelectedOrg(null); setOkrDetail(null); }} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
                 </div>
-                <div className="flex items-center gap-3 text-xs text-slate-500">
-                  <span>{activeCycle?.period || currentPeriod}</span>
-                  {selectedOrg.headName && <span>조직장: {selectedOrg.headName}</span>}
-                  {selectedOrg.submittedAt && <span>제출: {timeFormat(selectedOrg.submittedAt)}</span>}
-                  {isDirectChild(selectedOrg.id)
-                    ? <span className="text-blue-600 font-medium">직속 하위</span>
-                    : <span className="text-slate-400">비직속 하위</span>
-                  }
-                </div>
-              </div>
+              )}
 
-              {/* OKR 내용 */}
-              <div className="max-h-[calc(100vh-380px)] overflow-y-auto">
-                <div className="p-6 space-y-6">
-                  {renderOKRDetail()}
+              {/* 코멘트 패널 */}
+              {selectedOrg.okrSetId && <OKRCommentPanel okrSetId={selectedOrg.okrSetId} />}
+            </div>
 
-                  {/* 승인 이력 */}
-                  {approvalHistory.length > 0 && (
-                    <div className="border-t border-slate-100 pt-4">
-                      <h4 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2"><Clock className="w-4 h-4" />처리 이력</h4>
-                      <div className="space-y-3">
-                        {approvalHistory.map((h) => {
-                          const actionMap: Record<string, { icon: any; color: string; label: string }> = {
-                            created: { icon: FileEdit, color: 'text-slate-400', label: '생성' },
-                            submitted: { icon: Send, color: 'text-blue-500', label: '제출' },
-                            approved: { icon: Check, color: 'text-green-500', label: '승인' },
-                            rejected: { icon: X, color: 'text-red-500', label: '반려' },
-                            revision_requested: { icon: MessageSquare, color: 'text-amber-500', label: '수정요청' },
-                            revised: { icon: RefreshCw, color: 'text-indigo-500', label: '수정 완료' },
-                            finalized: { icon: CheckCircle2, color: 'text-green-600', label: '최종확정' },
-                            comment: { icon: MessageSquare, color: 'text-violet-500', label: '검토 의견' },
-                          };
-                          const info = actionMap[h.action] || { icon: Clock, color: 'text-slate-400', label: h.action };
-                          const IconComp = info.icon;
-                          return (
-                            <div key={h.id} className="flex gap-3">
-                              <div className="w-7 h-7 rounded-full bg-slate-100 flex items-center justify-center flex-shrink-0"><IconComp className={`w-3.5 h-3.5 ${info.color}`} /></div>
-                              <div className="flex-1">
-                                <div className="flex items-center gap-2"><span className="text-sm font-medium text-slate-700">{info.label}</span><span className="text-xs text-slate-400">by {h.actor_name}</span><span className="text-xs text-slate-400">{timeFormat(h.created_at)}</span></div>
-                                {h.comment && <p className="text-xs text-slate-500 mt-1 bg-slate-50 rounded p-2">{h.comment}</p>}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* 코멘트 패널 */}
-                  {selectedOrg.okrSetId && <OKRCommentPanel okrSetId={selectedOrg.okrSetId} />}
-                </div>
-              </div>
-
-              {/* ═══ 액션 영역 ═══ */}
-              {/* 직속 하위 + 제출됨 상태: 승인/수정요청 */}
+            {/* 모달 하단 액션 */}
+            <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 flex-shrink-0">
+              {/* 직속 하위 + 제출됨: 승인/수정요청 */}
               {isDirectChild(selectedOrg.id) && selectedOrg.okrStatus === 'submitted' && (
-                <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 flex gap-3">
+                <div className="flex gap-3">
                   <button onClick={() => { setActionType('approve'); setShowActionModal(true); setActionComment(''); }}
                     className="flex-1 bg-green-600 text-white rounded-lg py-2.5 font-medium hover:bg-green-700 flex items-center justify-center gap-2">
                     <Check className="w-4 h-4" /> 승인
@@ -894,34 +912,41 @@ export default function OKRSetupStatus() {
                     className="flex-1 bg-amber-500 text-white rounded-lg py-2.5 font-medium hover:bg-amber-600 flex items-center justify-center gap-2">
                     <MessageSquare className="w-4 h-4" /> 수정 요청
                   </button>
+                  <button onClick={() => { setSelectedOrg(null); setOkrDetail(null); }}
+                    className="px-6 border border-slate-300 text-slate-600 rounded-lg py-2.5 hover:bg-slate-100">닫기</button>
                 </div>
               )}
 
-              {/* 비직속 하위: 검토 의견 작성 */}
+              {/* 비직속: 검토 의견 작성 */}
               {!isDirectChild(selectedOrg.id) && selectedOrg.okrStatus !== 'not_started' && selectedOrg.okrSetId && (
-                <div className="px-6 py-4 border-t border-slate-100 bg-slate-50">
-                  <label className="block text-sm font-medium text-slate-700 mb-2">검토 의견</label>
-                  <textarea value={reviewComment} onChange={e => setReviewComment(e.target.value)}
-                    placeholder="이 조직의 OKR에 대한 의견을 작성하세요..."
-                    className="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm resize-none focus:ring-2 focus:ring-blue-500 outline-none" rows={2} />
-                  <button onClick={handleReviewComment} disabled={reviewCommentLoading || !reviewComment.trim()}
-                    className="mt-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2">
-                    {reviewCommentLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                    의견 전송
-                  </button>
+                <div>
+                  <div className="flex gap-2">
+                    <textarea value={reviewComment} onChange={e => setReviewComment(e.target.value)}
+                      placeholder="검토 의견을 작성하세요..."
+                      className="flex-1 border border-slate-300 rounded-lg px-3 py-2.5 text-sm resize-none focus:ring-2 focus:ring-blue-500 outline-none" rows={1} />
+                    <button onClick={handleReviewComment} disabled={reviewCommentLoading || !reviewComment.trim()}
+                      className="px-4 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2">
+                      {reviewCommentLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                      의견 전송
+                    </button>
+                    <button onClick={() => { setSelectedOrg(null); setOkrDetail(null); }}
+                      className="px-4 border border-slate-300 text-slate-600 rounded-lg py-2.5 hover:bg-slate-100">닫기</button>
+                  </div>
                 </div>
               )}
 
-              {/* 직속 하위 + 이미 승인됨: 안내 */}
-              {isDirectChild(selectedOrg.id) && (selectedOrg.okrStatus === 'approved' || selectedOrg.okrStatus === 'finalized') && (
-                <div className="px-6 py-3 border-t border-slate-100 bg-green-50">
-                  <p className="text-sm text-green-700 flex items-center gap-2"><CheckCircle2 className="w-4 h-4" /> 이미 승인된 OKR입니다.</p>
+              {/* 기타 상태: 닫기만 */}
+              {((isDirectChild(selectedOrg.id) && selectedOrg.okrStatus !== 'submitted') ||
+                (!isDirectChild(selectedOrg.id) && (selectedOrg.okrStatus === 'not_started' || !selectedOrg.okrSetId))) && (
+                <div className="flex justify-end">
+                  <button onClick={() => { setSelectedOrg(null); setOkrDetail(null); }}
+                    className="px-6 border border-slate-300 text-slate-600 rounded-lg py-2.5 hover:bg-slate-100">닫기</button>
                 </div>
               )}
             </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* 승인/수정요청 모달 */}
       {showActionModal && selectedOrg && (
