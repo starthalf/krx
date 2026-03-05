@@ -1,5 +1,5 @@
 // src/pages/ApprovalInbox.tsx
-// 승인 대기함 — 유관부서 검토요청을 검토대기 탭에 통합 + 완료건은 처리완료 탭으로
+// 승인 대기함 — 유관부서 검토요청을 검토대기 탭에 통합 + 완료건은 처리완료 탭으로 
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
