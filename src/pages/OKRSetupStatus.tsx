@@ -116,6 +116,7 @@ export default function OKRSetupStatus() {
   const navigate = useNavigate();
 
   const [orgStatuses, setOrgStatuses] = useState<OrgStatus[]>([]);
+  const [allCycles, setAllCycles] = useState<ActiveCycle[]>([]);
   const [activeCycle, setActiveCycle] = useState<ActiveCycle | null>(null);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
@@ -169,23 +170,45 @@ export default function OKRSetupStatus() {
   // 선택한 조직이 직속 하위인지 판별
   const isDirectChild = (orgId: string) => myDirectChildOrgIds.includes(orgId);
 
-  // ─── 활성 사이클 조회 ─────────────────────────────────
-  const fetchActiveCycle = useCallback(async () => {
+  // ─── 사이클 목록 조회 (전체) ────────────────────────────
+  const fetchCycles = useCallback(async () => {
     if (!company?.id) return;
     try {
-      const { data, error } = await supabase.rpc('get_active_planning_cycle', { p_company_id: company.id });
+      const { data, error } = await supabase
+        .from('okr_planning_cycles')
+        .select('*')
+        .eq('company_id', company.id)
+        .in('status', ['planning', 'in_progress', 'closed', 'finalized'])
+        .order('deadline_at', { ascending: false });
       if (error) throw error;
       if (data && data.length > 0) {
-        const row = data[0];
-        setActiveCycle({
-          id: row.id, period: row.period, title: row.title, status: row.status,
-          startsAt: row.starts_at, deadlineAt: row.deadline_at,
-          gracePeriodAt: row.grace_period_at, companyOkrFinalized: row.company_okr_finalized,
-          message: row.message, daysRemaining: row.days_remaining, isOverdue: row.is_overdue,
+        const cycles: ActiveCycle[] = data.map((row: any) => {
+          const daysRemaining = Math.max(0, Math.floor((new Date(row.deadline_at).getTime() - Date.now()) / 86400000));
+          return {
+            id: row.id, period: row.period, title: row.title, status: row.status,
+            startsAt: row.starts_at, deadlineAt: row.deadline_at,
+            gracePeriodAt: row.grace_period_at, companyOkrFinalized: row.company_okr_finalized,
+            message: row.message, daysRemaining, isOverdue: Date.now() > new Date(row.deadline_at).getTime(),
+          };
         });
-      } else { setActiveCycle(null); }
-    } catch (err) { console.warn('사이클 조회 실패:', err); setActiveCycle(null); }
-  }, [company?.id]);
+        setAllCycles(cycles);
+
+        // 자동 선택: currentPeriod와 일치하는 사이클 > in_progress > 첫 번째
+        if (!activeCycle) {
+          const matched = cycles.find(c => c.period === currentPeriod);
+          const inProgress = cycles.find(c => c.status === 'in_progress');
+          setActiveCycle(matched || inProgress || cycles[0]);
+        }
+      } else {
+        setAllCycles([]);
+        setActiveCycle(null);
+      }
+    } catch (err) {
+      console.warn('사이클 조회 실패:', err);
+      setAllCycles([]);
+      setActiveCycle(null);
+    }
+  }, [company?.id, currentPeriod]);
 
   // ─── 조직 상태 조회 ──────────────────────────────────
   const fetchOrgStatuses = useCallback(async () => {
@@ -311,7 +334,7 @@ export default function OKRSetupStatus() {
     finally { setLoading(false); }
   }, [activeCycle, organizations, currentPeriod]);
 
-  useEffect(() => { if (company?.id) fetchActiveCycle(); }, [company?.id, fetchActiveCycle]);
+  useEffect(() => { if (company?.id) fetchCycles(); }, [company?.id, fetchCycles]);
   useEffect(() => { if (organizations.length > 0) fetchOrgStatuses(); }, [organizations, activeCycle, fetchOrgStatuses]);
 
   // ─── OKR 상세 로드 ────────────────────────────────────
@@ -558,10 +581,29 @@ export default function OKRSetupStatus() {
             <p className="text-sm text-slate-500">{activeCycle ? activeCycle.title : `${currentPeriod} · ${company?.name || ''}`}</p>
           </div>
         </div>
-        <button onClick={() => { fetchActiveCycle(); fetchOrgStatuses(); }} disabled={loading}
-          className="px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-600 hover:bg-slate-50 flex items-center gap-1.5">
-          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /> 새로고침
-        </button>
+        <div className="flex items-center gap-3">
+          {/* 사이클 선택 */}
+          {allCycles.length > 1 && (
+            <select
+              value={activeCycle?.id || ''}
+              onChange={e => {
+                const cycle = allCycles.find(c => c.id === e.target.value);
+                if (cycle) setActiveCycle(cycle);
+              }}
+              className="border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-700 bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+            >
+              {allCycles.map(c => (
+                <option key={c.id} value={c.id}>
+                  {c.title || c.period} {c.status === 'in_progress' ? '(진행중)' : c.status === 'planning' ? '(계획)' : c.status === 'closed' ? '(마감)' : '(확정)'}
+                </option>
+              ))}
+            </select>
+          )}
+          <button onClick={() => { fetchCycles(); fetchOrgStatuses(); }} disabled={loading}
+            className="px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-600 hover:bg-slate-50 flex items-center gap-1.5">
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /> 새로고침
+          </button>
+        </div>
       </div>
 
       {/* 사이클 정보 카드 */}
