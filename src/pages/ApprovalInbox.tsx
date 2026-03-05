@@ -942,4 +942,4 @@ export default function ApprovalInbox() {
       )}
     </div>
   );
-} 
+}
