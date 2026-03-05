@@ -303,12 +303,12 @@ if (roleId) {  // ★ orgId 필수 조건 제거
         if (!existingRole) {
           const { error: roleInsertError } = await supabase
             .from('user_roles')
-            .insert({
-              profile_id: userId,
-              org_id: orgId,
-              role_id: roleId,
-              granted_by: userId,
-            });
+       .insert({
+  profile_id: userId,
+  org_id: orgId || null,  // ★ null이면 컬럼에 null 저장
+  role_id: roleId,
+  granted_by: userId,
+})
 
           if (roleInsertError) {
             console.error('user_roles insert failed:', roleInsertError);
