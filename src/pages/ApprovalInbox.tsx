@@ -106,7 +106,6 @@ export default function ApprovalInbox() {
   const { organizations, company } = useStore();
 
   const [activeTab, setActiveTab] = useState<TabType>('pending');
-  const [okrSets, setOkrSets] = useState<OKRSet[]>([]);
   const [reviewRequests, setReviewRequests] = useState<ReviewRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedSet, setSelectedSet] = useState<OKRSet | null>(null);
