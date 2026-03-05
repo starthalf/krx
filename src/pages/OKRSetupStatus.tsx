@@ -112,17 +112,18 @@ export default function OKRSetupStatus() {
   [myLeaderOrgIds, organizations]);
 
   const isDirect = (id:string) => directChildIds.includes(id);
+  // CEO(level 90+)는 모든 조직에 승인 권한
+  const canApprove = (id:string) => roleLevel >= 90 || isDirect(id);
 
   /* ─── 사이클 목록 조회 ─────────────────────────────── */
   const fetchCycles = useCallback(async()=>{
-    console.log('[OKRSetupStatus] fetchCycles called, company?.id:', company?.id);
-    if(!company?.id) { console.warn('[OKRSetupStatus] company.id is null, skipping fetchCycles'); return; }
+    if(!company?.id) return;
     try {
       const { data, error } = await supabase.from('okr_planning_cycles').select('*')
         .eq('company_id', company.id)
         .in('status',['planning','in_progress','closed','finalized'])
         .order('deadline_at',{ascending:false});
-      console.log('[OKRSetupStatus] cycles query result:', { data, error, companyId: company.id });
+      if(error) { console.warn('사이클 조회 에러:', error); return; }
       if(data && data.length>0){
         const list: Cycle[] = data.map((r:any)=>{
           const dr = Math.max(0, Math.floor((new Date(r.deadline_at).getTime()-Date.now())/86400000));
@@ -215,8 +216,9 @@ export default function OKRSetupStatus() {
     finally { setLoading(false); }
   },[cycle, organizations, currentPeriod]);
 
-  useEffect(()=>{ if(company?.id) fetchCycles(); },[company?.id, fetchCycles]);
-  useEffect(()=>{ if(organizations.length>0) fetchStatuses(); },[organizations, cycle, fetchStatuses]);
+  // company가 비동기로 로드되므로 company.id 변경 시 반드시 재실행
+  useEffect(()=>{ fetchCycles(); },[company?.id, currentPeriod]);
+  useEffect(()=>{ if(organizations.length>0 && (cycle || !company?.id)) fetchStatuses(); },[organizations, cycle, fetchStatuses]);
 
   /* ─── OKR 상세 로드 ─────────────────────────────────── */
   const openDetail = async(org: OrgStatus)=>{
@@ -568,7 +570,7 @@ export default function OKRSetupStatus() {
                 {filtered.map(org=>{
                   const c=STATUS_CFG[org.okrStatus]; const Icon=c.icon;
                   const canNudge=org.headId&&org.okrStatus!=='finalized'&&org.okrStatus!=='approved';
-                  const direct=isDirect(org.id);
+                  const direct=canApprove(org.id);
                   return (
                     <tr key={org.id} className={`transition-colors ${org.selected?'bg-orange-50/50':'hover:bg-slate-50/50'}`}>
                       <td className="pl-6 pr-2 py-3">
@@ -685,7 +687,7 @@ export default function OKRSetupStatus() {
               {modalOrg.okrSetId&&<OKRCommentPanel okrSetId={modalOrg.okrSetId}/>}
             </div>
             <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 flex-shrink-0">
-              {isDirect(modalOrg.id)&&modalOrg.okrStatus==='submitted'?(
+              {canApprove(modalOrg.id)&&modalOrg.okrStatus==='submitted'?(
                 <div className="flex gap-3">
                   <button onClick={()=>{setActionOrg(modalOrg);setActionType('approve');setActionComment('');}}
                     className="flex-1 bg-green-600 text-white rounded-lg py-2.5 font-medium hover:bg-green-700 flex items-center justify-center gap-2"><Check className="w-4 h-4"/> 승인</button>
@@ -693,7 +695,7 @@ export default function OKRSetupStatus() {
                     className="flex-1 bg-amber-500 text-white rounded-lg py-2.5 font-medium hover:bg-amber-600 flex items-center justify-center gap-2"><MessageSquare className="w-4 h-4"/> 수정 요청</button>
                   <button onClick={()=>{setModalOrg(null);setOkrDetail(null);}} className="px-6 border border-slate-300 text-slate-600 rounded-lg py-2.5 hover:bg-slate-100">닫기</button>
                 </div>
-              ):!isDirect(modalOrg.id)&&modalOrg.okrStatus!=='not_started'&&modalOrg.okrSetId?(
+              ):!canApprove(modalOrg.id)&&modalOrg.okrStatus!=='not_started'&&modalOrg.okrSetId?(
                 <div className="flex gap-2">
                   <textarea value={reviewText} onChange={e=>setReviewText(e.target.value)} placeholder="검토 의견을 작성하세요..."
                     className="flex-1 border border-slate-300 rounded-lg px-3 py-2.5 text-sm resize-none focus:ring-2 focus:ring-blue-500 outline-none" rows={1}/>
