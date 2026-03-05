@@ -191,29 +191,33 @@ export default function OKRSetupStatus() {
   const fetchOrgStatuses = useCallback(async () => {
     setLoading(true);
     try {
+      let usedRPC = false;
       if (activeCycle?.id) {
-        const { data, error } = await supabase.rpc('get_cycle_setup_stats', { p_cycle_id: activeCycle.id });
-        if (error) throw error;
-        const statuses: OrgStatus[] = (data || []).map((row: any) => {
-          let status: OrgStatus['okrStatus'] = 'not_started';
-          const s = row.okr_set_status;
-          if (s === 'finalized') status = 'finalized';
-          else if (s === 'approved') status = 'approved';
-          else if (s === 'submitted' || s === 'under_review') status = 'submitted';
-          else if (s === 'revision_requested') status = 'revision_requested';
-          else if (s === 'draft') status = 'draft';
-          const org = organizations.find(o => o.id === row.org_id);
-          return {
-            id: row.org_id, name: row.org_name, level: row.org_level,
-            parentOrgId: org?.parentOrgId || null,
-            headName: row.head_name, headId: row.head_profile_id,
-            okrStatus: status,
-            objectiveCount: row.objective_count || 0, krCount: row.kr_count || 0,
-            submittedAt: row.submitted_at, approvedAt: row.approved_at,
-            lastNudgedAt: null, selected: status === 'not_started' || status === 'draft' || status === 'revision_requested',
-            okrSetId: row.okr_set_id || null,
-          };
-        });
+        try {
+          const { data, error } = await supabase.rpc('get_cycle_setup_stats', { p_cycle_id: activeCycle.id });
+          if (error) throw error;
+          if (data && data.length > 0) {
+            usedRPC = true;
+            const statuses: OrgStatus[] = (data || []).map((row: any) => {
+              let status: OrgStatus['okrStatus'] = 'not_started';
+              const s = row.okr_set_status;
+              if (s === 'finalized') status = 'finalized';
+              else if (s === 'approved') status = 'approved';
+              else if (s === 'submitted' || s === 'under_review') status = 'submitted';
+              else if (s === 'revision_requested') status = 'revision_requested';
+              else if (s === 'draft') status = 'draft';
+              const org = organizations.find(o => o.id === row.org_id);
+              return {
+                id: row.org_id, name: row.org_name, level: row.org_level,
+                parentOrgId: org?.parentOrgId || null,
+                headName: row.head_name, headId: row.head_profile_id,
+                okrStatus: status,
+                objectiveCount: row.objective_count || 0, krCount: row.kr_count || 0,
+                submittedAt: row.submitted_at, approvedAt: row.approved_at,
+                lastNudgedAt: null, selected: status === 'not_started' || status === 'draft' || status === 'revision_requested',
+                okrSetId: row.okr_set_id || null,
+              };
+            });
         const orgIds = statuses.map(s => s.id);
         if (orgIds.length > 0) {
           const { data: nudges } = await supabase
@@ -238,30 +242,59 @@ export default function OKRSetupStatus() {
           }
         }
         setOrgStatuses(statuses);
-      } else {
+          }
+        } catch (rpcErr) {
+          console.warn('RPC 실패, fallback 사용:', rpcErr);
+        }
+      }
+
+      // fallback: RPC 미사용 또는 실패 시
+      if (!usedRPC) {
+        const period = activeCycle?.period || currentPeriod;
         const subOrgs = organizations.filter(o => o.level !== '전사');
         const statuses: OrgStatus[] = [];
         for (const org of subOrgs) {
           const { data: okrSet } = await supabase
             .from('okr_sets').select('id, status, submitted_at, reviewed_at')
-            .eq('org_id', org.id).eq('period', currentPeriod)
+            .eq('org_id', org.id).eq('period', period)
             .order('version', { ascending: false }).limit(1).maybeSingle();
-          const { count: objCount } = await supabase.from('objectives').select('*', { count: 'exact', head: true }).eq('org_id', org.id);
-          const { count: krCount } = await supabase.from('key_results').select('*', { count: 'exact', head: true }).eq('org_id', org.id);
+          const { count: objCount } = await supabase.from('objectives')
+            .select('*', { count: 'exact', head: true })
+            .eq('org_id', org.id).eq('is_latest', true).eq('period', period);
+          const { count: krCount } = await supabase.from('key_results')
+            .select('*', { count: 'exact', head: true })
+            .eq('org_id', org.id).eq('is_latest', true);
+
+          // 조직장 조회: user_roles → roles.level >= 70
           let headName: string | null = null, headId: string | null = null;
           try {
-            const { data: hr } = await supabase.from('user_roles').select('profile_id, role:roles!inner(name)')
-              .eq('org_id', org.id).in('roles.name', ['org_head', 'company_admin']).limit(1).maybeSingle();
-            if (hr?.profile_id) { headId = hr.profile_id; const { data: p } = await supabase.from('profiles').select('full_name').eq('id', hr.profile_id).single(); headName = p?.full_name || null; }
+            const { data: leaders } = await supabase
+              .from('user_roles')
+              .select('profile_id, roles!inner(level)')
+              .eq('org_id', org.id);
+            const leader = (leaders || []).find((r: any) => r.roles?.level >= 70);
+            if (leader?.profile_id) {
+              headId = leader.profile_id;
+              const { data: p } = await supabase.from('profiles').select('full_name').eq('id', leader.profile_id).single();
+              headName = p?.full_name || null;
+            }
           } catch {}
+
           const { data: lastNudge } = await supabase.from('notifications').select('created_at')
             .eq('type', 'okr_draft_reminder').eq('org_id', org.id).order('created_at', { ascending: false }).limit(1).maybeSingle();
+
           let status: OrgStatus['okrStatus'] = 'not_started';
-          if (okrSet?.status === 'finalized') status = 'finalized';
-          else if (okrSet?.status === 'approved') status = 'approved';
-          else if (okrSet?.status === 'submitted' || okrSet?.status === 'under_review') status = 'submitted';
-          else if (okrSet?.status === 'revision_requested') status = 'revision_requested';
-          else if (okrSet?.status === 'draft') status = 'draft';
+          if (okrSet) {
+            if (okrSet.status === 'finalized') status = 'finalized';
+            else if (okrSet.status === 'approved') status = 'approved';
+            else if (okrSet.status === 'submitted' || okrSet.status === 'under_review') status = 'submitted';
+            else if (okrSet.status === 'revision_requested') status = 'revision_requested';
+            else if (okrSet.status === 'draft') status = 'draft';
+          } else if ((objCount || 0) > 0) {
+            // okr_sets 없지만 objectives가 있으면 draft로 간주
+            status = 'draft';
+          }
+
           statuses.push({
             id: org.id, name: org.name, level: org.level, parentOrgId: org.parentOrgId || null,
             headName, headId, okrStatus: status,
