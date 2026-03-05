@@ -167,38 +167,67 @@ export default function ApprovalInbox() {
     try {
       const { data } = await supabase.from('review_requests').select('*').eq('reviewer_id', user.id).order('created_at', { ascending: false });
       if (data && data.length > 0) {
-        // 요청자 프로필 일괄 조회 (이름 + 직책)
+        // 요청자 프로필 일괄 조회 (이름)
         const requesterIds = [...new Set(data.map((r: any) => r.requester_id).filter(Boolean))];
-        let profileMap: Record<string, { full_name: string; org_role: string }> = {};
+        let nameMap: Record<string, string> = {};
         if (requesterIds.length > 0) {
           const { data: profiles } = await supabase
             .from('profiles')
-            .select('id, full_name, org_role')
+            .select('id, full_name')
             .in('id', requesterIds);
           if (profiles) {
-            profileMap = Object.fromEntries(
-              profiles.map((p: any) => [p.id, { full_name: p.full_name || '', org_role: p.org_role || '' }])
+            nameMap = Object.fromEntries(
+              profiles.map((p: any) => [p.id, p.full_name || ''])
             );
           }
         }
 
-        const orgRoleLabel: Record<string, string> = {
-          ceo: 'CEO',
-          executive: '임원',
-          head: '본부장',
-          sub_head: '팀장',
-          member: '팀원',
+        // 요청자의 실제 조직 내 역할 조회 (user_roles → roles.level 기반)
+        // requester_id + requester_org_id 조합으로 조회
+        const roleQueries = data.map((r: any) => ({ profileId: r.requester_id, orgId: r.requester_org_id }));
+        const uniquePairs = roleQueries.filter((v: any, i: number, a: any[]) =>
+          a.findIndex(t => t.profileId === v.profileId && t.orgId === v.orgId) === i
+        );
+        let roleMap: Record<string, number> = {}; // key: "profileId__orgId" → role level
+        if (uniquePairs.length > 0) {
+          for (const pair of uniquePairs) {
+            if (!pair.profileId || !pair.orgId) continue;
+            const { data: ur } = await supabase
+              .from('user_roles')
+              .select('roles!inner(level)')
+              .eq('profile_id', pair.profileId)
+              .eq('org_id', pair.orgId)
+              .limit(1)
+              .maybeSingle();
+            if (ur) {
+              roleMap[`${pair.profileId}__${pair.orgId}`] = (ur as any).roles?.level || 0;
+            }
+          }
+        }
+
+        const getRoleLabelByLevel = (level: number, orgLevel?: string): string => {
+          if (level >= 90) return 'CEO';
+          if (level >= 80) return '임원';
+          if (level >= 70) {
+            // 조직 레벨에 따라 본부장/팀장 구분
+            if (orgLevel === '본부' || orgLevel === '부문') return '본부장';
+            if (orgLevel === '팀' || orgLevel === '센터') return '팀장';
+            return '조직장';
+          }
+          if (level >= 30) return '팀원';
+          return '뷰어';
         };
 
         setReviewRequests(data.map((req: any) => {
           const reqOrg = organizations.find(o => o.id === req.requester_org_id);
-          const profile = profileMap[req.requester_id];
+          const roleLevel = roleMap[`${req.requester_id}__${req.requester_org_id}`] || 0;
+          const roleLabel = getRoleLabelByLevel(roleLevel, reqOrg?.level);
           return {
             ...req,
             requester_org_name: reqOrg?.name || '알 수 없는 조직',
             requester_org_level: reqOrg?.level || '',
-            requester_name: profile?.full_name || '',
-            requester_org_role: profile?.org_role ? (orgRoleLabel[profile.org_role] || profile.org_role) : '',
+            requester_name: nameMap[req.requester_id] || '',
+            requester_org_role: roleLabel,
           };
         }));
       } else {
