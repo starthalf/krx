@@ -115,12 +115,14 @@ export default function OKRSetupStatus() {
 
   /* ─── 사이클 목록 조회 ─────────────────────────────── */
   const fetchCycles = useCallback(async()=>{
-    if(!company?.id) return;
+    console.log('[OKRSetupStatus] fetchCycles called, company?.id:', company?.id);
+    if(!company?.id) { console.warn('[OKRSetupStatus] company.id is null, skipping fetchCycles'); return; }
     try {
-      const { data } = await supabase.from('okr_planning_cycles').select('*')
+      const { data, error } = await supabase.from('okr_planning_cycles').select('*')
         .eq('company_id', company.id)
         .in('status',['planning','in_progress','closed','finalized'])
         .order('deadline_at',{ascending:false});
+      console.log('[OKRSetupStatus] cycles query result:', { data, error, companyId: company.id });
       if(data && data.length>0){
         const list: Cycle[] = data.map((r:any)=>{
           const dr = Math.max(0, Math.floor((new Date(r.deadline_at).getTime()-Date.now())/86400000));
