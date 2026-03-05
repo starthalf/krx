@@ -719,7 +719,6 @@ export default function OKRSetupStatus() {
                   </button>
                 </div>
               </div>
-            </div>
 
             {showMsgInput && (
               <div className="px-6 py-3 border-b border-slate-100 bg-orange-50/50">
