@@ -1,5 +1,5 @@
 // src/pages/ApprovalInbox.tsx
-// 승인 대기함 — 유관부서 검토요청을 검토대기 탭에 통합 + 완료건은 처리완료 탭으로 
+// 승인 대기함 — 유관부서 검토요청을 검토대기 탭에 통합 + 완료건은 처리완료 탭으로
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -79,6 +79,7 @@ interface ReviewRequest {
   requester_org_name?: string;
   requester_org_level?: string;
   requester_name?: string;
+  requester_position?: string;
 }
 
 interface ActiveCycle {
@@ -165,11 +166,35 @@ export default function ApprovalInbox() {
     if (!user?.id) return;
     try {
       const { data } = await supabase.from('review_requests').select('*').eq('reviewer_id', user.id).order('created_at', { ascending: false });
-      if (data) {
+      if (data && data.length > 0) {
+        // 요청자 프로필 일괄 조회 (이름 + 직책)
+        const requesterIds = [...new Set(data.map((r: any) => r.requester_id).filter(Boolean))];
+        let profileMap: Record<string, { full_name: string; position: string }> = {};
+        if (requesterIds.length > 0) {
+          const { data: profiles } = await supabase
+            .from('profiles')
+            .select('id, full_name, position')
+            .in('id', requesterIds);
+          if (profiles) {
+            profileMap = Object.fromEntries(
+              profiles.map((p: any) => [p.id, { full_name: p.full_name || '', position: p.position || '' }])
+            );
+          }
+        }
+
         setReviewRequests(data.map((req: any) => {
           const reqOrg = organizations.find(o => o.id === req.requester_org_id);
-          return { ...req, requester_org_name: reqOrg?.name || '알 수 없는 조직', requester_org_level: reqOrg?.level || '' };
+          const profile = profileMap[req.requester_id];
+          return {
+            ...req,
+            requester_org_name: reqOrg?.name || '알 수 없는 조직',
+            requester_org_level: reqOrg?.level || '',
+            requester_name: profile?.full_name || '',
+            requester_position: profile?.position || '',
+          };
         }));
+      } else {
+        setReviewRequests([]);
       }
     } catch (err) { console.warn('검토 요청 조회 실패:', err); }
   };
@@ -435,7 +460,17 @@ export default function ApprovalInbox() {
                   <span className="font-semibold text-slate-900">{req.requester_org_name}</span>
                   <span className="text-xs text-slate-400">{req.requester_org_level}</span>
                 </div>
-                <span className="text-xs text-violet-600 font-medium">유관부서 검토</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs text-violet-600 font-medium">유관부서 검토</span>
+                  {req.requester_name && (
+                    <>
+                      <span className="text-xs text-slate-300">·</span>
+                      <span className="text-xs text-slate-500">
+                        {req.requester_name}{req.requester_position ? ` ${req.requester_position}` : ''}
+                      </span>
+                    </>
+                  )}
+                </div>
               </div>
             </div>
             {isPending
