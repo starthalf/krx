@@ -292,7 +292,7 @@ if (needsOrgRoleSelection) {
         roleId = roleData?.id;
       }
 
-      if (orgId && roleId) {
+      if (roleId) {
         const { data: existingRole } = await supabase
           .from('user_roles')
           .select('id')
