@@ -280,19 +280,19 @@ if (needsOrgRoleSelection) {
       }
 
       // ── 4. user_roles 할당 ──
-      const orgId = invitation.org_id || selectedOrgId;
-      let roleId = invitation.role_id;
+     const orgId = invitation.org_id || selectedOrgId || null;  // ★ '' → null 변환
+let roleId = invitation.role_id;
 
-      if (!roleId) {
-        const { data: roleData } = await supabase
-          .from('roles')
-          .select('id')
-          .eq('name', selectedRoleType || 'team_member')
-          .single();
-        roleId = roleData?.id;
-      }
+if (!roleId) {
+  const { data: roleData } = await supabase
+    .from('roles')
+    .select('id')
+    .eq('name', selectedRoleType || 'team_member')
+    .single();
+  roleId = roleData?.id;
+}
 
-      if (roleId) {
+if (roleId) {  // ★ orgId 필수 조건 제거
         const { data: existingRole } = await supabase
           .from('user_roles')
           .select('id')
