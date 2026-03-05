@@ -152,7 +152,8 @@ export default function ApprovalInbox() {
         query = query.in('status', ['submitted', 'under_review']).neq('submitted_by', user.id);
       }
       else if (activeTab === 'completed') {
-        query = query.in('status', ['approved', 'rejected', 'revision_requested', 'finalized']);
+        // 내가 제출한 건은 처리완료에서 제외 (내 제출 현황에서만 표시)
+        query = query.in('status', ['approved', 'rejected', 'revision_requested', 'finalized']).neq('submitted_by', user.id);
       }
       else if (activeTab === 'my_submissions') {
         query = query.eq('submitted_by', user.id);
@@ -942,4 +943,4 @@ export default function ApprovalInbox() {
       )}
     </div>
   );
-} 
+}
