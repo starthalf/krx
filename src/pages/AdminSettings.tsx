@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { 
   Shield, Users, Layers, Lock, Settings as SettingsIcon, ChevronRight, 
-  Building2, Mail, CalendarClock, ArrowLeft, X, Archive
+  Building2, Mail, CalendarClock, ArrowLeft, X, Archive, Target
 } from 'lucide-react';
 import UserRolesManager from '../components/admin/UserRolesManager';
 import OrgStructureSettings from '../components/admin/OrgStructureSettings';
@@ -13,11 +13,12 @@ import CompanyManagement from '../components/admin/CompanyManagement';
 import UserInvitation from '../components/admin/UserInvitation';
 import UnifiedPeriodManager from '../components/admin/UnifiedPeriodManager';
 import PeriodHistoryViewer from '../components/admin/PeriodHistoryViewer';
-// ★ FIX: dynamic import 제거 → 정적 import
+import OKRPolicySettings from '../components/admin/OKRPolicySettings';  // ★ 추가
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 
-type TabType = 'companies' | 'invite' | 'users' | 'roles' | 'structure' | 'levels' | 'permissions' | 'periods' | 'history';
+// ★ 'okr-policy' 추가
+type TabType = 'companies' | 'invite' | 'users' | 'roles' | 'structure' | 'levels' | 'permissions' | 'periods' | 'history' | 'okr-policy';
 
 const TAB_ALIASES: Record<string, TabType> = {
   'planning-cycles': 'periods',
@@ -32,12 +33,14 @@ const TAB_ALIASES: Record<string, TabType> = {
   'levels': 'levels',
   'permissions': 'permissions',
   'companies': 'companies',
+  'okr-policy': 'okr-policy',  // ★ 추가
+  'policy': 'okr-policy',      // ★ 추가 (alias)
 };
 
 export default function AdminSettings() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { user } = useAuth();  // ★ FIX: AuthContext에서 user 가져오기
+  const { user } = useAuth();
   const tabParam = searchParams.get('tab');
   const initialTab: TabType = (tabParam && TAB_ALIASES[tabParam]) || 'companies';
 
@@ -46,23 +49,18 @@ export default function AdminSettings() {
   const [loading, setLoading] = useState(true);
   const mountedRef = useRef(true);
 
-  // URL 파라미터 변경 시 탭 동기화
   useEffect(() => {
     if (tabParam && TAB_ALIASES[tabParam]) {
       setActiveTab(TAB_ALIASES[tabParam]);
     }
   }, [tabParam]);
 
-  // ★ FIX: user가 준비되면 권한 체크 실행
-  //   이전: useEffect([], []) → 마운트 시 1회, 이때 user null이면 영영 안 됨
-  //   이후: user?.id 의존성 → user 준비되면 실행, re-mount 시에도 정상 동작
   useEffect(() => {
     mountedRef.current = true;
     
     console.log('🔍 AdminSettings: useEffect, user =', user?.id || 'NULL');
     
     if (!user) {
-      // user 아직 없으면 5초 안전장치
       const timeout = setTimeout(() => {
         if (mountedRef.current) {
           console.warn('⚠️ AdminSettings: 5초 타임아웃 — loading 해제');
@@ -130,6 +128,7 @@ export default function AdminSettings() {
     { id: 'companies' as TabType, name: '회사 관리', icon: Building2, description: '등록된 회사 목록 및 관리 (Super Admin)', minLevel: 100 },
     { id: 'invite' as TabType, name: '사용자 초대', icon: Mail, description: '새로운 팀원 초대 및 초대 관리', minLevel: 80 },
     { id: 'users' as TabType, name: '사용자 관리', icon: Users, description: '사용자별 역할 및 권한 할당', minLevel: 80 },
+    { id: 'okr-policy' as TabType, name: 'OKR 정책', icon: Target, description: 'OKR 수립 주기 정책 설정', minLevel: 80 },  // ★ 추가
     { id: 'periods' as TabType, name: '기간 & 수립 관리', icon: CalendarClock, description: '기간 생성 및 OKR 수립 사이클 관리', minLevel: 80 },
     { id: 'history' as TabType, name: '성과 히스토리', icon: Archive, description: '마감된 기간의 성과 스냅샷 조회', minLevel: 80 },
     { id: 'structure' as TabType, name: '조직 편집', icon: Building2, description: '조직 추가/수정/삭제 및 AI 생성', minLevel: 80 },
@@ -222,6 +221,7 @@ export default function AdminSettings() {
                 {activeTab === 'history' && '마감된 기간의 성과 스냅샷을 조회합니다. 전사 요약, 조직별 달성률, 등급 분포 등을 확인할 수 있습니다.'}
                 {activeTab === 'companies' && '등록된 회사 목록을 관리하고 새 회사를 추가할 수 있습니다.'}
                 {activeTab === 'invite' && '이메일로 새로운 팀원을 초대하거나 팀 초대 링크를 생성할 수 있습니다.'}
+                {activeTab === 'okr-policy' && 'OKR 수립 주기(연도/반기/분기)를 설정합니다. 변경 시 기존 사이클은 아카이빙됩니다.'}
               </p>
             </div>
           </div>
@@ -237,6 +237,7 @@ export default function AdminSettings() {
               {activeTab === 'permissions' && <PermissionsList />}
               {activeTab === 'periods' && <UnifiedPeriodManager />}
               {activeTab === 'history' && <PeriodHistoryViewer />}
+              {activeTab === 'okr-policy' && <OKRPolicySettings />}
             </div>
           </div>
         </div>
