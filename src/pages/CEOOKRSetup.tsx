@@ -8,7 +8,8 @@ import {
   Building2, Bot, Target, ChevronRight, ChevronLeft, Check, CheckCircle2,
   RefreshCw, Pencil, Trash2, Plus, X, Loader2, ArrowLeft, Send,
   GitBranch, CalendarClock, Megaphone, Zap, Eye, AlertCircle,
-  ChevronDown, ChevronUp, Sparkles, Rocket, Calendar, Settings
+  ChevronDown, ChevronUp, Sparkles, Rocket, Calendar, Settings,
+  Upload, FileText, Paperclip
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useStore } from '../store/useStore';
@@ -26,6 +27,15 @@ interface CompanyContext {
   challenges: string;
   competitiveLandscape: string;
   additionalContext: string;
+}
+
+interface AttachedFile {
+  id: string;
+  name: string;
+  size: number;
+  type: string;
+  path: string;
+  uploaded_at: string;
 }
 
 interface GeneratedObjective {
@@ -90,6 +100,30 @@ const PERSPECTIVE_COLORS: Record<string, string> = {
   '학습성장': 'bg-violet-100 text-violet-700',
 };
 
+// ─── File Upload Helpers ─────────────────────────────────
+
+const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
+const ALLOWED_EXTENSIONS = [
+  '.pdf', '.docx', '.doc', '.xlsx', '.xls', '.csv', '.txt', '.md',
+  '.hwp', '.hwpx', '.pptx', '.ppt', '.json', '.png', '.jpg', '.jpeg',
+];
+
+const getFileIcon = (type: string, name: string) => {
+  if (type.includes('pdf')) return '📄';
+  if (type.includes('spreadsheet') || type.includes('excel') || name.endsWith('.xlsx') || name.endsWith('.xls') || name.endsWith('.csv')) return '📊';
+  if (type.includes('word') || name.endsWith('.docx') || name.endsWith('.doc')) return '📝';
+  if (type.includes('presentation') || name.endsWith('.pptx')) return '📑';
+  if (type.includes('hwp') || name.endsWith('.hwp') || name.endsWith('.hwpx')) return '📋';
+  if (type.includes('image')) return '🖼️';
+  return '📎';
+};
+
+const formatFileSize = (bytes: number) => {
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+};
+
 // ─── Main Component ──────────────────────────────────────
 
 export default function CEOOKRSetup() {
@@ -118,6 +152,11 @@ export default function CEOOKRSetup() {
     additionalContext: '',
   });
   const [contextSaved, setContextSaved] = useState(false);
+
+  // ─── 파일 업로드 State ───
+  const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   // Step 1: 전사 OKR
   const [objectives, setObjectives] = useState<GeneratedObjective[]>([]);
@@ -279,7 +318,6 @@ export default function CEOOKRSetup() {
   const cycleUnitLabel = periodUnitFilter === 'year' ? '연도' : periodUnitFilter === 'half' ? '반기' : '분기';
 
   // 기존 진행 상태 복원 (기간 선택 + 조직 로딩 완료 후)
-  // ★ organizations.length 의존성 — 비동기 조직 로딩 완료 후 재실행
   useEffect(() => {
     console.log('[CEOOKRSetup] useEffect check:', { companyId: company?.id, selectedPeriodCode, orgsLen: organizations.length });
     if (company?.id && selectedPeriodCode && organizations.length > 0) {
@@ -314,7 +352,6 @@ export default function CEOOKRSetup() {
 
       if (companyObjs && companyObjs.length > 0) {
         console.log('[loadExistingProgress] ✅ 전사 OKR 발견:', companyObjs.length, '개, approval_status:', companyObjs.map((o:any) => o.approval_status));
-        // 전사 OKR이 있으면 복원
         const restored: GeneratedObjective[] = companyObjs.map((obj: any, idx: number) => ({
           id: obj.id,
           name: obj.name,
@@ -340,17 +377,14 @@ export default function CEOOKRSetup() {
         }));
 
         setObjectives(restored);
-
-        // ★ 기존 데이터 발견 → 기간 자동 확정 (Step 0 스킵)
         setPeriodConfirmed(true);
 
-        // finalized 상태면 확정 완료
         const isFinalized = companyObjs.some((o: any) => o.approval_status === 'finalized');
         if (isFinalized) {
           setCompanyOKRFinalized(true);
-          setCurrentStep(2); // Step 2: 전사 OKR 수립 (확정 완료)
+          setCurrentStep(2);
         } else {
-          setCurrentStep(2); // Step 2: OKR 있지만 아직 확정 전
+          setCurrentStep(2);
         }
       }
 
@@ -387,13 +421,13 @@ export default function CEOOKRSetup() {
           if (allDone && statuses.length === childOrgs.length) {
             setAllDraftsComplete(true);
             if (companyObjs && companyObjs.some((o: any) => o.approval_status === 'finalized')) {
-              setCurrentStep(3); // 전사 확정 + 조직 초안 완료 → Step 3
+              setCurrentStep(3);
             }
           }
         }
       }
 
-    // 3. 사이클 시작 여부 확인
+      // 3. 사이클 시작 여부 확인
       const { data: cycles } = await supabase
         .from('okr_planning_cycles')
         .select('*')
@@ -402,19 +436,17 @@ export default function CEOOKRSetup() {
         .order('created_at', { ascending: false })
         .limit(1);
 
-      // 🚨 수정된 부분: 조건문을 더 직관적으로 합치고, else 처리를 추가함
       if (cycles && cycles.length > 0 && cycles[0].cycle_started_at && cycles[0].status === 'in_progress') {
         setCycleStarted(true);
-        setCurrentStep(4); // Step 4: 사이클 시작
+        setCurrentStep(4);
       } else {
-        // ★ 핵심: DB에 활성화된 사이클이 없다면(관리자가 삭제했다면) 무조건 false로 초기화!
         setCycleStarted(false); 
       }
 
     } catch (err) {
       console.error('진행 상태 복원 실패:', err);
     }
-  }; // 👈👈👈 여기에 함수를 닫는 중괄호를 꼭 추가해 줘!!!
+  };
 
   const loadExistingContext = async () => {
     if (!company?.id) return;
@@ -436,11 +468,104 @@ export default function CEOOKRSetup() {
           competitiveLandscape: row.competitive_landscape || '',
           additionalContext: row.additional_context || '',
         });
-        // 데이터가 있으면 (draft든 finalized든) 저장됨 표시
+        // 첨부파일 복원
+        if (row.attached_files && Array.isArray(row.attached_files)) {
+          setAttachedFiles(row.attached_files);
+        }
         setContextSaved(true);
       }
     } catch {
       // 첫 사용 - 빈 컨텍스트
+    }
+  };
+
+  // ─── 파일 업로드/삭제 핸들러 ─────────────────────────────
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0 || !company?.id || !selectedPeriodCode) return;
+
+    setIsUploading(true);
+    setUploadError(null);
+
+    const newFiles: AttachedFile[] = [];
+
+    for (const file of Array.from(files)) {
+      // 확장자 검사
+      const ext = '.' + file.name.split('.').pop()?.toLowerCase();
+      if (!ALLOWED_EXTENSIONS.includes(ext)) {
+        setUploadError(`지원하지 않는 파일 형식: ${ext}`);
+        continue;
+      }
+
+      // 크기 검사
+      if (file.size > MAX_FILE_SIZE) {
+        setUploadError(`파일 크기 초과 (최대 50MB): ${file.name}`);
+        continue;
+      }
+
+      // 중복 검사
+      if (attachedFiles.some(f => f.name === file.name)) {
+        setUploadError(`이미 첨부된 파일: ${file.name}`);
+        continue;
+      }
+
+      try {
+        const fileId = crypto.randomUUID();
+        const safeName = file.name.replace(/[^a-zA-Z0-9가-힣._-]/g, '_');
+        const storagePath = `${company.id}/${selectedPeriodCode}/${fileId}_${safeName}`;
+
+        const { error: uploadErr } = await supabase.storage
+          .from('context-documents')
+          .upload(storagePath, file, {
+            cacheControl: '3600',
+            upsert: false,
+          });
+
+        if (uploadErr) {
+          console.error('Upload error:', uploadErr);
+          setUploadError(`업로드 실패: ${file.name} - ${uploadErr.message}`);
+          continue;
+        }
+
+        newFiles.push({
+          id: fileId,
+          name: file.name,
+          size: file.size,
+          type: file.type,
+          path: storagePath,
+          uploaded_at: new Date().toISOString(),
+        });
+      } catch (err: any) {
+        console.error('File upload error:', err);
+        setUploadError(`업로드 실패: ${file.name}`);
+      }
+    }
+
+    if (newFiles.length > 0) {
+      const updated = [...attachedFiles, ...newFiles];
+      setAttachedFiles(updated);
+      setContextSaved(false); // 저장 필요 표시
+    }
+
+    setIsUploading(false);
+    e.target.value = '';
+  };
+
+  const handleFileDelete = async (fileToDelete: AttachedFile) => {
+    if (!confirm(`"${fileToDelete.name}" 파일을 삭제하시겠습니까?`)) return;
+
+    try {
+      await supabase.storage
+        .from('context-documents')
+        .remove([fileToDelete.path]);
+
+      const updated = attachedFiles.filter(f => f.id !== fileToDelete.id);
+      setAttachedFiles(updated);
+      setContextSaved(false);
+    } catch (err) {
+      console.error('File delete error:', err);
+      alert('파일 삭제 실패');
     }
   };
 
@@ -450,7 +575,6 @@ export default function CEOOKRSetup() {
     if (!company?.id || !user?.id || !selectedPeriodCode) return;
 
     try {
-      // 기존 레코드 확인
       const { data: existing } = await supabase
         .from('company_okr_contexts')
         .select('id')
@@ -459,7 +583,6 @@ export default function CEOOKRSetup() {
         .limit(1);
 
       if (existing && existing.length > 0) {
-        // 업데이트
         await supabase
           .from('company_okr_contexts')
           .update({
@@ -469,10 +592,10 @@ export default function CEOOKRSetup() {
             challenges: context.challenges,
             competitive_landscape: context.competitiveLandscape,
             additional_context: context.additionalContext,
+            attached_files: attachedFiles,
           })
           .eq('id', existing[0].id);
       } else {
-        // 신규 생성
         await supabase
           .from('company_okr_contexts')
           .insert({
@@ -484,6 +607,7 @@ export default function CEOOKRSetup() {
             challenges: context.challenges,
             competitive_landscape: context.competitiveLandscape,
             additional_context: context.additionalContext,
+            attached_files: attachedFiles,
             status: 'draft',
           });
       }
@@ -514,6 +638,12 @@ export default function CEOOKRSetup() {
           challenges: context.challenges,
           competitiveLandscape: context.competitiveLandscape,
           additionalContext: context.additionalContext,
+          attachedFiles: attachedFiles.map(f => ({
+            name: f.name,
+            path: f.path,
+            type: f.type,
+            size: f.size,
+          })),
         }
       });
 
@@ -570,14 +700,12 @@ export default function CEOOKRSetup() {
     if (!confirm(`선택된 ${selectedObjs.length}개 전사 목표를 확정하시겠습니까?`)) return;
 
     try {
-      // 전사 조직 찾기
       const companyOrg = organizations.find(o => o.level === '전사');
       if (!companyOrg) {
         alert('전사 조직이 설정되어 있지 않습니다. 관리자 설정에서 조직을 먼저 등록해주세요.');
         return;
       }
 
-      // 기존 전사 OKR 삭제 (해당 기간)
       const { data: existingObjs } = await supabase
         .from('objectives')
         .select('id')
@@ -590,7 +718,6 @@ export default function CEOOKRSetup() {
         await supabase.from('objectives').delete().in('id', objIds);
       }
 
-      // 새 전사 OKR 저장
       for (const obj of selectedObjs) {
         const { data: savedObj, error: objError } = await supabase
           .from('objectives')
@@ -641,7 +768,6 @@ export default function CEOOKRSetup() {
         }
       }
 
-      // 컨텍스트 상태 확정
       await supabase
         .from('company_okr_contexts')
         .update({ status: 'finalized', finalized_at: new Date().toISOString(), finalized_by: user.id })
@@ -669,7 +795,6 @@ export default function CEOOKRSetup() {
       return;
     }
 
-    // 전사 확정 OKR 조회
     const { data: companyObjs } = await supabase
       .from('objectives')
       .select(`
@@ -692,22 +817,18 @@ export default function CEOOKRSetup() {
       keyResults: (obj.key_results || []).map((kr: any) => kr.name),
     }));
 
-    // 하위 조직 목록 (전사 제외)
     const childOrgs = organizations.filter(o => o.level !== '전사');
     if (childOrgs.length === 0) {
       alert('하위 조직이 없습니다.');
       return;
     }
 
-    // 조직별 상위 체인의 OKR 수집 함수
     const getDirectParentOKRs = async (org: typeof childOrgs[0]) => {
-      // 직속 상위 조직의 OKR을 가져옴 (이미 생성된 ai_draft 포함)
-      if (!org.parentOrgId) return parentOKRs; // 상위가 전사면 전사 OKR 반환
+      if (!org.parentOrgId) return parentOKRs;
       
       const parentOrg = organizations.find(o => o.id === org.parentOrgId);
-      if (!parentOrg || parentOrg.level === '전사') return parentOKRs; // 상위가 전사면 전사 OKR 반환
+      if (!parentOrg || parentOrg.level === '전사') return parentOKRs;
       
-      // 직속 상위 조직(부문 등)의 objectives 조회
       const { data: directParentObjs } = await supabase
         .from('objectives')
         .select('id, name, bii_type, key_results(id, name)')
@@ -725,12 +846,9 @@ export default function CEOOKRSetup() {
         }));
       }
       
-      // 직속 상위 조직에 OKR이 없으면 전사 OKR fallback
       return parentOKRs;
     };
 
-    // 상태 초기화
-    // 레벨 순서: 부문 → 본부 → 팀 (상위 조직 초안이 먼저 생성되어야 하위에서 참조 가능)
     const levelOrder: Record<string, number> = { '부문': 1, '본부': 2, '팀': 3, '센터': 3 };
     const sortedChildOrgs = [...childOrgs].sort((a, b) => 
       (levelOrder[a.level] || 99) - (levelOrder[b.level] || 99)
@@ -746,17 +864,14 @@ export default function CEOOKRSetup() {
     setOrgDraftStatuses(statuses);
     setIsGeneratingAllDrafts(true);
 
-    // 순차 생성 (API rate limit 고려, 상위 레벨부터)
     for (let i = 0; i < sortedChildOrgs.length; i++) {
       const org = sortedChildOrgs[i];
 
-      // 상태: generating
       setOrgDraftStatuses(prev => prev.map(s =>
         s.orgId === org.id ? { ...s, status: 'generating' } : s
       ));
 
       try {
-        // 직속 상위 조직의 OKR을 가져옴
         const directParentOKRs = await getDirectParentOKRs(org);
         const parentOrg = organizations.find(o => o.id === org.parentOrgId);
         const parentOrgName = parentOrg?.name || '전사';
@@ -770,8 +885,8 @@ export default function CEOOKRSetup() {
             functionTags: org.functionTags || [],
             industry: company.industry,
             cascadingMode: true,
-            parentOKRs: directParentOKRs, // 직속 상위 OKR (부문 or 전사)
-            companyOKRs: parentOKRs, // 전사 OKR (항상 참조 컨텍스트로)
+            parentOKRs: directParentOKRs,
+            companyOKRs: parentOKRs,
             parentOrgName,
             parentOrgLevel,
           }
@@ -780,10 +895,8 @@ export default function CEOOKRSetup() {
         if (error) throw error;
 
         if (data?.objectives) {
-          // DB에 ai_draft로 저장
           let savedCount = 0;
           
-          // 기존 초안 삭제 (source 관계없이 — 조직장이 수정한 것도 포함)
           const { data: existingObjs } = await supabase
             .from('objectives')
             .select('id')
@@ -806,7 +919,7 @@ export default function CEOOKRSetup() {
                 org_id: org.id,
                 name: obj.name,
                 bii_type: obj.biiType || 'Improve',
-                perspective: obj.perspective || '재무', // 👉 이 줄을 추가!
+                perspective: obj.perspective || '재무',
                 period: selectedPeriodCode,
                 status: 'draft',
                 source: 'ai_draft',
@@ -820,7 +933,6 @@ export default function CEOOKRSetup() {
 
             if (savedObj) {
               savedCount++;
-              // 이 Objective에 대한 KR도 생성
               try {
                 const { data: krData } = await supabase.functions.invoke('generate-krs', {
                   body: {
@@ -893,7 +1005,6 @@ export default function CEOOKRSetup() {
 
     setIsCycleStarting(true);
     try {
-      // 1. okr_planning_cycles 생성
       const { data: cycle, error: cycleError } = await supabase
         .from('okr_planning_cycles')
         .insert({
@@ -916,12 +1027,10 @@ export default function CEOOKRSetup() {
 
       if (cycleError) throw cycleError;
 
-      // 2. 모든 조직장에게 알림 발송
       const childOrgs = organizations.filter(o => o.level !== '전사');
       const notifications = [];
 
       for (const org of childOrgs) {
-        // 조직에 속한 사용자 중 리더 찾기 (간단히: 해당 org의 user_roles에서 높은 레벨)
         const { data: orgMembers } = await supabase
           .from('user_roles')
           .select('profile_id, roles!inner(name, level)')
@@ -971,7 +1080,6 @@ export default function CEOOKRSetup() {
     setPreviewOrg({ orgId, orgName, level });
     setPreviewLoading(true);
     try {
-      // 1. objectives 조회
       const { data: objs, error: objError } = await supabase
         .from('objectives')
         .select('id, name, bii_type, perspective, parent_obj_id')
@@ -988,7 +1096,6 @@ export default function CEOOKRSetup() {
         return;
       }
 
-      // 2. 해당 objectives의 KR 조회
       const objIds = objs.map(o => o.id);
       const { data: krs, error: krError } = await supabase
         .from('key_results')
@@ -997,7 +1104,6 @@ export default function CEOOKRSetup() {
 
       if (krError) console.error('key_results 조회 에러:', krError);
 
-      // 3. objectives에 KR 매핑
       const result = objs.map(obj => ({
         ...obj,
         key_results: (krs || []).filter(kr => kr.objective_id === obj.id),
@@ -1083,8 +1189,6 @@ export default function CEOOKRSetup() {
     );
   }
 
-  // ★ selectedPeriodCode가 없어도 Step 0에서 기간을 선택할 수 있으므로 블로킹하지 않음
-
   // ─── Render ────────────────────────────────────────────
 
   return (
@@ -1093,7 +1197,6 @@ export default function CEOOKRSetup() {
       {previewOrg && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setPreviewOrg(null)}>
           <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[80vh] overflow-hidden" onClick={e => e.stopPropagation()}>
-            {/* 모달 헤더 */}
             <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-gradient-to-r from-indigo-50 to-violet-50">
               <div>
                 <div className="flex items-center gap-2">
@@ -1107,7 +1210,6 @@ export default function CEOOKRSetup() {
               </button>
             </div>
 
-            {/* 모달 본문 */}
             <div className="px-6 py-4 overflow-y-auto max-h-[calc(80vh-80px)] space-y-4">
               {previewLoading ? (
                 <div className="flex justify-center py-12">
@@ -1122,7 +1224,6 @@ export default function CEOOKRSetup() {
                     : null;
                   return (
                     <div key={obj.id} className="border border-slate-200 rounded-xl overflow-hidden">
-                      {/* Objective 헤더 */}
                       <div className="px-4 py-3 bg-slate-50 border-b border-slate-100">
                         <div className="flex items-center gap-2">
                           <span className="text-sm font-bold text-indigo-700 bg-indigo-100 px-2 py-0.5 rounded">
@@ -1145,7 +1246,6 @@ export default function CEOOKRSetup() {
                           </div>
                         )}
                       </div>
-                      {/* KR 목록 */}
                       <div className="px-4 py-2 space-y-2">
                         {(obj.key_results || []).map((kr: any, krIdx: number) => (
                           <div key={kr.id} className="flex items-start gap-2 py-1.5">
@@ -1187,7 +1287,6 @@ export default function CEOOKRSetup() {
                 </div>
               </div>
             </div>
-            {/* 기간 표시 배지 */}
             <div className="flex items-center gap-2">
               <span className="text-sm text-slate-500 bg-slate-100 px-3 py-1.5 rounded-lg font-medium">
                 📅 {selectedPeriodCode}
@@ -1249,7 +1348,6 @@ export default function CEOOKRSetup() {
                 </div>
               </div>
 
-              {/* 현재 정책 표시 */}
               <div className="mb-5 p-3 bg-slate-50 border border-slate-200 rounded-lg flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <Calendar className="w-4 h-4 text-slate-500" />
@@ -1260,7 +1358,6 @@ export default function CEOOKRSetup() {
                 </button>
               </div>
 
-              {/* 기간 선택 */}
               {periodLoading ? (
                 <div className="text-center py-8">
                   <Loader2 className="w-8 h-8 text-blue-600 animate-spin mx-auto mb-2" />
@@ -1303,7 +1400,6 @@ export default function CEOOKRSetup() {
                     })}
                   </select>
 
-                  {/* 선택된 기간 상세 */}
                   {selectedPeriodId && (() => {
                     const sp = availablePeriods.find(p => p.id === selectedPeriodId);
                     if (!sp) return null;
@@ -1330,7 +1426,6 @@ export default function CEOOKRSetup() {
               )}
             </div>
 
-            {/* 다음 단계 */}
             <div className="flex justify-end">
               <button
                 onClick={handleConfirmPeriod}
@@ -1380,6 +1475,89 @@ export default function CEOOKRSetup() {
                 ))}
               </div>
 
+              {/* ─── 파일 첨부 영역 ─── */}
+              <div className="mt-6 pt-6 border-t border-slate-200">
+                <div className="flex items-center justify-between mb-3">
+                  <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
+                    <Paperclip className="w-4 h-4" />
+                    참고 자료 첨부
+                    <span className="text-xs text-slate-400 font-normal">(선택) 사업계획서, 전략문서 등</span>
+                  </label>
+                  <label className="cursor-pointer">
+                    <input
+                      type="file"
+                      multiple
+                      onChange={handleFileUpload}
+                      className="hidden"
+                      accept=".pdf,.docx,.doc,.xlsx,.xls,.csv,.txt,.md,.hwp,.hwpx,.pptx,.ppt,.json,.png,.jpg,.jpeg"
+                    />
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors">
+                      {isUploading ? (
+                        <>
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                          업로드 중...
+                        </>
+                      ) : (
+                        <>
+                          <Upload className="w-3 h-3" />
+                          파일 추가
+                        </>
+                      )}
+                    </span>
+                  </label>
+                </div>
+
+                {/* 에러 메시지 */}
+                {uploadError && (
+                  <div className="mb-3 p-2.5 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700 flex items-center gap-2">
+                    <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
+                    {uploadError}
+                    <button onClick={() => setUploadError(null)} className="ml-auto text-red-400 hover:text-red-600">
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
+
+                {/* 첨부된 파일 목록 */}
+                {attachedFiles.length > 0 ? (
+                  <div className="space-y-2">
+                    {attachedFiles.map((file) => (
+                      <div
+                        key={file.id}
+                        className="flex items-center gap-3 px-3 py-2.5 bg-slate-50 rounded-lg border border-slate-200 group hover:border-slate-300 transition-colors"
+                      >
+                        <span className="text-lg flex-shrink-0">{getFileIcon(file.type, file.name)}</span>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-slate-800 truncate">{file.name}</p>
+                          <p className="text-xs text-slate-400">{formatFileSize(file.size)}</p>
+                        </div>
+                        <button
+                          onClick={() => handleFileDelete(file)}
+                          className="p-1 text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"
+                          title="삭제"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                    <p className="text-xs text-slate-400 mt-2">
+                      💡 첨부된 파일은 AI가 전사 OKR 생성 시 참고자료로 활용합니다
+                    </p>
+                  </div>
+                ) : (
+                  <div className="border-2 border-dashed border-slate-200 rounded-lg p-6 text-center">
+                    <FileText className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                    <p className="text-xs text-slate-400">
+                      사업계획서, 전략문서, 실적자료 등을 첨부하면<br />
+                      AI가 더 정확한 OKR을 생성합니다
+                    </p>
+                    <p className="text-xs text-slate-300 mt-2">
+                      PDF, Excel, Word, HWP, CSV, PPT 등 지원 (최대 50MB)
+                    </p>
+                  </div>
+                )}
+              </div>
+
               <div className="mt-6 flex gap-3">
                 <button
                   onClick={handleSaveContext}
@@ -1395,7 +1573,6 @@ export default function CEOOKRSetup() {
               </div>
             </div>
 
-            {/* 다음 단계 */}
             <div className="flex justify-between">
               <button onClick={() => setCurrentStep(0)} className="px-6 py-2.5 border border-slate-300 text-slate-700 rounded-lg font-medium hover:bg-slate-50 flex items-center gap-2">
                 <ChevronLeft className="w-4 h-4" /> 이전
@@ -1415,7 +1592,6 @@ export default function CEOOKRSetup() {
         {/* ════════ Step 2: 전사 OKR 수립 ════════ */}
         {currentStep === 2 && (
           <div className="space-y-6">
-            {/* 사이클 진행 중 경고 */}
             {cycleStarted && (
               <div className="bg-amber-50 border border-amber-300 rounded-xl p-4 flex items-start gap-3">
                 <AlertCircle className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" />
@@ -1425,7 +1601,6 @@ export default function CEOOKRSetup() {
                 </div>
               </div>
             )}
-            {/* AI 생성 버튼 */}
             {objectives.length === 0 && !isAIGenerating && (
               <div className="bg-gradient-to-br from-blue-50 to-violet-50 border-2 border-dashed border-blue-200 rounded-xl p-12 text-center">
                 <Bot className="w-16 h-16 text-blue-600 mx-auto mb-4" />
@@ -1433,6 +1608,9 @@ export default function CEOOKRSetup() {
                 <p className="text-slate-600 mb-6 max-w-lg mx-auto">
                   입력하신 경영 컨텍스트를 바탕으로 {company?.industry} 업종에 최적화된 전사 OKR을 생성합니다
                 </p>
+                {attachedFiles.length > 0 && (
+                  <p className="text-sm text-blue-600 mb-4">📎 {attachedFiles.length}개 첨부파일이 참고자료로 활용됩니다</p>
+                )}
                 <button
                   onClick={handleGenerateCompanyOKR}
                   className="px-8 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 transition-colors text-lg flex items-center gap-2 mx-auto"
@@ -1443,19 +1621,21 @@ export default function CEOOKRSetup() {
               </div>
             )}
 
-            {/* 로딩 */}
             {isAIGenerating && (
               <div className="bg-white rounded-xl border border-slate-200 p-12 text-center">
                 <Bot className="w-16 h-16 text-blue-600 mx-auto mb-4 animate-bounce" />
                 <h3 className="text-xl font-bold text-slate-900 mb-2">AI가 전사 OKR을 생성하고 있습니다...</h3>
-                <p className="text-slate-600 mb-6">{company?.industry} 업종 KPI DB를 참조하여 최적의 목표를 설계 중</p>
+                <p className="text-slate-600 mb-6">
+                  {company?.industry} 업종 KPI DB를 참조하여 최적의 목표를 설계 중
+                  {attachedFiles.length > 0 && <><br />📎 {attachedFiles.length}개 첨부 문서 분석 중</>}
+                </p>
                 <div className="max-w-xs mx-auto mb-3">
                   <div className="h-2 bg-slate-200 rounded-full overflow-hidden">
                     <div className="h-full bg-gradient-to-r from-blue-500 via-violet-500 to-blue-500 rounded-full animate-[shimmer_2s_infinite]"
                       style={{ width: '100%', backgroundSize: '200% 100%', animation: 'shimmer 2s linear infinite' }} />
                   </div>
                 </div>
-                <p className="text-xs text-slate-400">보통 15~30초 소요됩니다</p>
+                <p className="text-xs text-slate-400">보통 15~30초 소요됩니다{attachedFiles.length > 0 && ' (첨부파일 분석 시 추가 소요)'}</p>
                 <style>{`
                   @keyframes shimmer {
                     0% { background-position: 200% 0; }
@@ -1465,10 +1645,8 @@ export default function CEOOKRSetup() {
               </div>
             )}
 
-            {/* 생성된 OKR 목록 */}
             {objectives.length > 0 && !isAIGenerating && (
               <>
-                {/* 요약 카드 */}
                 <div className="grid grid-cols-4 gap-4">
                   <div className="bg-white rounded-xl border border-slate-200 p-4 text-center">
                     <div className="text-2xl font-bold text-slate-900">{selectedCount}</div>
@@ -1485,7 +1663,6 @@ export default function CEOOKRSetup() {
                   })}
                 </div>
 
-                {/* 목표 리스트 */}
                 <div className="space-y-4">
                   {objectives.map((obj, idx) => {
                     const biiColor = BII_COLORS[obj.biiType] || BII_COLORS.Improve;
@@ -1496,7 +1673,6 @@ export default function CEOOKRSetup() {
 
                     return (
                       <div key={obj.id} className={`bg-white rounded-xl border-2 transition-all ${obj.selected ? 'border-blue-200' : 'border-slate-200 opacity-60'}`}>
-                        {/* ── 카드 헤더 (항상 보임) ── */}
                         <div className="p-5 flex items-start gap-4">
                           <input
                             type="checkbox"
@@ -1525,11 +1701,8 @@ export default function CEOOKRSetup() {
                           </div>
                         </div>
 
-                        {/* ── 펼친 영역 ── */}
                         {isExpanded && (
                           <div className="px-5 pb-5">
-
-                            {/* Objective 수정 버튼 - 헤더에 바로 연결 */}
                             <div className="pl-9 pb-4">
                               {isObjEditing ? (
                                 <div className="space-y-3 bg-blue-50 rounded-lg p-4 border border-blue-200">
@@ -1575,7 +1748,6 @@ export default function CEOOKRSetup() {
                               )}
                             </div>
 
-                            {/* KR 리스트 - 여기에만 구분선 */}
                             <div className="border-t border-slate-100 pt-4">
                               <div className="flex items-center justify-between mb-3">
                                 <span className="text-sm font-medium text-slate-700">
@@ -1587,7 +1759,6 @@ export default function CEOOKRSetup() {
                                   const isKREditing = editingKRId === kr.id;
                                   return (
                                     <div key={kr.id} className="bg-slate-50 rounded-lg p-4">
-                                      {/* KR 요약 (항상 보임) */}
                                       <div className="flex items-center gap-2 mb-1">
                                         <span className="text-sm font-extrabold text-indigo-600 italic font-serif flex-shrink-0">KR{kIdx + 1}</span>
                                         <span className="text-xs bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded">{kr.unit}</span>
@@ -1597,7 +1768,6 @@ export default function CEOOKRSetup() {
                                       <p className="text-sm font-medium text-slate-900 mb-1">{kr.name}</p>
                                       {kr.definition && <p className="text-xs text-slate-500">{kr.definition}</p>}
 
-                                      {/* KR 수정 영역 (토글) */}
                                       {isKREditing ? (
                                         <div className="mt-3 bg-white rounded-lg p-3 border border-indigo-200 space-y-2">
                                           <div>
@@ -1678,7 +1848,6 @@ export default function CEOOKRSetup() {
                   })}
                 </div>
 
-                {/* 액션 버튼 */}
                 <div className="flex items-center justify-between pt-4">
                   <div className="flex gap-3">
                     <button onClick={addObjective} className="px-4 py-2 border border-slate-300 rounded-lg text-sm font-medium hover:bg-slate-50 flex items-center gap-1.5">
@@ -1743,7 +1912,6 @@ export default function CEOOKRSetup() {
                 </div>
               </div>
 
-              {/* 시작 전 */}
               {orgDraftStatuses.length === 0 && !isGeneratingAllDrafts && (
                 <div className="text-center py-8">
                   <div className="text-5xl mb-4">🏗️</div>
@@ -1761,10 +1929,8 @@ export default function CEOOKRSetup() {
                 </div>
               )}
 
-              {/* 진행 상태 */}
               {orgDraftStatuses.length > 0 && (
                 <div className="space-y-3">
-                  {/* 진행률 */}
                   {(() => {
                     const doneCount = orgDraftStatuses.filter(s => s.status === 'done' || s.status === 'error').length;
                     const total = orgDraftStatuses.length;
@@ -1795,7 +1961,6 @@ export default function CEOOKRSetup() {
                     );
                   })()}
 
-                  {/* 조직별 상태 */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     {orgDraftStatuses.map(s => (
                       <div
@@ -1828,7 +1993,6 @@ export default function CEOOKRSetup() {
                 </div>
               )}
 
-              {/* 완료 후 */}
               {allDraftsComplete && (
                 <div className="mt-6 space-y-4">
                   <div className="bg-green-50 border border-green-200 rounded-xl p-4 flex items-center gap-3">
@@ -1859,7 +2023,6 @@ export default function CEOOKRSetup() {
               )}
             </div>
 
-            {/* 네비게이션 */}
             <div className="flex justify-between">
               <button onClick={() => setCurrentStep(2)} className="px-6 py-2.5 border border-slate-300 text-slate-700 rounded-lg font-medium hover:bg-slate-50 flex items-center gap-2">
                 <ChevronLeft className="w-4 h-4" /> 이전
@@ -1884,7 +2047,6 @@ export default function CEOOKRSetup() {
 
               {!cycleStarted ? (
                 <div className="space-y-5">
-                  {/* 마감일 */}
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1.5">📅 수립 마감일</label>
                     <input
@@ -1896,7 +2058,6 @@ export default function CEOOKRSetup() {
                     />
                   </div>
 
-                  {/* 메시지 */}
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1.5">💬 조직장에게 보낼 메시지</label>
                     <textarea
@@ -1908,14 +2069,12 @@ export default function CEOOKRSetup() {
                     />
                   </div>
 
-                  {/* 요약 */}
                   <div className="bg-slate-50 rounded-lg p-4 text-sm text-slate-700 space-y-1">
                     <div>📊 전사 OKR: {objectives.filter(o => o.selected).length}개 목표 확정</div>
                     <div>🏢 대상 조직: {organizations.filter(o => o.level !== '전사').length}개</div>
                     <div>📋 AI 초안: {allDraftsComplete ? '✅ 전체 생성 완료' : '⏳ 미생성'}</div>
                   </div>
 
-                  {/* 시작 버튼 */}
                   <button
                     onClick={handleStartCycle}
                     disabled={!deadlineDate || isCycleStarting}
@@ -1953,7 +2112,6 @@ export default function CEOOKRSetup() {
                     </button>
                   </div>
 
-                  {/* 하단 관리 링크 */}
                   <div className="mt-8 pt-4 border-t border-slate-100 flex items-center justify-center">
                     <button
                       onClick={() => navigate('/admin?tab=cycles')}
@@ -1966,7 +2124,6 @@ export default function CEOOKRSetup() {
               )}
             </div>
 
-            {/* 네비게이션 */}
             {!cycleStarted && (
               <div className="flex justify-start max-w-2xl mx-auto">
                 <button onClick={() => setCurrentStep(3)} className="px-6 py-2.5 border border-slate-300 text-slate-700 rounded-lg font-medium hover:bg-slate-50 flex items-center gap-2">
