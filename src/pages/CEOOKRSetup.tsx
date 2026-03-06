@@ -473,6 +473,12 @@ export default function CEOOKRSetup() {
           setAttachedFiles(row.attached_files);
         }
         setContextSaved(true);
+        // ★ 컨텍스트가 저장되어 있으면 기간 자동 확정 + Step 1로 복원
+        // (loadExistingProgress에서 OKR이 있으면 Step 2+로 덮어쓰므로 충돌 없음)
+        setPeriodConfirmed(true);
+        if (currentStep < 1) {
+          setCurrentStep(1);
+        }
       }
     } catch {
       // 첫 사용 - 빈 컨텍스트
