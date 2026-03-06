@@ -388,45 +388,34 @@ export default function CEOOKRSetup() {
         }
       }
 
-      // 2. 하위 조직 초안 생성 여부 확인
+      // 2. 하위 조직 초안 생성 여부 확인 (★ 병렬 조회로 속도 개선)
       const childOrgs = organizations.filter(o => o.level !== '전사');
       if (childOrgs.length > 0) {
-        let allDone = true;
-        const statuses: OrgDraftStatus[] = [];
-
-        for (const org of childOrgs) {
-          const { data: orgObjs, count } = await supabase
-            .from('objectives')
-            .select('id', { count: 'exact' })
-            .eq('org_id', org.id)
-            .eq('period', selectedPeriodCode)
-            .eq('source', 'ai_draft');
-
-          const objCount = count || 0;
-          if (objCount > 0) {
-            statuses.push({
+        const results = await Promise.all(
+          childOrgs.map(async (org) => {
+            const { count } = await supabase
+              .from('objectives')
+              .select('id', { count: 'exact', head: true })
+              .eq('org_id', org.id)
+              .eq('period', selectedPeriodCode)
+              .eq('source', 'ai_draft');
+            const objCount = count || 0;
+            return {
               orgId: org.id,
               orgName: org.name,
               level: org.level,
-              status: 'done',
+              status: (objCount > 0 ? 'done' : 'error') as 'done' | 'error',
               objectiveCount: objCount,
-            });
-          } else {
-            // ★ 미생성 조직도 목록에 포함 (pending 상태)
-            allDone = false;
-            statuses.push({
-              orgId: org.id,
-              orgName: org.name,
-              level: org.level,
-              status: 'error', // 이전에 시도했으나 실패한 것으로 간주
-              objectiveCount: 0,
-            });
-          }
-        }
+            };
+          })
+        );
 
-        if (statuses.length > 0) {
-          setOrgDraftStatuses(statuses);
-          if (allDone && statuses.length === childOrgs.length) {
+        const allDone = results.every(r => r.status === 'done');
+        const hasDrafts = results.some(r => r.status === 'done');
+
+        if (hasDrafts) {
+          setOrgDraftStatuses(results);
+          if (allDone) {
             setAllDraftsComplete(true);
           }
           // 일부라도 초안이 생성되어 있으면 Step 3으로 복원
@@ -1076,8 +1065,8 @@ export default function CEOOKRSetup() {
       ));
 
       try {
-        // 조직 간 딜레이 (rate limit 방지)
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        // 조직 간 딜레이 (rate limit 방지 — 5초)
+        await new Promise(resolve => setTimeout(resolve, 5000));
 
         const directParentOKRs = await getDirectParentOKRs(org);
         const parentOrg = organizations.find(o => o.id === org.parentOrgId);
@@ -2168,7 +2157,7 @@ export default function CEOOKRSetup() {
                           <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">{s.objectiveCount}개 목표</span>
                         )}
                         {s.status === 'error' && (
-                          <span className="text-xs text-red-600">실패</span>
+                          <span className="text-xs text-red-600" title={s.error || '실패'}>실패</span>
                         )}
                       </div>
                     ))}
