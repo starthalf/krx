@@ -418,11 +418,13 @@ export default function CEOOKRSetup() {
 
         if (statuses.length > 0) {
           setOrgDraftStatuses(statuses);
+          // 모든 하위 조직에 초안이 있으면 전체 완료
           if (allDone && statuses.length === childOrgs.length) {
             setAllDraftsComplete(true);
-            if (companyObjs && companyObjs.some((o: any) => o.approval_status === 'finalized')) {
-              setCurrentStep(3);
-            }
+          }
+          // 일부라도 초안이 생성되어 있으면 Step 3으로 복원
+          if (companyObjs && companyObjs.some((o: any) => o.approval_status === 'finalized')) {
+            setCurrentStep(3);
           }
         }
       }
@@ -1000,6 +1002,168 @@ export default function CEOOKRSetup() {
     setAllDraftsComplete(true);
   };
 
+  // ─── 실패 조직만 재시도 ──────────────────────────────────
+  const handleRetryFailedDrafts = async () => {
+    if (!company?.id || !selectedPeriodCode) return;
+
+    const failedOrgs = orgDraftStatuses.filter(s => s.status === 'error');
+    if (failedOrgs.length === 0) {
+      alert('실패한 조직이 없습니다.');
+      return;
+    }
+
+    if (!confirm(`${failedOrgs.length}개 실패 조직의 초안을 다시 생성하시겠습니까?`)) return;
+
+    const companyOrg = organizations.find(o => o.level === '전사');
+    if (!companyOrg) return;
+
+    const { data: companyObjs } = await supabase
+      .from('objectives')
+      .select('id, name, bii_type, key_results(id, name)')
+      .eq('org_id', companyOrg.id)
+      .eq('period', selectedPeriodCode)
+      .eq('approval_status', 'finalized');
+
+    if (!companyObjs || companyObjs.length === 0) return;
+
+    const parentOKRs = companyObjs.map(obj => ({
+      objectiveId: obj.id,
+      objectiveName: obj.name,
+      biiType: obj.bii_type,
+      keyResults: (obj.key_results || []).map((kr: any) => kr.name),
+    }));
+
+    const getDirectParentOKRs = async (org: any) => {
+      if (!org.parentOrgId) return parentOKRs;
+      const parentOrg = organizations.find(o => o.id === org.parentOrgId);
+      if (!parentOrg || parentOrg.level === '전사') return parentOKRs;
+      const { data: directParentObjs } = await supabase
+        .from('objectives')
+        .select('id, name, bii_type, key_results(id, name)')
+        .eq('org_id', parentOrg.id)
+        .eq('period', selectedPeriodCode)
+        .in('source', ['ai_draft', 'manual'])
+        .order('sort_order');
+      if (directParentObjs && directParentObjs.length > 0) {
+        return directParentObjs.map(obj => ({
+          objectiveId: obj.id, objectiveName: obj.name, biiType: obj.bii_type,
+          keyResults: (obj.key_results || []).map((kr: any) => kr.name),
+        }));
+      }
+      return parentOKRs;
+    };
+
+    setIsGeneratingAllDrafts(true);
+
+    // 실패 조직을 pending으로 리셋
+    setOrgDraftStatuses(prev => prev.map(s =>
+      s.status === 'error' ? { ...s, status: 'pending' as const, error: undefined } : s
+    ));
+
+    for (const failedStatus of failedOrgs) {
+      const org = organizations.find(o => o.id === failedStatus.orgId);
+      if (!org) continue;
+
+      setOrgDraftStatuses(prev => prev.map(s =>
+        s.orgId === org.id ? { ...s, status: 'generating' as const } : s
+      ));
+
+      try {
+        // 조직 간 딜레이 (rate limit 방지)
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
+        const directParentOKRs = await getDirectParentOKRs(org);
+        const parentOrg = organizations.find(o => o.id === org.parentOrgId);
+
+        const { data, error } = await supabase.functions.invoke('generate-objectives', {
+          body: {
+            orgName: org.name,
+            orgMission: org.mission || '',
+            orgType: org.orgType || 'Front',
+            functionTags: org.functionTags || [],
+            industry: company.industry,
+            cascadingMode: true,
+            parentOKRs: directParentOKRs,
+            companyOKRs: parentOKRs,
+            parentOrgName: parentOrg?.name || '전사',
+            parentOrgLevel: parentOrg?.level || '전사',
+          }
+        });
+
+        if (error) throw error;
+
+        if (data?.objectives) {
+          let savedCount = 0;
+
+          const { data: existingObjs } = await supabase
+            .from('objectives').select('id').eq('org_id', org.id).eq('period', selectedPeriodCode);
+          if (existingObjs && existingObjs.length > 0) {
+            const ids = existingObjs.map(o => o.id);
+            await supabase.from('key_results').delete().in('objective_id', ids);
+            await supabase.from('objectives').delete().in('id', ids);
+          }
+
+          for (const obj of data.objectives) {
+            const { data: savedObj } = await supabase
+              .from('objectives')
+              .insert({
+                org_id: org.id, name: obj.name, bii_type: obj.biiType || 'Improve',
+                perspective: obj.perspective || '재무', period: selectedPeriodCode,
+                status: 'draft', source: 'ai_draft', approval_status: 'ai_draft',
+                parent_obj_id: obj.parentObjectiveId || null,
+                cascade_type: obj.cascadeType || 'independent', sort_order: savedCount,
+              })
+              .select().single();
+
+            if (savedObj) {
+              savedCount++;
+              try {
+                const { data: krData } = await supabase.functions.invoke('generate-krs', {
+                  body: {
+                    objectiveName: obj.name, objectiveType: obj.biiType || 'Improve',
+                    perspective: obj.perspective || '재무', orgType: org.orgType || 'Front',
+                    functionTags: org.functionTags || [], industry: company.industry,
+                  }
+                });
+                if (krData?.krs) {
+                  for (const kr of krData.krs) {
+                    await supabase.from('key_results').insert({
+                      objective_id: savedObj.id, org_id: org.id, name: kr.name,
+                      definition: kr.definition || '', formula: kr.formula || '',
+                      unit: kr.unit || '%', weight: kr.weight || 30,
+                      target_value: kr.targetValue || 100, current_value: 0,
+                      bii_type: kr.biiType || obj.biiType || 'Improve', kpi_category: '전략',
+                      perspective: kr.perspective || obj.perspective || '재무',
+                      indicator_type: kr.indicatorType || '결과',
+                      measurement_cycle: kr.measurementCycle || '월',
+                      grade_criteria: kr.gradeCriteria || { S: 120, A: 110, B: 100, C: 90, D: 0 },
+                      quarterly_targets: kr.quarterlyTargets || { Q1: 0, Q2: 0, Q3: 0, Q4: 0 },
+                      status: 'draft', source: 'ai_draft',
+                      cascade_type: obj.cascadeType || 'independent',
+                    });
+                  }
+                }
+              } catch (krErr) {
+                console.warn(`KR 생성 실패 (재시도 ${org.name}/${obj.name}):`, krErr);
+              }
+            }
+          }
+
+          setOrgDraftStatuses(prev => prev.map(s =>
+            s.orgId === org.id ? { ...s, status: 'done' as const, objectiveCount: savedCount } : s
+          ));
+        }
+      } catch (err: any) {
+        console.error(`재시도 실패 (${org.name}):`, err);
+        setOrgDraftStatuses(prev => prev.map(s =>
+          s.orgId === org.id ? { ...s, status: 'error' as const, error: err.message } : s
+        ));
+      }
+    }
+
+    setIsGeneratingAllDrafts(false);
+  };
+
   // ─── Step 3: 사이클 시작 ───────────────────────────────
 
   const handleStartCycle = async () => {
@@ -1309,7 +1473,8 @@ export default function CEOOKRSetup() {
           <div className="flex items-center justify-between">
             {STEPS.map((step, idx) => {
               const isActive = idx === currentStep;
-              const isDone = (idx === 0 && periodConfirmed) || (idx === 1 && contextSaved) || (idx === 2 && companyOKRFinalized) || (idx === 3 && allDraftsComplete) || (idx === 4 && cycleStarted);
+              const draftsProcessed = allDraftsComplete || (!isGeneratingAllDrafts && orgDraftStatuses.length > 0 && orgDraftStatuses.every(s => s.status === 'done' || s.status === 'error'));
+              const isDone = (idx === 0 && periodConfirmed) || (idx === 1 && contextSaved) || (idx === 2 && companyOKRFinalized) || (idx === 3 && draftsProcessed) || (idx === 4 && cycleStarted);
               return (
                 <div key={step.id} className="flex items-center flex-1">
                   <div
@@ -2000,19 +2165,48 @@ export default function CEOOKRSetup() {
                 </div>
               )}
 
-              {allDraftsComplete && (
+              {/* 완료 후 (에러 포함 전체 처리 완료 시) */}
+              {!isGeneratingAllDrafts && orgDraftStatuses.length > 0 && orgDraftStatuses.every(s => s.status === 'done' || s.status === 'error') && (
                 <div className="mt-6 space-y-4">
-                  <div className="bg-green-50 border border-green-200 rounded-xl p-4 flex items-center gap-3">
-                    <CheckCircle2 className="w-6 h-6 text-green-600" />
-                    <div>
-                      <span className="text-green-800 font-semibold">전체 조직 초안 생성 완료!</span>
-                      <span className="text-green-700 text-sm ml-2">
-                        {orgDraftStatuses.filter(s => s.status === 'done').length}개 조직의 OKR 초안이 준비되었습니다.
-                      </span>
-                    </div>
-                  </div>
+                  {(() => {
+                    const doneOrgs = orgDraftStatuses.filter(s => s.status === 'done').length;
+                    const errorOrgs = orgDraftStatuses.filter(s => s.status === 'error').length;
+                    return (
+                      <>
+                        {errorOrgs === 0 ? (
+                          <div className="bg-green-50 border border-green-200 rounded-xl p-4 flex items-center gap-3">
+                            <CheckCircle2 className="w-6 h-6 text-green-600" />
+                            <div>
+                              <span className="text-green-800 font-semibold">전체 조직 초안 생성 완료!</span>
+                              <span className="text-green-700 text-sm ml-2">
+                                {doneOrgs}개 조직의 OKR 초안이 준비되었습니다.
+                              </span>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-center gap-3">
+                            <AlertCircle className="w-6 h-6 text-amber-600" />
+                            <div>
+                              <span className="text-amber-800 font-semibold">조직 초안 생성 완료 ({doneOrgs}개 성공, {errorOrgs}개 실패)</span>
+                              <p className="text-amber-700 text-xs mt-1">실패한 조직은 사이클 시작 후 각 조직장이 직접 작성하거나, 이전 단계에서 다시 생성할 수 있습니다.</p>
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
 
-                  <div className="flex gap-3">
+                  <div className="flex gap-3 flex-wrap">
+                    {/* 실패 조직 재시도 버튼 */}
+                    {orgDraftStatuses.some(s => s.status === 'error') && (
+                      <button
+                        onClick={() => handleRetryFailedDrafts()}
+                        disabled={isGeneratingAllDrafts}
+                        className="px-5 py-2.5 border border-amber-300 text-amber-700 bg-amber-50 rounded-lg font-medium hover:bg-amber-100 flex items-center gap-2"
+                      >
+                        <RefreshCw className="w-4 h-4" /> 실패 조직만 재시도 ({orgDraftStatuses.filter(s => s.status === 'error').length}개)
+                      </button>
+                    )}
                     <button
                       onClick={() => navigate('/okr-map')}
                       className="px-6 py-2.5 border border-indigo-300 text-indigo-700 bg-indigo-50 rounded-lg font-medium hover:bg-indigo-100 flex items-center gap-2"
