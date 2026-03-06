@@ -888,4 +888,4 @@ function TeamInviteLinkModal({ company, onClose, onUpdate }: TeamInviteLinkModal
       </div>
     </div>
   );
-}
+} 
