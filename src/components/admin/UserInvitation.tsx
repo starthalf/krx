@@ -7,7 +7,7 @@ import { supabase } from '../../lib/supabase';
 interface InvitationForm {
   email: string;
   full_name: string;
-  role_type: 'org_head' | 'team_member' | 'viewer' | '';
+  role_type: 'org_leader' | 'member' | 'viewer' | '';  // ★ DB name 기준
   org_id: string;
 }
 
@@ -93,11 +93,16 @@ export default function UserInvitation() {
       // role_type으로 role_id 찾기
       let roleId = null;
       if (formData.role_type) {
-        const { data: role } = await supabase
+        const { data: role, error: roleError } = await supabase
           .from('roles')
           .select('id')
           .eq('name', formData.role_type)
           .single();
+        
+        if (roleError) {
+          console.error('Role lookup failed:', roleError, 'role_type:', formData.role_type);
+          throw new Error(`역할 '${formData.role_type}'을 찾을 수 없습니다`);
+        }
         roleId = role?.id;
       }
 
@@ -143,11 +148,12 @@ export default function UserInvitation() {
   const getRoleBadge = (role: any) => {
     if (!role) return null;
     
-    if (role.name === 'org_head') {
+    // ★ DB name 기준
+    if (role.name === 'org_leader' || role.name === 'ceo') {
       return (
         <span className="inline-flex items-center gap-1 px-2 py-1 bg-amber-100 text-amber-700 rounded text-xs">
           <Crown className="w-3 h-3" />
-          조직장
+          {role.display_name || '조직장'}
         </span>
       );
     }
@@ -164,7 +170,7 @@ export default function UserInvitation() {
     return (
       <span className="inline-flex items-center gap-1 px-2 py-1 bg-blue-100 text-blue-600 rounded text-xs">
         <User className="w-3 h-3" />
-        {role.display_name || '팀원'}
+        {role.display_name || '구성원'}
       </span>
     );
   };
@@ -238,7 +244,7 @@ export default function UserInvitation() {
               <p className="font-semibold mb-1">💡 역할 안내</p>
               <ul className="space-y-1 text-xs">
                 <li>• <strong>조직장</strong>: 담당 조직의 OKR을 관리하고, 상위 조직에 승인 요청, 하위 조직에 독촉이 가능합니다 (조직 필수)</li>
-                <li>• <strong>팀원</strong>: 본인 OKR 및 체크인 권한 (조직 필수)</li>
+                <li>• <strong>구성원</strong>: 본인 OKR 및 체크인 권한 (조직 필수)</li>
                 <li>• <strong>조회자</strong>: 읽기 전용 권한 - 대시보드 조회, 공개된 OKR 열람 (조직 선택)</li>
               </ul>
             </div>
@@ -335,7 +341,7 @@ interface InviteEntry {
   id: string;
   email: string;
   full_name: string;
-  role_type: 'org_head' | 'team_member' | 'viewer' | '';
+  role_type: 'org_leader' | 'member' | 'viewer' | '';  // ★ DB name 기준
   org_id: string;
 }
 
@@ -375,9 +381,6 @@ function InviteModal({ organizations, loading, onSubmit, onClose }: InviteModalP
   const updateEntry = (id: string, field: keyof InviteEntry, value: string) => {
     setEntries(entries.map(e => {
       if (e.id !== id) return e;
-      
-      // 역할이 viewer로 바뀌면 org_id는 선택 사항이므로 유지
-      // 역할이 org_head나 team_member로 바뀌면 org_id 필수
       return { ...e, [field]: value };
     }));
   };
@@ -387,9 +390,9 @@ function InviteModal({ organizations, loading, onSubmit, onClose }: InviteModalP
     setEntries(entries.map(e => ({ ...e, [field]: value })));
   };
 
-  // 조직 선택이 필수인지 확인
+  // ★ 조직 선택이 필수인지 확인 — DB name 기준
   const isOrgRequired = (roleType: string): boolean => {
-    return roleType === 'org_head' || roleType === 'team_member';
+    return roleType === 'org_leader' || roleType === 'member';
   };
 
   // 유효성 검사
@@ -403,9 +406,9 @@ function InviteModal({ organizations, loading, onSubmit, onClose }: InviteModalP
         alert(`${entry.email}: 역할을 선택해주세요`);
         return false;
       }
-      // 조직장, 팀원은 조직 필수
+      // 조직장, 구성원은 조직 필수
       if (isOrgRequired(entry.role_type) && !entry.org_id) {
-        alert(`${entry.email}: ${entry.role_type === 'org_head' ? '조직장' : '팀원'}은 소속 조직을 선택해야 합니다`);
+        alert(`${entry.email}: ${entry.role_type === 'org_leader' ? '조직장' : '구성원'}은 소속 조직을 선택해야 합니다`);
         return false;
       }
     }
@@ -429,7 +432,7 @@ function InviteModal({ organizations, loading, onSubmit, onClose }: InviteModalP
         await onSubmit({
           email: entry.email,
           full_name: entry.full_name,
-          role_type: entry.role_type as 'org_head' | 'team_member' | 'viewer',
+          role_type: entry.role_type as 'org_leader' | 'member' | 'viewer',  // ★
           org_id: entry.org_id
         });
         newResults.push({ email: entry.email, success: true });
@@ -539,8 +542,8 @@ function InviteModal({ organizations, loading, onSubmit, onClose }: InviteModalP
               className="w-full px-3 py-1.5 border border-slate-300 rounded-lg text-sm"
             >
               <option value="">선택...</option>
-              <option value="org_head">👑 조직장</option>
-              <option value="team_member">👤 팀원</option>
+              <option value="org_leader">👑 조직장</option>
+              <option value="member">👤 구성원</option>
               <option value="viewer">👁 조회자</option>
             </select>
           </div>
@@ -605,7 +608,7 @@ function InviteModal({ organizations, loading, onSubmit, onClose }: InviteModalP
                   className="px-2 py-1.5 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
                 />
 
-                {/* 역할 */}
+                {/* ★ 역할 — DB name 기준 */}
                 <select
                   value={entry.role_type}
                   onChange={(e) => updateEntry(entry.id, 'role_type', e.target.value)}
@@ -614,8 +617,8 @@ function InviteModal({ organizations, loading, onSubmit, onClose }: InviteModalP
                   }`}
                 >
                   <option value="">역할 선택 *</option>
-                  <option value="org_head">👑 조직장</option>
-                  <option value="team_member">👤 팀원</option>
+                  <option value="org_leader">👑 조직장</option>
+                  <option value="member">👤 구성원</option>
                   <option value="viewer">👁 조회자</option>
                 </select>
 
@@ -885,4 +888,4 @@ function TeamInviteLinkModal({ company, onClose, onUpdate }: TeamInviteLinkModal
       </div>
     </div>
   );
-} 
+}
