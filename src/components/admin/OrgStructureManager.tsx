@@ -19,6 +19,31 @@ function getChildLevel(parentLevel: string, levels: string[]): string {
   return levels[idx + 1];
 }
 
+// ★ 위상 정렬: 부모가 반드시 자식보다 먼저 오도록 정렬
+function topologicalSort(rows: any[]): any[] {
+  const nameSet = new Set(rows.map(r => r['조직명']?.trim()).filter(Boolean));
+  const sorted: any[] = [];
+  const visited = new Set<string>();
+
+  const visit = (row: any) => {
+    const name = row['조직명']?.trim();
+    if (!name || visited.has(name)) return;
+
+    const parentName = row['상위조직명']?.trim();
+    // 부모가 이 배치에 포함되어 있으면 부모를 먼저 처리
+    if (parentName && nameSet.has(parentName) && !visited.has(parentName)) {
+      const parentRow = rows.find(r => r['조직명']?.trim() === parentName);
+      if (parentRow) visit(parentRow);
+    }
+
+    visited.add(name);
+    sorted.push(row);
+  };
+
+  rows.forEach(row => visit(row));
+  return sorted;
+}
+
 export default function OrgStructureManager() {
   const {
     organizations, fetchOrganizations, addOrganization, updateOrganization,
@@ -96,7 +121,6 @@ export default function OrgStructureManager() {
 
         if (error) throw error;
 
-        // org_id별로 카운트
         const counts = new Map<string, number>();
         (data || []).forEach((row: any) => {
           const orgId = row.org_id;
@@ -138,12 +162,21 @@ export default function OrgStructureManager() {
   const getChildOrgs = (parentId: string | null) =>
     organizations.filter(org => org.parentOrgId === parentId);
 
+  // ★ 전사(루트) 조직인지 판별: parentOrgId가 없고, level이 '전사'이거나 조직 트리의 최상위
+  const isRootOrg = (org: Organization): boolean => {
+    if (org.parentOrgId) return false;
+    // level이 '전사'이거나, 회사와 이름이 같은 조직
+    if (org.level === '전사') return true;
+    if (company?.name && org.name === company.name) return true;
+    return false;
+  };
+
   const renderOrgTree = (org: Organization, level: number = 0) => {
     const children = getChildOrgs(org.id);
     const hasChildren = children.length > 0;
     const isExpanded = expandedOrgs.has(org.id);
     const isSelected = selectedOrgId === org.id;
-    const actualMemberCount = memberCounts.get(org.id) || 0; // ★ 실제 인원수
+    const actualMemberCount = memberCounts.get(org.id) || 0;
 
     return (
       <div key={org.id}>
@@ -167,7 +200,6 @@ export default function OrgStructureManager() {
               <span className={`px-1.5 py-0.5 text-xs rounded border ${getOrgTypeColor(org.orgType)}`}>
                 {org.orgType}
               </span>
-              {/* ★ 수정: headcount 대신 실제 배정 인원수 */}
               <span className="text-xs text-slate-500">{actualMemberCount}명</span>
             </div>
           </div>
@@ -203,10 +235,16 @@ export default function OrgStructureManager() {
     alert('✅ 조직 정보가 저장되었습니다');
   };
 
-  // 조직 삭제
+  // ★ 조직 삭제 — 전사(루트) 조직만 보호, 나머지는 삭제 가능
   const handleDelete = async (orgId: string) => {
     const org = organizations.find(o => o.id === orgId);
     if (!org) return;
+
+    // 전사(루트) 조직은 삭제 불가
+    if (isRootOrg(org)) {
+      alert('❌ 전사(최상위) 조직은 삭제할 수 없습니다.');
+      return;
+    }
 
     const children = getChildOrgs(orgId);
     if (children.length > 0) {
@@ -214,7 +252,13 @@ export default function OrgStructureManager() {
       return;
     }
 
-    if (!confirm(`"${org.name}" 조직을 삭제하시겠습니까?\n\n삭제하면 복구할 수 없습니다.`)) return;
+    // 배정된 인원이 있으면 경고
+    const memberCount = memberCounts.get(orgId) || 0;
+    const confirmMsg = memberCount > 0
+      ? `"${org.name}" 조직에 ${memberCount}명이 배정되어 있습니다.\n삭제하면 해당 인원의 소속이 해제됩니다.\n\n정말 삭제하시겠습니까?`
+      : `"${org.name}" 조직을 삭제하시겠습니까?\n\n삭제하면 복구할 수 없습니다.`;
+
+    if (!confirm(confirmMsg)) return;
 
     await deleteOrganization(orgId);
     if (selectedOrgId === orgId) {
@@ -334,17 +378,25 @@ ${existingOrgs || '(없음 - 전사 조직만 있음)'}
       const nameToId = new Map<string, string>();
       organizations.forEach(o => nameToId.set(o.name, o.id));
 
-      const sorted = [...aiResult].sort((a, b) =>
-        (levelPriority[a.level] ?? 99) - (levelPriority[b.level] ?? 99)
-      );
+      // ★ AI 결과도 위상 정렬 적용
+      const aiRows = aiResult.map(item => ({
+        '조직명': item.name,
+        '상위조직명': item.parentName,
+        '레벨': item.level,
+        '유형': item.orgType,
+        '미션': item.mission,
+      }));
+      const sorted = topologicalSort(aiRows);
 
       let successCount = 0;
-      for (const item of sorted) {
-        if (nameToId.has(item.name)) continue;
+      for (const row of sorted) {
+        const name = row['조직명']?.trim();
+        if (!name || nameToId.has(name)) continue;
 
-        const parentId = nameToId.get(item.parentName) || null;
-        if (!parentId && item.parentName) {
-          console.warn(`상위 조직 '${item.parentName}'을 찾을 수 없어 건너뜁니다: ${item.name}`);
+        const parentName = row['상위조직명']?.trim();
+        const parentId = parentName ? nameToId.get(parentName) || null : null;
+        if (parentName && !parentId) {
+          console.warn(`상위 조직 '${parentName}'을 찾을 수 없어 건너뜁니다: ${name}`);
           continue;
         }
 
@@ -352,11 +404,11 @@ ${existingOrgs || '(없음 - 전사 조직만 있음)'}
           .from('organizations')
           .insert({
             company_id: companyId,
-            name: item.name,
-            level: item.level || '팀',
+            name: name,
+            level: row['레벨'] || '팀',
             parent_org_id: parentId,
-            org_type: item.orgType || 'Middle',
-            mission: item.mission || '',
+            org_type: row['유형'] || 'Middle',
+            mission: row['미션'] || '',
             function_tags: [],
             headcount: 0,
             sort_order: 99,
@@ -368,7 +420,7 @@ ${existingOrgs || '(없음 - 전사 조직만 있음)'}
           nameToId.set(data.name, data.id);
           successCount++;
         } else {
-          console.warn(`조직 생성 실패 (${item.name}):`, error);
+          console.warn(`조직 생성 실패 (${name}):`, error);
         }
       }
 
@@ -403,6 +455,7 @@ ${existingOrgs || '(없음 - 전사 조직만 있음)'}
     fileInputRef.current?.click();
   };
 
+  // ★ 엑셀 업로드 — 위상 정렬 적용
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -429,22 +482,31 @@ ${existingOrgs || '(없음 - 전사 조직만 있음)'}
         return;
       }
 
-      const sortedRows = jsonData.sort((a: any, b: any) =>
-        (levelPriority[a['레벨']] ?? 99) - (levelPriority[b['레벨']] ?? 99)
-      );
+      // ★ 핵심 수정: levelPriority 기반 정렬 대신 위상 정렬 사용
+      const sortedRows = topologicalSort(jsonData);
 
       const orgNameMap = new Map<string, string>();
       organizations.forEach(org => orgNameMap.set(org.name, org.id));
       let successCount = 0;
+      let skipCount = 0;
 
       for (const row of sortedRows) {
         const orgName = row['조직명']?.trim();
-        if (!orgName || orgNameMap.has(orgName)) continue;
+        if (!orgName) continue;
+        
+        // 이미 존재하면 건너뜀
+        if (orgNameMap.has(orgName)) {
+          skipCount++;
+          continue;
+        }
 
         let parentId: string | null = null;
         const parentName = row['상위조직명']?.trim();
         if (parentName) {
           parentId = orgNameMap.get(parentName) || null;
+          if (!parentId) {
+            console.warn(`⚠️ 상위 조직 '${parentName}'을 찾을 수 없음 → '${orgName}'은 최상위로 생성됩니다`);
+          }
         }
 
         const { data, error } = await supabase
@@ -466,10 +528,14 @@ ${existingOrgs || '(없음 - 전사 조직만 있음)'}
         if (!error && data) {
           orgNameMap.set(data.name, data.id);
           successCount++;
+        } else {
+          console.warn(`조직 생성 실패 (${orgName}):`, error);
         }
       }
 
-      alert(`✅ ${successCount}개 조직이 업로드되었습니다!`);
+      let msg = `✅ ${successCount}개 조직이 업로드되었습니다!`;
+      if (skipCount > 0) msg += `\n(${skipCount}개는 이미 존재하여 건너뜀)`;
+      alert(msg);
       await fetchOrganizations(companyId);
     } catch (error: any) {
       alert(`업로드 실패: ${error.message}`);
@@ -630,7 +696,6 @@ ${existingOrgs || '(없음 - 전사 조직만 있음)'}
                 />
               </div>
 
-              {/* ★ 수정: 인원수를 실제 배정 인원으로 표시 (읽기 전용) */}
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-1">인원수</label>
                 <div className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-slate-50 flex items-center gap-2">
@@ -651,7 +716,8 @@ ${existingOrgs || '(없음 - 전사 조직만 있음)'}
                       className="flex-1 px-3 py-2 border border-blue-200 text-blue-700 rounded-lg hover:bg-blue-50 text-xs flex items-center justify-center gap-1">
                       <FolderPlus className="w-3.5 h-3.5" /> 하위 추가
                     </button>
-                    {selectedOrg.parentOrgId && (
+                    {/* ★ 수정: 전사(루트) 조직만 삭제 불가, 나머지는 삭제 가능 */}
+                    {!isRootOrg(selectedOrg) && (
                       <button onClick={() => handleDelete(selectedOrg.id)}
                         className="px-3 py-2 border border-red-200 text-red-600 rounded-lg hover:bg-red-50 text-xs flex items-center justify-center gap-1">
                         <Trash2 className="w-3.5 h-3.5" /> 삭제
