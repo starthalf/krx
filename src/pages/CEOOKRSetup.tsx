@@ -412,20 +412,13 @@ export default function CEOOKRSetup() {
               objectiveCount: objCount,
             });
           } else {
-            // ★ 미생성 조직도 목록에 포함 (pending 상태)
             allDone = false;
-            statuses.push({
-              orgId: org.id,
-              orgName: org.name,
-              level: org.level,
-              status: 'error', // 이전에 시도했으나 실패한 것으로 간주
-              objectiveCount: 0,
-            });
           }
         }
 
         if (statuses.length > 0) {
           setOrgDraftStatuses(statuses);
+          // 모든 하위 조직에 초안이 있으면 전체 완료
           if (allDone && statuses.length === childOrgs.length) {
             setAllDraftsComplete(true);
           }
@@ -2111,11 +2104,9 @@ export default function CEOOKRSetup() {
               {orgDraftStatuses.length > 0 && (
                 <div className="space-y-3">
                   {(() => {
-                    const successCount = orgDraftStatuses.filter(s => s.status === 'done').length;
-                    const errorCount = orgDraftStatuses.filter(s => s.status === 'error').length;
-                    const processedCount = successCount + errorCount;
+                    const doneCount = orgDraftStatuses.filter(s => s.status === 'done' || s.status === 'error').length;
                     const total = orgDraftStatuses.length;
-                    const pct = total > 0 ? Math.round((successCount / total) * 100) : 0;
+                    const pct = Math.round((doneCount / total) * 100);
                     const generatingOrg = orgDraftStatuses.find(s => s.status === 'generating');
                     return (
                       <div className="mb-4">
@@ -2123,15 +2114,13 @@ export default function CEOOKRSetup() {
                           <span className="text-sm text-slate-700">
                             {generatingOrg ? (
                               <><Loader2 className="w-4 h-4 inline animate-spin mr-1 text-indigo-600" /><span className="font-medium">{generatingOrg.orgName}</span> 생성 중...</>
-                            ) : errorCount === 0 && successCount === total ? (
+                            ) : doneCount === total ? (
                               <span className="text-green-700 font-medium">✅ 전체 완료</span>
-                            ) : processedCount === total && errorCount > 0 ? (
-                              <span className="text-amber-700 font-medium">⚠️ {successCount}개 성공, {errorCount}개 미생성</span>
                             ) : (
                               '대기 중...'
                             )}
                           </span>
-                          <span className="text-sm font-bold text-slate-700">{successCount} / {total} ({pct}%)</span>
+                          <span className="text-sm font-bold text-slate-700">{doneCount} / {total} ({pct}%)</span>
                         </div>
                         <div className="h-3 bg-slate-200 rounded-full overflow-hidden">
                           <div
@@ -2349,4 +2338,4 @@ export default function CEOOKRSetup() {
       </div>
     </div>
   );
-}
+} 
