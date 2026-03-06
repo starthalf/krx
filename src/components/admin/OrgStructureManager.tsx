@@ -54,6 +54,7 @@ export default function OrgStructureManager() {
   const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null);
   const [expandedOrgs, setExpandedOrgs] = useState<Set<string>>(new Set());
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState({ current: 0, total: 0, currentName: '' });
   const [editMode, setEditMode] = useState(false);
 
   // ★ 실제 배정 인원수 (user_roles 기반)
@@ -490,9 +491,14 @@ ${existingOrgs || '(없음 - 전사 조직만 있음)'}
       let successCount = 0;
       let skipCount = 0;
 
-      for (const row of sortedRows) {
+      setUploadProgress({ current: 0, total: sortedRows.length, currentName: '준비 중...' });
+
+      for (let i = 0; i < sortedRows.length; i++) {
+        const row = sortedRows[i];
         const orgName = row['조직명']?.trim();
         if (!orgName) continue;
+
+        setUploadProgress({ current: i + 1, total: sortedRows.length, currentName: orgName });
         
         // 이미 존재하면 건너뜀
         if (orgNameMap.has(orgName)) {
@@ -742,6 +748,42 @@ ${existingOrgs || '(없음 - 전사 조직만 있음)'}
           조직을 추가, 수정, 삭제하거나 AI로 자동 생성할 수 있습니다.
         </p>
       </div>
+
+      {/* ★ 엑셀 업로드 진행 오버레이 */}
+      {isUploading && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl p-8 max-w-sm w-full mx-4 text-center">
+            <Loader2 className="w-10 h-10 text-blue-600 animate-spin mx-auto mb-4" />
+            <h3 className="text-lg font-bold text-slate-900 mb-2">조직 업로드 중...</h3>
+            <p className="text-sm text-slate-600 mb-4">
+              엑셀 데이터를 처리하고 있습니다
+            </p>
+            
+            {uploadProgress.total > 0 && (
+              <div className="space-y-3">
+                {/* 프로그레스 바 */}
+                <div className="w-full bg-slate-200 rounded-full h-2.5">
+                  <div 
+                    className="bg-blue-600 h-2.5 rounded-full transition-all duration-300"
+                    style={{ width: `${Math.round((uploadProgress.current / uploadProgress.total) * 100)}%` }}
+                  />
+                </div>
+                
+                {/* 카운트 */}
+                <div className="flex items-center justify-between text-xs text-slate-500">
+                  <span>{uploadProgress.current} / {uploadProgress.total}</span>
+                  <span>{Math.round((uploadProgress.current / uploadProgress.total) * 100)}%</span>
+                </div>
+                
+                {/* 현재 처리 중인 조직명 */}
+                <p className="text-xs text-slate-400 truncate">
+                  {uploadProgress.currentName}
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* 하위 조직 추가 모달 */}
       {showAddModal && addParentOrg && (
