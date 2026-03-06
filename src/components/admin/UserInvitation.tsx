@@ -1,13 +1,13 @@
 // src/components/admin/UserInvitation.tsx
 import { useState, useEffect } from 'react';
-import { UserPlus, Mail, Send, X, Copy, Check, Crown, User, AlertCircle, Plus, Eye, Building2 } from 'lucide-react';
+import { UserPlus, Mail, Send, X, Copy, Check, Crown, User, AlertCircle, Plus, Eye, Building2, Star } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 import { supabase } from '../../lib/supabase';
 
 interface InvitationForm {
   email: string;
   full_name: string;
-  role_type: 'org_leader' | 'member' | 'viewer' | '';  // ★ DB name 기준
+  role_type: 'ceo' | 'org_leader' | 'member' | 'viewer' | '';  // ★ CEO 추가
   org_id: string;
 }
 
@@ -20,7 +20,6 @@ export default function UserInvitation() {
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
   const [company, setCompany] = useState<any>(null);
 
-  // 조직이 있는지 확인
   const hasOrganizations = organizations.length > 0;
 
   useEffect(() => {
@@ -106,11 +105,26 @@ export default function UserInvitation() {
         roleId = role?.id;
       }
 
+      // ★ CEO는 전사 조직을 자동 배정
+      let orgId = formData.org_id || null;
+      if (formData.role_type === 'ceo' && !orgId) {
+        // 전사 조직 찾기
+        const { data: rootOrg } = await supabase
+          .from('organizations')
+          .select('id')
+          .eq('company_id', profile.company_id)
+          .eq('level', '전사')
+          .maybeSingle();
+        
+        if (rootOrg) {
+          orgId = rootOrg.id;
+        }
+      }
+
       // 초대 토큰 생성
       const token = Math.random().toString(36).substring(2, 15) + 
                    Math.random().toString(36).substring(2, 15);
 
-      // 초대 생성 - viewer는 org_id 없이도 가능
       const { error } = await supabase
         .from('invitations')
         .insert({
@@ -118,7 +132,7 @@ export default function UserInvitation() {
           email: formData.email,
           full_name: formData.full_name || null,
           role_id: roleId,
-          org_id: formData.org_id || null,
+          org_id: orgId,
           token: token,
           invited_by: user.id
         });
@@ -148,8 +162,16 @@ export default function UserInvitation() {
   const getRoleBadge = (role: any) => {
     if (!role) return null;
     
-    // ★ DB name 기준
-    if (role.name === 'org_leader' || role.name === 'ceo') {
+    if (role.name === 'ceo') {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-1 bg-purple-100 text-purple-700 rounded text-xs">
+          <Star className="w-3 h-3" />
+          CEO
+        </span>
+      );
+    }
+
+    if (role.name === 'org_leader') {
       return (
         <span className="inline-flex items-center gap-1 px-2 py-1 bg-amber-100 text-amber-700 rounded text-xs">
           <Crown className="w-3 h-3" />
@@ -243,6 +265,7 @@ export default function UserInvitation() {
             <div className="text-sm text-blue-800">
               <p className="font-semibold mb-1">💡 역할 안내</p>
               <ul className="space-y-1 text-xs">
+                <li>• <strong>CEO</strong>: 전사 OKR 수립/확정, 최종 승인, 사이클 관리 (전사 자동 배정)</li>
                 <li>• <strong>조직장</strong>: 담당 조직의 OKR을 관리하고, 상위 조직에 승인 요청, 하위 조직에 독촉이 가능합니다 (조직 필수)</li>
                 <li>• <strong>구성원</strong>: 본인 OKR 및 체크인 권한 (조직 필수)</li>
                 <li>• <strong>조회자</strong>: 읽기 전용 권한 - 대시보드 조회, 공개된 OKR 열람 (조직 선택)</li>
@@ -341,7 +364,7 @@ interface InviteEntry {
   id: string;
   email: string;
   full_name: string;
-  role_type: 'org_leader' | 'member' | 'viewer' | '';  // ★ DB name 기준
+  role_type: 'ceo' | 'org_leader' | 'member' | 'viewer' | '';  // ★ CEO 추가
   org_id: string;
 }
 
@@ -360,24 +383,17 @@ function InviteModal({ organizations, loading, onSubmit, onClose }: InviteModalP
   const [currentIndex, setCurrentIndex] = useState(0);
   const [results, setResults] = useState<{ email: string; success: boolean; error?: string }[]>([]);
 
-  // 엔트리 추가
   const addEntry = () => {
     setEntries([...entries, { 
-      id: crypto.randomUUID(), 
-      email: '', 
-      full_name: '', 
-      role_type: '', 
-      org_id: '' 
+      id: crypto.randomUUID(), email: '', full_name: '', role_type: '', org_id: '' 
     }]);
   };
 
-  // 엔트리 삭제
   const removeEntry = (id: string) => {
     if (entries.length === 1) return;
     setEntries(entries.filter(e => e.id !== id));
   };
 
-  // 엔트리 업데이트
   const updateEntry = (id: string, field: keyof InviteEntry, value: string) => {
     setEntries(entries.map(e => {
       if (e.id !== id) return e;
@@ -385,17 +401,15 @@ function InviteModal({ organizations, loading, onSubmit, onClose }: InviteModalP
     }));
   };
 
-  // 전체 역할/조직 일괄 적용
   const applyToAll = (field: 'role_type' | 'org_id', value: string) => {
     setEntries(entries.map(e => ({ ...e, [field]: value })));
   };
 
-  // ★ 조직 선택이 필수인지 확인 — DB name 기준
+  // ★ 조직 선택이 필수인지 확인 — CEO는 전사 자동 배정이므로 불필요
   const isOrgRequired = (roleType: string): boolean => {
     return roleType === 'org_leader' || roleType === 'member';
   };
 
-  // 유효성 검사
   const validateEntries = (): boolean => {
     for (const entry of entries) {
       if (!entry.email) {
@@ -406,7 +420,6 @@ function InviteModal({ organizations, loading, onSubmit, onClose }: InviteModalP
         alert(`${entry.email}: 역할을 선택해주세요`);
         return false;
       }
-      // 조직장, 구성원은 조직 필수
       if (isOrgRequired(entry.role_type) && !entry.org_id) {
         alert(`${entry.email}: ${entry.role_type === 'org_leader' ? '조직장' : '구성원'}은 소속 조직을 선택해야 합니다`);
         return false;
@@ -415,24 +428,21 @@ function InviteModal({ organizations, loading, onSubmit, onClose }: InviteModalP
     return true;
   };
 
-  // 제출
   const handleSubmit = async () => {
     if (!validateEntries()) return;
 
     setSubmitting(true);
     setResults([]);
-    
     const newResults: typeof results = [];
 
     for (let i = 0; i < entries.length; i++) {
       const entry = entries[i];
       setCurrentIndex(i);
-      
       try {
         await onSubmit({
           email: entry.email,
           full_name: entry.full_name,
-          role_type: entry.role_type as 'org_leader' | 'member' | 'viewer',  // ★
+          role_type: entry.role_type as 'ceo' | 'org_leader' | 'member' | 'viewer',
           org_id: entry.org_id
         });
         newResults.push({ email: entry.email, success: true });
@@ -444,7 +454,6 @@ function InviteModal({ organizations, loading, onSubmit, onClose }: InviteModalP
     setResults(newResults);
     setSubmitting(false);
 
-    // 모두 성공하면 닫기
     if (newResults.every(r => r.success)) {
       setTimeout(() => {
         alert(`${newResults.length}명의 초대가 완료되었습니다!`);
@@ -453,7 +462,6 @@ function InviteModal({ organizations, loading, onSubmit, onClose }: InviteModalP
     }
   };
 
-  // 조직을 계층별로 그룹핑
   const groupedOrgs = organizations.reduce((acc, org) => {
     const level = org.level || '기타';
     if (!acc[level]) acc[level] = [];
@@ -470,7 +478,6 @@ function InviteModal({ organizations, loading, onSubmit, onClose }: InviteModalP
       <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
         <div className="bg-white rounded-xl max-w-md w-full p-6">
           <h3 className="text-xl font-bold text-slate-900 mb-4">초대 결과</h3>
-          
           <div className="mb-4 p-4 bg-slate-50 rounded-lg">
             <div className="flex gap-4 text-center">
               <div className="flex-1">
@@ -485,36 +492,16 @@ function InviteModal({ organizations, loading, onSubmit, onClose }: InviteModalP
               )}
             </div>
           </div>
-
           <div className="space-y-2 max-h-60 overflow-y-auto mb-4">
             {results.map((result, idx) => (
-              <div 
-                key={idx}
-                className={`flex items-center gap-2 p-2 rounded-lg ${
-                  result.success ? 'bg-green-50' : 'bg-red-50'
-                }`}
-              >
-                {result.success ? (
-                  <Check className="w-4 h-4 text-green-600" />
-                ) : (
-                  <X className="w-4 h-4 text-red-600" />
-                )}
-                <span className={`text-sm ${result.success ? 'text-green-800' : 'text-red-800'}`}>
-                  {result.email}
-                </span>
-                {result.error && (
-                  <span className="text-xs text-red-600 ml-auto">{result.error}</span>
-                )}
+              <div key={idx} className={`flex items-center gap-2 p-2 rounded-lg ${result.success ? 'bg-green-50' : 'bg-red-50'}`}>
+                {result.success ? <Check className="w-4 h-4 text-green-600" /> : <X className="w-4 h-4 text-red-600" />}
+                <span className={`text-sm ${result.success ? 'text-green-800' : 'text-red-800'}`}>{result.email}</span>
+                {result.error && <span className="text-xs text-red-600 ml-auto">{result.error}</span>}
               </div>
             ))}
           </div>
-
-          <button
-            onClick={onClose}
-            className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-          >
-            닫기
-          </button>
+          <button onClick={onClose} className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">닫기</button>
         </div>
       </div>
     );
@@ -542,6 +529,7 @@ function InviteModal({ organizations, loading, onSubmit, onClose }: InviteModalP
               className="w-full px-3 py-1.5 border border-slate-300 rounded-lg text-sm"
             >
               <option value="">선택...</option>
+              <option value="ceo">⭐ CEO</option>
               <option value="org_leader">👑 조직장</option>
               <option value="member">👤 구성원</option>
               <option value="viewer">👁 조회자</option>
@@ -575,10 +563,11 @@ function InviteModal({ organizations, loading, onSubmit, onClose }: InviteModalP
           <div></div>
         </div>
 
-        {/* 엔트리 목록 - 리스트 형태 */}
+        {/* 엔트리 목록 */}
         <div className="flex-1 overflow-y-auto border border-slate-200 rounded-b-lg mb-4">
           {entries.map((entry, index) => {
             const orgRequired = isOrgRequired(entry.role_type);
+            const isCeo = entry.role_type === 'ceo';
             
             return (
               <div 
@@ -587,10 +576,8 @@ function InviteModal({ organizations, loading, onSubmit, onClose }: InviteModalP
                   index % 2 === 0 ? 'bg-white' : 'bg-slate-50'
                 } ${index !== entries.length - 1 ? 'border-b border-slate-100' : ''}`}
               >
-                {/* 번호 */}
                 <div className="text-sm text-slate-500 text-center">{index + 1}</div>
 
-                {/* 이메일 */}
                 <input
                   type="email"
                   value={entry.email}
@@ -599,7 +586,6 @@ function InviteModal({ organizations, loading, onSubmit, onClose }: InviteModalP
                   className="px-2 py-1.5 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
                 />
 
-                {/* 이름 */}
                 <input
                   type="text"
                   value={entry.full_name}
@@ -608,7 +594,7 @@ function InviteModal({ organizations, loading, onSubmit, onClose }: InviteModalP
                   className="px-2 py-1.5 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
                 />
 
-                {/* ★ 역할 — DB name 기준 */}
+                {/* ★ 역할 — CEO 옵션 추가 */}
                 <select
                   value={entry.role_type}
                   onChange={(e) => updateEntry(entry.id, 'role_type', e.target.value)}
@@ -617,46 +603,52 @@ function InviteModal({ organizations, loading, onSubmit, onClose }: InviteModalP
                   }`}
                 >
                   <option value="">역할 선택 *</option>
+                  <option value="ceo">⭐ CEO</option>
                   <option value="org_leader">👑 조직장</option>
                   <option value="member">👤 구성원</option>
                   <option value="viewer">👁 조회자</option>
                 </select>
 
-                {/* 소속 조직 - 역할에 따라 필수 여부 변경 */}
+                {/* 소속 조직 — CEO는 전사 자동 배정 표시 */}
                 <div className="relative">
-                  <select
-                    value={entry.org_id}
-                    onChange={(e) => updateEntry(entry.id, 'org_id', e.target.value)}
-                    disabled={!entry.role_type}
-                    className={`w-full px-2 py-1.5 border rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-slate-100 disabled:text-slate-400 ${
-                      !entry.role_type 
-                        ? 'border-slate-200' 
-                        : orgRequired && !entry.org_id 
-                          ? 'border-red-400 bg-red-50' 
-                          : 'border-slate-300'
-                    }`}
-                  >
-                    <option value="">
-                      {!entry.role_type 
-                        ? '역할 먼저 선택' 
-                        : orgRequired 
-                          ? '조직 선택 *' 
-                          : '조직 선택 (선택사항)'}
-                    </option>
-                    {Object.entries(groupedOrgs).map(([level, orgs]) => (
-                      <optgroup key={level} label={level}>
-                        {(orgs as any[]).map((org) => (
-                          <option key={org.id} value={org.id}>{org.name}</option>
-                        ))}
-                      </optgroup>
-                    ))}
-                  </select>
+                  {isCeo ? (
+                    <div className="w-full px-2 py-1.5 bg-purple-50 border border-purple-200 rounded text-sm text-purple-700 font-medium">
+                      전사 (자동)
+                    </div>
+                  ) : (
+                    <select
+                      value={entry.org_id}
+                      onChange={(e) => updateEntry(entry.id, 'org_id', e.target.value)}
+                      disabled={!entry.role_type}
+                      className={`w-full px-2 py-1.5 border rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-slate-100 disabled:text-slate-400 ${
+                        !entry.role_type 
+                          ? 'border-slate-200' 
+                          : orgRequired && !entry.org_id 
+                            ? 'border-red-400 bg-red-50' 
+                            : 'border-slate-300'
+                      }`}
+                    >
+                      <option value="">
+                        {!entry.role_type 
+                          ? '역할 먼저 선택' 
+                          : orgRequired 
+                            ? '조직 선택 *' 
+                            : '조직 선택 (선택사항)'}
+                      </option>
+                      {Object.entries(groupedOrgs).map(([level, orgs]) => (
+                        <optgroup key={level} label={level}>
+                          {(orgs as any[]).map((org) => (
+                            <option key={org.id} value={org.id}>{org.name}</option>
+                          ))}
+                        </optgroup>
+                      ))}
+                    </select>
+                  )}
                   {orgRequired && !entry.org_id && entry.role_type && (
                     <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full"></span>
                   )}
                 </div>
 
-                {/* 삭제 버튼 */}
                 <button
                   onClick={() => removeEntry(entry.id)}
                   disabled={entries.length === 1}
@@ -669,7 +661,6 @@ function InviteModal({ organizations, loading, onSubmit, onClose }: InviteModalP
           })}
         </div>
 
-        {/* 추가 버튼 */}
         <button
           onClick={addEntry}
           className="w-full py-2 border-2 border-dashed border-slate-300 text-slate-600 rounded-lg hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50 transition-colors mb-4 flex items-center justify-center gap-2"
@@ -678,7 +669,6 @@ function InviteModal({ organizations, loading, onSubmit, onClose }: InviteModalP
           사용자 추가
         </button>
 
-        {/* 하단 버튼 */}
         <div className="flex gap-3 pt-4 border-t">
           <button
             onClick={onClose}
@@ -797,7 +787,6 @@ function TeamInviteLinkModal({ company, onClose, onUpdate }: TeamInviteLinkModal
           </button>
         </div>
 
-        {/* 안내 */}
         <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
           <h4 className="font-semibold text-blue-900 mb-2">🔗 팀 초대 링크란?</h4>
           <p className="text-sm text-blue-800">
@@ -806,7 +795,6 @@ function TeamInviteLinkModal({ company, onClose, onUpdate }: TeamInviteLinkModal
           </p>
         </div>
 
-        {/* 활성화 상태 */}
         <div className="mb-6 p-4 bg-slate-50 rounded-lg">
           <div className="flex items-center justify-between">
             <div>
@@ -827,7 +815,6 @@ function TeamInviteLinkModal({ company, onClose, onUpdate }: TeamInviteLinkModal
           </div>
         </div>
 
-        {/* 이메일 도메인 */}
         <div className="mb-6">
           <label className="block text-sm font-medium text-slate-700 mb-2">
             📧 허용된 이메일 도메인
@@ -847,7 +834,6 @@ function TeamInviteLinkModal({ company, onClose, onUpdate }: TeamInviteLinkModal
           </p>
         </div>
 
-        {/* 초대 링크 */}
         <div className="mb-6">
           <label className="block text-sm font-medium text-slate-700 mb-2">
             🔗 공유 링크
@@ -868,7 +854,6 @@ function TeamInviteLinkModal({ company, onClose, onUpdate }: TeamInviteLinkModal
           </div>
         </div>
 
-        {/* 버튼 */}
         <div className="flex gap-3">
           <button
             onClick={handleRegenerateToken}
@@ -888,4 +873,4 @@ function TeamInviteLinkModal({ company, onClose, onUpdate }: TeamInviteLinkModal
       </div>
     </div>
   );
-} 
+}
