@@ -512,8 +512,9 @@ export default function CEOOKRSetup() {
 
       try {
         const fileId = crypto.randomUUID();
-        const safeName = file.name.replace(/[^a-zA-Z0-9가-힣._-]/g, '_');
-        const storagePath = `${company.id}/${selectedPeriodCode}/${fileId}_${safeName}`;
+        // Storage key에는 ASCII만 허용 — UUID + 확장자만 사용, 원본 파일명은 JSON에 보관
+        const fileExt = file.name.split('.').pop()?.toLowerCase() || 'bin';
+        const storagePath = `${company.id}/${selectedPeriodCode}/${fileId}.${fileExt}`;
 
         const { error: uploadErr } = await supabase.storage
           .from('context-documents')
