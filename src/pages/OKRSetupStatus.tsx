@@ -1,9 +1,7 @@
 // src/pages/OKRSetupStatus.tsx
 // OKR 수립 현황 — CEO/본부장용
 // ★ 기간(fiscal_periods) ↔ 사이클(okr_planning_cycles) 분리
-//   - 기간 셀렉터: 항상 표시 (fiscal_periods에서 조회)
-//   - 사이클이 없으면: "이 기간에 수립 사이클이 없습니다" + CEO 수립 이동
-//   - 사이클이 있으면: 사이클 카드 + 요약 + 조직 테이블
+// ★ AI 초안(okr_sets 없이 objectives만 있는 경우)도 OKR 확인 가능
 
 import { useState, useEffect, useMemo } from 'react';
 import {
@@ -64,7 +62,6 @@ export default function OKRSetupStatus() {
   const currentPeriod = useStore(s => s.currentPeriod);
   const navigate = useNavigate();
 
-  // ── company 자동 로드 ──
   const [companyReady, setCompanyReady] = useState(!!company?.id);
   useEffect(()=>{
     if(!user?.id) return;
@@ -83,7 +80,6 @@ export default function OKRSetupStatus() {
     })();
   },[user?.id, company?.id]);
 
-  // ── State ──
   const [periods, setPeriods] = useState<Period[]>([]);
   const [selectedPeriod, setSelectedPeriod] = useState<Period|null>(null);
   const [cycle, setCycle] = useState<Cycle|null>(null);
@@ -121,7 +117,7 @@ export default function OKRSetupStatus() {
   const isDirect = (id:string) => directChildIds.includes(id);
   const canApprove = (id:string) => roleLevel >= 90 || isDirect(id);
 
-  /* ─── 1단계: 기간 목록 조회 (fiscal_periods) ──────────── */
+  /* ─── 1단계: 기간 목록 조회 ──────────── */
   const fetchPeriods = async()=>{
     if(!company?.id) return;
     try {
@@ -141,7 +137,6 @@ export default function OKRSetupStatus() {
       }
       const list: Period[] = (data||[]).map((r:any)=>({ id:r.id, periodCode:r.period_code, periodName:r.period_name, periodType:r.period_type, startsAt:r.starts_at, endsAt:r.ends_at, status:r.status }));
       setPeriods(list);
-      // 자동 선택
       if(!selectedPeriod && list.length>0){
         const matched = list.find(p=>p.periodCode===currentPeriod);
         const planning = list.find(p=>p.status==='planning');
@@ -151,7 +146,7 @@ export default function OKRSetupStatus() {
     } catch(e){ console.warn('기간 조회 실패:',e); }
   };
 
-  /* ─── 2단계: 선택 기간의 사이클 조회 ───────────────────── */
+  /* ─── 2단계: 사이클 조회 ───────────────────── */
   const fetchCycleForPeriod = async(periodCode: string)=>{
     if(!company?.id) return;
     try {
@@ -170,53 +165,75 @@ export default function OKRSetupStatus() {
 
   /* ─── 3단계: 조직 상태 조회 ────────────────────────────── */
   const fetchStatuses = async()=>{
-    if(!cycle?.id) { setOrgStatuses([]); setLoading(false); return; }
+    // ★ 사이클 없어도 기간이 선택되어 있으면 조직 상태 조회 가능
+    const period = cycle?.period || selectedPeriod?.periodCode || currentPeriod;
+    if(!period) { setOrgStatuses([]); setLoading(false); return; }
     setLoading(true);
-    const period = cycle.period;
     try {
       let usedRPC = false;
-      try {
-        const { data, error } = await supabase.rpc('get_cycle_setup_stats',{ p_cycle_id: cycle.id });
-        if(!error && data && data.length>0){
-          usedRPC = true;
-          const list: OrgStatus[] = data.map((r:any)=>{
-            let st: OrgStatus['okrStatus'] = 'not_started';
-            const s=r.okr_set_status;
-            if(s==='finalized') st='finalized'; else if(s==='approved') st='approved';
-            else if(s==='submitted'||s==='under_review') st='submitted';
-            else if(s==='revision_requested') st='revision_requested'; else if(s==='draft') st='draft';
-            const org = organizations.find(o=>o.id===r.org_id);
-            return { id:r.org_id, name:r.org_name, level:r.org_level,
-              parentOrgId: org?.parentOrgId||null, headName:r.head_name, headId:r.head_profile_id, okrStatus:st,
-              objectiveCount:r.objective_count||0, krCount:r.kr_count||0,
-              submittedAt:r.submitted_at, approvedAt:r.approved_at, lastNudgedAt:null,
-              selected: st==='not_started'||st==='draft'||st==='revision_requested', okrSetId: r.okr_set_id||null };
-          });
-          for(const os of list.filter(s=>!s.okrSetId && s.okrStatus!=='not_started')){
-            const { data:sd } = await supabase.from('okr_sets').select('id').eq('org_id',os.id).eq('period',period).order('version',{ascending:false}).limit(1).maybeSingle();
-            if(sd) os.okrSetId = sd.id;
+      if(cycle?.id) {
+        try {
+          const { data, error } = await supabase.rpc('get_cycle_setup_stats',{ p_cycle_id: cycle.id });
+          if(!error && data && data.length>0){
+            usedRPC = true;
+            const list: OrgStatus[] = data.map((r:any)=>{
+              let st: OrgStatus['okrStatus'] = 'not_started';
+              const s=r.okr_set_status;
+              if(s==='finalized') st='finalized'; else if(s==='approved') st='approved';
+              else if(s==='submitted'||s==='under_review') st='submitted';
+              else if(s==='revision_requested') st='revision_requested'; else if(s==='draft') st='draft';
+              else if((r.objective_count||0)>0) st='draft'; // ★ okr_sets 없어도 objectives 있으면 draft
+              const org = organizations.find(o=>o.id===r.org_id);
+              return { id:r.org_id, name:r.org_name, level:r.org_level,
+                parentOrgId: org?.parentOrgId||null, headName:r.head_name, headId:r.head_profile_id, okrStatus:st,
+                objectiveCount:r.objective_count||0, krCount:r.kr_count||0,
+                submittedAt:r.submitted_at, approvedAt:r.approved_at, lastNudgedAt:null,
+                selected: st==='not_started'||st==='draft'||st==='revision_requested', okrSetId: r.okr_set_id||null };
+            });
+            for(const os of list.filter(s=>!s.okrSetId && s.okrStatus!=='not_started')){
+              const { data:sd } = await supabase.from('okr_sets').select('id').eq('org_id',os.id).eq('period',period).order('version',{ascending:false}).limit(1).maybeSingle();
+              if(sd) os.okrSetId = sd.id;
+            }
+            const ids = list.map(s=>s.id);
+            if(ids.length>0){
+              const { data:nudges } = await supabase.from('notifications').select('org_id,created_at').eq('type','okr_draft_reminder').in('org_id',ids).order('created_at',{ascending:false});
+              if(nudges){ const m=new Map<string,string>(); for(const n of nudges){ if(n.org_id&&!m.has(n.org_id)) m.set(n.org_id,n.created_at); } for(const s of list) s.lastNudgedAt=m.get(s.id)||null; }
+            }
+            setOrgStatuses(list);
           }
-          const ids = list.map(s=>s.id);
-          if(ids.length>0){
-            const { data:nudges } = await supabase.from('notifications').select('org_id,created_at').eq('type','okr_draft_reminder').in('org_id',ids).order('created_at',{ascending:false});
-            if(nudges){ const m=new Map<string,string>(); for(const n of nudges){ if(n.org_id&&!m.has(n.org_id)) m.set(n.org_id,n.created_at); } for(const s of list) s.lastNudgedAt=m.get(s.id)||null; }
-          }
-          setOrgStatuses(list);
-        }
-      } catch(e){ console.warn('RPC 실패:',e); }
+        } catch(e){ console.warn('RPC 실패:',e); }
+      }
       if(!usedRPC){
         const subs = organizations.filter(o=>o.level!=='전사');
         const list: OrgStatus[] = [];
         for(const org of subs){
           const { data:okrSet } = await supabase.from('okr_sets').select('id,status,submitted_at,reviewed_at').eq('org_id',org.id).eq('period',period).order('version',{ascending:false}).limit(1).maybeSingle();
-          const { count:oc } = await supabase.from('objectives').select('*',{count:'exact',head:true}).eq('org_id',org.id).eq('is_latest',true).eq('period',period);
-          const { count:kc } = await supabase.from('key_results').select('*',{count:'exact',head:true}).eq('org_id',org.id).eq('is_latest',true);
+
+          // ★ is_latest fallback — AI 초안도 카운트
+          let oc = 0, kc = 0;
+          const { count:ocL } = await supabase.from('objectives').select('*',{count:'exact',head:true}).eq('org_id',org.id).eq('is_latest',true).eq('period',period);
+          if((ocL||0) > 0) {
+            oc = ocL || 0;
+            const { count:kcL } = await supabase.from('key_results').select('*',{count:'exact',head:true}).eq('org_id',org.id).eq('is_latest',true);
+            kc = kcL || 0;
+          } else {
+            const { count:ocA } = await supabase.from('objectives').select('*',{count:'exact',head:true}).eq('org_id',org.id).eq('period',period);
+            oc = ocA || 0;
+            if(oc > 0){
+              const { data:oIds } = await supabase.from('objectives').select('id').eq('org_id',org.id).eq('period',period);
+              if(oIds && oIds.length > 0){
+                const { count:kcA } = await supabase.from('key_results').select('*',{count:'exact',head:true}).in('objective_id',oIds.map((o:any)=>o.id));
+                kc = kcA || 0;
+              }
+            }
+          }
+
           let headName:string|null=null, headId:string|null=null;
           try { const { data:ld } = await supabase.from('user_roles').select('profile_id, roles!inner(level)').eq('org_id',org.id); const l=(ld||[]).find((r:any)=>r.roles?.level>=70); if(l?.profile_id){ headId=l.profile_id; const { data:p }=await supabase.from('profiles').select('full_name').eq('id',l.profile_id).single(); headName=p?.full_name||null; } } catch{}
           let st: OrgStatus['okrStatus'] = 'not_started';
           if(okrSet){ if(okrSet.status==='finalized') st='finalized'; else if(okrSet.status==='approved') st='approved'; else if(okrSet.status==='submitted'||okrSet.status==='under_review') st='submitted'; else if(okrSet.status==='revision_requested') st='revision_requested'; else if(okrSet.status==='draft') st='draft'; }
-          else if((oc||0)>0) st='draft';
-          list.push({ id:org.id, name:org.name, level:org.level, parentOrgId:org.parentOrgId||null, headName, headId, okrStatus:st, objectiveCount:oc||0, krCount:kc||0, submittedAt:okrSet?.submitted_at||null, approvedAt:okrSet?.reviewed_at||null, lastNudgedAt:null, selected: st==='not_started'||st==='draft'||st==='revision_requested', okrSetId:okrSet?.id||null });
+          else if(oc>0) st='draft';
+          list.push({ id:org.id, name:org.name, level:org.level, parentOrgId:org.parentOrgId||null, headName, headId, okrStatus:st, objectiveCount:oc, krCount:kc, submittedAt:okrSet?.submitted_at||null, approvedAt:okrSet?.reviewed_at||null, lastNudgedAt:null, selected: st==='not_started'||st==='draft'||st==='revision_requested', okrSetId:okrSet?.id||null });
         }
         setOrgStatuses(list);
       }
@@ -224,22 +241,37 @@ export default function OKRSetupStatus() {
     finally { setLoading(false); }
   };
 
-  // ── Effects chain: companyReady → fetchPeriods → selectedPeriod → fetchCycle → cycle → fetchStatuses
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(()=>{ if(companyReady && company?.id) fetchPeriods(); },[companyReady, company?.id]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(()=>{ if(selectedPeriod && company?.id) fetchCycleForPeriod(selectedPeriod.periodCode); },[selectedPeriod?.id, company?.id]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(()=>{ if(organizations.length>0) fetchStatuses(); },[cycle?.id, organizations.length]);
+  useEffect(()=>{ if(organizations.length>0 && (cycle?.id || selectedPeriod)) fetchStatuses(); },[cycle?.id, selectedPeriod?.id, organizations.length]);
 
   /* ─── OKR 상세 ──────────────────────────────────────── */
   const openDetail = async(org: OrgStatus)=>{
     setModalOrg(org); setDetailLoading(true); setOkrDetail(null); setHistory([]); setReviewText('');
     try {
       const period = cycle?.period||selectedPeriod?.periodCode||currentPeriod;
-      const { data:objs } = await supabase.from('objectives').select('id,name,bii_type,perspective,sort_order').eq('org_id',org.id).eq('is_latest',true).eq('period',period).order('sort_order');
+
+      // ★ is_latest fallback — AI 초안도 조회
+      let objs: any[] = [];
+      const { data:objsL } = await supabase.from('objectives').select('id,name,bii_type,perspective,sort_order')
+        .eq('org_id',org.id).eq('is_latest',true).eq('period',period).order('sort_order');
+      if(objsL && objsL.length > 0) { objs = objsL; }
+      else { const { data:objsA } = await supabase.from('objectives').select('id,name,bii_type,perspective,sort_order').eq('org_id',org.id).eq('period',period).order('sort_order'); objs = objsA || []; }
+
       const objectives = [];
-      for(const obj of (objs||[])){ const { data:krs } = await supabase.from('key_results').select('id,name,definition,weight,target_value,unit,bii_type,kpi_category,perspective,grade_criteria').eq('objective_id',obj.id).eq('is_latest',true).order('weight',{ascending:false}); objectives.push({...obj, key_results:krs||[]}); }
+      for(const obj of objs){
+        // ★ KR도 is_latest fallback
+        let krs: any[] = [];
+        const { data:krsL } = await supabase.from('key_results')
+          .select('id,name,definition,weight,target_value,unit,bii_type,kpi_category,perspective,grade_criteria')
+          .eq('objective_id',obj.id).eq('is_latest',true).order('weight',{ascending:false});
+        if(krsL && krsL.length > 0) { krs = krsL; }
+        else { const { data:krsA } = await supabase.from('key_results').select('id,name,definition,weight,target_value,unit,bii_type,kpi_category,perspective,grade_criteria').eq('objective_id',obj.id).order('weight',{ascending:false}); krs = krsA || []; }
+        objectives.push({...obj, key_results:krs});
+      }
       setOkrDetail({objectives});
       if(org.okrSetId){ const { data:h } = await supabase.from('approval_history').select('id,action,actor_name,comment,created_at').eq('okr_set_id',org.okrSetId).order('created_at',{ascending:false}); setHistory(h||[]); }
     } catch(e){ console.warn('상세 조회 실패:',e); }
@@ -324,7 +356,6 @@ export default function OKRSetupStatus() {
   /* ═══════════════════════ RENDER ═══════════════════════ */
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
-
       {/* ── 헤더 + 기간 셀렉터 ── */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -335,7 +366,6 @@ export default function OKRSetupStatus() {
           </div>
         </div>
         <div className="flex items-center gap-3">
-          {/* ★ 기간 셀렉터 (fiscal_periods 기반 — 항상 표시) */}
           {periods.length>0&&(
             <select value={selectedPeriod?.id||''} onChange={e=>{const p=periods.find(x=>x.id===e.target.value); if(p){setSelectedPeriod(p);setCycle(null);setOrgStatuses([]);}}}
               className="border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-700 bg-white focus:ring-2 focus:ring-blue-500 outline-none min-w-[200px]">
@@ -349,7 +379,7 @@ export default function OKRSetupStatus() {
         </div>
       </div>
 
-      {/* ── 사이클이 있을 때: 사이클 카드 ── */}
+      {/* ── 사이클 카드 ── */}
       {cycle&&(
         <div className={`rounded-xl border p-5 ${cycle.isOverdue?'bg-red-50 border-red-200':cycle.daysRemaining<=3?'bg-amber-50 border-amber-200':'bg-blue-50 border-blue-200'}`}>
           <div className="flex items-center justify-between">
@@ -380,7 +410,7 @@ export default function OKRSetupStatus() {
         </div>
       )}
 
-      {/* ── 사이클이 없을 때: 안내 ── */}
+      {/* ── 사이클 없을 때 안내 ── */}
       {!cycle&&!loading&&selectedPeriod&&(
         <div className="bg-gradient-to-br from-slate-50 to-blue-50 border border-slate-200 rounded-xl p-8 text-center">
           <Rocket className="w-12 h-12 text-blue-400 mx-auto mb-4"/>
@@ -406,8 +436,8 @@ export default function OKRSetupStatus() {
         </div>
       )}
 
-      {/* ═══ 사이클이 있을 때만: 요약 + 진행바 + 테이블 ═══ */}
-      {cycle&&(<>
+      {/* ═══ 요약 + 진행바 + 테이블 (사이클 있거나 orgStatuses가 있을 때) ═══ */}
+      {(cycle || orgStatuses.length > 0) &&(<>
         {/* 요약 카드 */}
         <div className="grid grid-cols-5 gap-4">
           <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
@@ -469,11 +499,13 @@ export default function OKRSetupStatus() {
                         <td className="px-3 py-3 text-center text-sm text-slate-600">{org.objectiveCount>0?<>{org.objectiveCount} <span className="text-slate-400">O</span> / {org.krCount} <span className="text-slate-400">KR</span></>:<span className="text-slate-300">—</span>}</td>
                         <td className="px-3 py-3 text-center">{ago(org.lastNudgedAt)?<span className="text-xs text-orange-500 flex items-center justify-center gap-1"><Clock className="w-3 h-3"/>{ago(org.lastNudgedAt)}</span>:<span className="text-xs text-slate-300">—</span>}</td>
                         <td className="pr-6 pl-3 py-3"><div className="flex items-center justify-end gap-1.5">
-                          {org.okrStatus!=='not_started'&&(<button onClick={()=>openDetail(org)} className="px-2.5 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors flex items-center gap-1"><Eye className="w-3 h-3"/> OKR 확인</button>)}
+                          {/* ★ objectiveCount > 0이면 OKR 확인 버튼 항상 표시 */}
+                          {(org.okrStatus!=='not_started'||org.objectiveCount>0)&&(<button onClick={()=>openDetail(org)} className="px-2.5 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors flex items-center gap-1"><Eye className="w-3 h-3"/> OKR 확인</button>)}
                           {direct&&org.okrStatus==='submitted'&&(<button onClick={()=>{setActionOrg(org);setActionType('approve');setActionComment('');}} className="px-2.5 py-1.5 text-xs font-medium text-green-600 bg-green-50 border border-green-200 rounded-lg hover:bg-green-100 transition-colors flex items-center gap-1"><Check className="w-3 h-3"/> 승인</button>)}
                           {direct&&org.okrStatus==='submitted'&&(<button onClick={()=>{setActionOrg(org);setActionType('revision_request');setActionComment('');}} className="px-2.5 py-1.5 text-xs font-medium text-amber-600 bg-amber-50 border border-amber-200 rounded-lg hover:bg-amber-100 transition-colors flex items-center gap-1"><MessageSquare className="w-3 h-3"/> 수정요청</button>)}
                           {!direct&&org.okrStatus!=='not_started'&&org.okrSetId&&(<button onClick={()=>openDetail(org)} className="px-2.5 py-1.5 text-xs font-medium text-violet-600 bg-violet-50 border border-violet-200 rounded-lg hover:bg-violet-100 transition-colors flex items-center gap-1"><MessageSquare className="w-3 h-3"/> 검토의견</button>)}
-                          {org.okrStatus==='not_started'&&<span className="text-xs text-slate-300">—</span>}
+                          {/* ★ 진짜 OKR 0개인 경우에만 대시 표시 */}
+                          {org.okrStatus==='not_started'&&org.objectiveCount===0&&<span className="text-xs text-slate-300">—</span>}
                         </div></td>
                       </tr>
                     );
