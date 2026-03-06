@@ -53,7 +53,8 @@ export default function AcceptInvite() {
 
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [selectedOrgId, setSelectedOrgId] = useState('');
-  const [selectedRoleType, setSelectedRoleType] = useState<'org_head' | 'team_member' | ''>('');
+  // ★ 수정: DB roles.name 기준 — org_leader, member
+  const [selectedRoleType, setSelectedRoleType] = useState<'org_leader' | 'member' | ''>('');
 
   useEffect(() => {
     if (token) {
@@ -289,11 +290,19 @@ export default function AcceptInvite() {
       let roleId = invitation.role_id;
 
       if (!roleId) {
-        const { data: roleData } = await supabase
+        // ★ 수정: DB name 기준 — 'member' (not 'team_member')
+        const roleName = selectedRoleType || 'member';
+        console.log('🔍 역할 조회:', roleName);
+        const { data: roleData, error: roleError } = await supabase
           .from('roles')
           .select('id')
-          .eq('name', selectedRoleType || 'team_member')
+          .eq('name', roleName)
           .single();
+        
+        if (roleError) {
+          console.error('Role lookup failed:', roleError);
+          throw new Error(`역할 '${roleName}'을 찾을 수 없습니다`);
+        }
         roleId = roleData?.id;
       }
 
@@ -342,6 +351,8 @@ export default function AcceptInvite() {
           }
           console.log('✅ user_roles 할당 완료:', { roleId, orgId: effectiveOrgId });
         }
+      } else {
+        console.warn('⚠️ roleId가 없어서 user_roles를 할당하지 않았습니다');
       }
 
       // ── 5. onboarding 상태 설정 ──
@@ -551,43 +562,45 @@ export default function AcceptInvite() {
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">역할 *</label>
                 <div className="space-y-2">
+                  {/* ★ 수정: org_leader */}
                   <button
                     type="button"
-                    onClick={() => setSelectedRoleType('org_head')}
+                    onClick={() => setSelectedRoleType('org_leader')}
                     className={`w-full text-left p-3 rounded-lg border-2 transition-all ${
-                      selectedRoleType === 'org_head'
+                      selectedRoleType === 'org_leader'
                         ? 'border-amber-500 bg-amber-100'
                         : 'border-slate-200 bg-white hover:border-slate-300'
                     }`}
                   >
                     <div className="flex items-center gap-3">
-                      <Crown className={`w-5 h-5 ${selectedRoleType === 'org_head' ? 'text-amber-600' : 'text-slate-400'}`} />
+                      <Crown className={`w-5 h-5 ${selectedRoleType === 'org_leader' ? 'text-amber-600' : 'text-slate-400'}`} />
                       <div>
                         <div className="font-medium text-slate-900">조직장</div>
                         <div className="text-xs text-slate-500">조직 OKR 관리, 하위 승인/독촉</div>
                       </div>
-                      {selectedRoleType === 'org_head' && (
+                      {selectedRoleType === 'org_leader' && (
                         <CheckCircle className="w-5 h-5 text-amber-600 ml-auto" />
                       )}
                     </div>
                   </button>
 
+                  {/* ★ 수정: member */}
                   <button
                     type="button"
-                    onClick={() => setSelectedRoleType('team_member')}
+                    onClick={() => setSelectedRoleType('member')}
                     className={`w-full text-left p-3 rounded-lg border-2 transition-all ${
-                      selectedRoleType === 'team_member'
+                      selectedRoleType === 'member'
                         ? 'border-blue-500 bg-blue-100'
                         : 'border-slate-200 bg-white hover:border-slate-300'
                     }`}
                   >
                     <div className="flex items-center gap-3">
-                      <User className={`w-5 h-5 ${selectedRoleType === 'team_member' ? 'text-blue-600' : 'text-slate-400'}`} />
+                      <User className={`w-5 h-5 ${selectedRoleType === 'member' ? 'text-blue-600' : 'text-slate-400'}`} />
                       <div>
                         <div className="font-medium text-slate-900">구성원</div>
                         <div className="text-xs text-slate-500">개인 OKR 수립, 체크인</div>
                       </div>
-                      {selectedRoleType === 'team_member' && (
+                      {selectedRoleType === 'member' && (
                         <CheckCircle className="w-5 h-5 text-blue-600 ml-auto" />
                       )}
                     </div>
@@ -598,7 +611,7 @@ export default function AcceptInvite() {
           </div>
         )}
 
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6"> 
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
           <p className="text-sm text-blue-800">
             💡 가입 후 자동으로 <strong>{invitation.company_name}</strong>의 구성원으로 등록됩니다
           </p>
