@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   Bell, User, ChevronDown, Settings, LogOut, Shield, Inbox,
   Check, CheckCheck, Clock, Send, GitBranch, AlertTriangle,
-  FileCheck, MessageSquare, Users, X
+  FileCheck, MessageSquare, Users, X, Calendar
 } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { useAuth } from '../contexts/AuthContext';
@@ -46,9 +46,32 @@ interface NotifItem {
   sender_name: string | null;
 }
 
+// ★ 기간 데이터 타입
+interface PeriodOption {
+  id: string;
+  period_code: string;
+  period_name: string;
+  period_type: string;
+  status: string;
+  starts_at: string;
+  ends_at: string;
+}
+
+// 기간 상태 라벨
+function periodStatusBadge(status: string) {
+  const map: Record<string, { label: string; cls: string }> = {
+    upcoming: { label: '예정', cls: 'bg-slate-100 text-slate-500' },
+    planning: { label: '수립중', cls: 'bg-blue-100 text-blue-700' },
+    active:   { label: '실행중', cls: 'bg-green-100 text-green-700' },
+    closing:  { label: '마감중', cls: 'bg-orange-100 text-orange-700' },
+    closed:   { label: '마감', cls: 'bg-slate-200 text-slate-600' },
+  };
+  return map[status] || { label: status, cls: 'bg-slate-100 text-slate-500' };
+}
+
 export default function TopBar() {
   const navigate = useNavigate();
-const { profile, user, signOut } = useAuth();
+  const { profile, user, signOut } = useAuth();
   const company = useStore(state => state.company);
   const currentPeriod = useStore(state => state.currentPeriod);
   const setCurrentPeriod = useStore(state => state.setCurrentPeriod);
@@ -58,13 +81,17 @@ const { profile, user, signOut } = useAuth();
   const [roleLevel, setRoleLevel] = useState(0);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // 알림 상태 (NEW)
+  // 알림 상태
   const [showNotif, setShowNotif] = useState(false);
   const [notifs, setNotifs] = useState<NotifItem[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const notifRef = useRef<HTMLDivElement>(null);
 
-  // 권한 체크 (기존)
+  // ★ 기간 목록 (실데이터)
+  const [periods, setPeriods] = useState<PeriodOption[]>([]);
+  const [periodsLoading, setPeriodsLoading] = useState(false);
+
+  // 권한 체크
   useEffect(() => {
     const checkRole = async () => {
       const level = await getMyRoleLevel();
@@ -83,7 +110,71 @@ const { profile, user, signOut } = useAuth();
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  // ==================== 알림 로직 (NEW) ====================
+  // ★ fiscal_periods에서 기간 목록 로딩
+  useEffect(() => {
+    const loadPeriods = async () => {
+      const companyId = company?.id || profile?.company_id;
+      if (!companyId) return;
+
+      setPeriodsLoading(true);
+      try {
+        // 회사의 OKR 주기 단위 확인
+        const { data: companyData } = await supabase
+          .from('companies')
+          .select('okr_cycle_unit')
+          .eq('id', companyId)
+          .single();
+
+        const cycleUnit = companyData?.okr_cycle_unit || 'half';
+
+        // 해당 주기 타입의 기간 목록 조회
+        let { data, error } = await supabase
+          .from('fiscal_periods')
+          .select('id, period_code, period_name, period_type, status, starts_at, ends_at')
+          .eq('company_id', companyId)
+          .eq('period_type', cycleUnit)
+          .order('period_code', { ascending: false });
+
+        if (error) throw error;
+
+        // 주기 타입에 맞는 기간이 없으면 전체 fallback
+        if (!data || data.length === 0) {
+          const { data: allPeriods } = await supabase
+            .from('fiscal_periods')
+            .select('id, period_code, period_name, period_type, status, starts_at, ends_at')
+            .eq('company_id', companyId)
+            .in('period_type', ['half', 'quarter', 'year'])
+            .order('period_code', { ascending: false });
+          data = allPeriods || [];
+        }
+
+        setPeriods(data || []);
+
+        // 자동 선택: 현재 활성 기간 > planning > 최신
+        if (data && data.length > 0) {
+          const now = new Date();
+          const active = data.find(p => p.status === 'active');
+          const planning = data.find(p => p.status === 'planning');
+          const current = data.find(p => new Date(p.starts_at) <= now && now <= new Date(p.ends_at));
+          const best = active || planning || current || data[0];
+
+          // currentPeriod가 비어있거나 목록에 없으면 자동 설정
+          const existsInList = data.some(p => p.period_code === currentPeriod);
+          if (!currentPeriod || !existsInList) {
+            setCurrentPeriod(best.period_code);
+          }
+        }
+      } catch (err) {
+        console.warn('기간 목록 로드 실패:', err);
+      } finally {
+        setPeriodsLoading(false);
+      }
+    };
+
+    loadPeriods();
+  }, [company?.id, profile?.company_id]);
+
+  // ==================== 알림 로직 ====================
 
   const fetchNotifs = async () => {
     if (!user?.id) return;
@@ -146,7 +237,7 @@ const { profile, user, signOut } = useAuth();
     return days < 7 ? `${days}일 전` : new Date(d).toLocaleDateString('ko-KR');
   };
 
-  // ==================== 기존 핸들러 ====================
+  // ==================== 핸들러 ====================
 
   const handleLogout = async () => {
     try {
@@ -160,24 +251,45 @@ const { profile, user, signOut } = useAuth();
   const handleMySettings = () => { setShowDropdown(false); navigate('/my-settings'); };
   const handleAdminSettings = () => { navigate('/admin'); };
 
+  // ★ 기간 선택 시 period_code를 store에 저장
+  const handlePeriodChange = (periodCode: string) => {
+    setCurrentPeriod(periodCode);
+  };
+
   return (
     <div className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6">
       <div className="flex items-center gap-4">
-<h1 className="text-lg font-semibold text-slate-900">{company?.name || 'OKR-Driven'}</h1>
+        <h1 className="text-lg font-semibold text-slate-900">{company?.name || 'OKR-Driven'}</h1>
         <div className="h-4 w-px bg-slate-300" />
-        <select
-          value={currentPeriod}
-          onChange={(e) => setCurrentPeriod(e.target.value)}
-          className="text-sm border border-slate-300 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-        >
-          <option value="2025-H1">2025년 상반기</option>
-          <option value="2025-H2">2025년 하반기</option>
-          <option value="2024-H2">2024년 하반기</option>
-        </select>
+
+        {/* ★ 기간 선택 — fiscal_periods 실데이터 */}
+        {periods.length > 0 ? (
+          <div className="flex items-center gap-2">
+            <Calendar className="w-4 h-4 text-slate-400" />
+            <select
+              value={currentPeriod}
+              onChange={(e) => handlePeriodChange(e.target.value)}
+              className="text-sm border border-slate-300 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+            >
+              {periods.map(p => {
+                const badge = periodStatusBadge(p.status);
+                return (
+                  <option key={p.id} value={p.period_code}>
+                    {p.period_name || p.period_code} ({badge.label})
+                  </option>
+                );
+              })}
+            </select>
+          </div>
+        ) : periodsLoading ? (
+          <span className="text-xs text-slate-400">기간 로딩...</span>
+        ) : (
+          <span className="text-xs text-slate-400">설정된 기간이 없습니다</span>
+        )}
       </div>
 
       <div className="flex items-center gap-3">
-        {/* [NEW] 승인 대기함 바로가기 */}
+        {/* 승인 대기함 바로가기 */}
         <button
           onClick={() => navigate('/approval-inbox')}
           className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
@@ -187,7 +299,7 @@ const { profile, user, signOut } = useAuth();
           <span className="hidden lg:inline">승인함</span>
         </button>
 
-        {/* [NEW] 알림 벨 + 드롭다운 */}
+        {/* 알림 벨 + 드롭다운 */}
         <div className="relative" ref={notifRef}>
           <button
             onClick={() => { setShowNotif(!showNotif); if (!showNotif) fetchNotifs(); }}
@@ -255,7 +367,7 @@ const { profile, user, signOut } = useAuth();
           )}
         </div>
 
-        {/* 관리자 설정 (레벨 90 이상) - 기존 */}
+        {/* 관리자 설정 */}
         {roleLevel >= 80 && (
           <>
             <div className="h-8 w-px bg-slate-300" />
@@ -268,7 +380,7 @@ const { profile, user, signOut } = useAuth();
 
         <div className="h-8 w-px bg-slate-300" />
 
-        {/* 사용자 메뉴 - 기존 */}
+        {/* 사용자 메뉴 */}
         <div className="relative" ref={dropdownRef}>
           <button onClick={() => setShowDropdown(!showDropdown)} className="flex items-center gap-2 px-3 py-1.5 text-slate-700 hover:bg-slate-100 rounded-lg transition-colors">
             <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-violet-500 rounded-full flex items-center justify-center">
