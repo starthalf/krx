@@ -79,11 +79,21 @@ export default function Dashboard() {
         if (thisVersion !== permCheckVersionRef.current) return;
         setRoleLevel(level);
 
-        const managable: string[] = [];
-        for (const org of organizations) {
-          const canManage = await checkCanManageOrg(org.id);
-          if (canManage) managable.push(org.id);
+        // ★ CEO/관리자(80+)는 전체 조직 관리 가능 → RPC 호출 불필요
+        let managable: string[];
+        if (level >= ROLE_LEVELS.COMPANY_ADMIN) {
+          managable = organizations.map(o => o.id);
+        } else {
+          // ★ Promise.all 병렬 처리 (순차 → 병렬로 변경, 55회 → 1회 왕복 수준)
+          const results = await Promise.all(
+            organizations.map(async (org) => ({
+              id: org.id,
+              can: await checkCanManageOrg(org.id),
+            }))
+          );
+          managable = results.filter(r => r.can).map(r => r.id);
         }
+
         if (thisVersion !== permCheckVersionRef.current) return;
         setManagableOrgs(prev => {
           const key = managable.join(',');
