@@ -251,9 +251,10 @@ export default function Dashboard() {
     { name: 'D', value: gradeDistribution.D, color: '#EF4444' },
   ];
 
+  // ★ "주의 필요" = C/D 등급 중 실적이 입력된 것만 (실적 0 = 체크인 전이므로 제외)
   const warningKRs = allKRs.filter(kr => {
     const g = calculateGrade(kr);
-    return g === 'C' || g === 'D';
+    return (g === 'C' || g === 'D') && kr.currentValue > 0;
   });
 
   // ★ FIX 2: 체크인 현황 — scopeOrgIds로 범위 제한
@@ -330,10 +331,9 @@ export default function Dashboard() {
   const insights = useMemo<Insight[]>(() => {
     const result: Insight[] = [];
 
-    // ★ 실적이 입력된 KR 중에서만 C/D 등급 경고 (실적 0인 D등급은 제외)
-    const realWarningKRs = warningKRs.filter(kr => kr.currentValue > 0);
-    if (realWarningKRs.length > 0) {
-      result.push({ type: 'warning', icon: AlertCircle, text: `${realWarningKRs.length}개 KR이 C/D 등급으로 집중 관리가 필요합니다.` });
+    // C/D 등급 경고 (warningKRs는 이미 실적 0 제외됨)
+    if (warningKRs.length > 0) {
+      result.push({ type: 'warning', icon: AlertCircle, text: `${warningKRs.length}개 KR이 C/D 등급으로 집중 관리가 필요합니다.` });
     }
 
     const delayedOrgs = scopedCheckinStats.filter(s => s.total_krs > 0 && s.checkin_rate < 50);
