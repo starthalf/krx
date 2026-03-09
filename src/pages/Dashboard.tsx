@@ -282,7 +282,7 @@ export default function Dashboard() {
     return `${allKRs.length}개 KR 중 ${checked}개 입력`;
   }, [scopedCheckinStats, allKRs]);
 
-  // ★ FIX 3: NaN 방어 + 범위 제한
+  // ★ FIX 3: NaN 방어 + 범위 제한 + 실적 0일 때 "체크인 전" 표시
   const orgProgressList = useMemo(() => {
     return (dashboardStats || [])
       .filter((org: any) => scopeOrgIds.has(org.org_id || org.id))
@@ -298,11 +298,24 @@ export default function Dashboard() {
           ((s * 120) + (a * 110) + (b * 100) + (c * 80) + (d * 50)) / totalCount
         );
 
+        // ★ 모든 KR이 D등급(= 실적 미입력)이면 아직 성과 추적 전
+        const allGradeD = totalCount > 0 && d === totalCount;
+
         let status = { label: '순항', color: 'text-green-600', bg: 'bg-green-100' };
-        if (weightedScore >= 110) status = { label: '탁월', color: 'text-blue-600', bg: 'bg-blue-100' };
-        else if (weightedScore < 90 && totalCount > 0) status = { label: '주의', color: 'text-orange-600', bg: 'bg-orange-100' };
-        if (weightedScore < 70 && totalCount > 0) status = { label: '위험', color: 'text-red-600', bg: 'bg-red-100' };
-        if (totalCount === 0) status = { label: '수립 전', color: 'text-slate-400', bg: 'bg-slate-100' };
+        if (totalCount === 0) {
+          status = { label: '수립 전', color: 'text-slate-400', bg: 'bg-slate-100' };
+        } else if (allGradeD) {
+          // 실적이 하나도 입력 안 된 상태
+          status = { label: '체크인 전', color: 'text-slate-500', bg: 'bg-slate-100' };
+        } else if (weightedScore >= 110) {
+          status = { label: '탁월', color: 'text-blue-600', bg: 'bg-blue-100' };
+        } else if (weightedScore >= 90) {
+          status = { label: '순항', color: 'text-green-600', bg: 'bg-green-100' };
+        } else if (weightedScore >= 70) {
+          status = { label: '주의', color: 'text-orange-600', bg: 'bg-orange-100' };
+        } else {
+          status = { label: '위험', color: 'text-red-600', bg: 'bg-red-100' };
+        }
 
         return {
           name: org.name || org.org_name || '(이름 없음)',
@@ -317,8 +330,10 @@ export default function Dashboard() {
   const insights = useMemo<Insight[]>(() => {
     const result: Insight[] = [];
 
-    if (warningKRs.length > 0) {
-      result.push({ type: 'warning', icon: AlertCircle, text: `${warningKRs.length}개 KR이 C/D 등급으로 집중 관리가 필요합니다.` });
+    // ★ 실적이 입력된 KR 중에서만 C/D 등급 경고 (실적 0인 D등급은 제외)
+    const realWarningKRs = warningKRs.filter(kr => kr.currentValue > 0);
+    if (realWarningKRs.length > 0) {
+      result.push({ type: 'warning', icon: AlertCircle, text: `${realWarningKRs.length}개 KR이 C/D 등급으로 집중 관리가 필요합니다.` });
     }
 
     const delayedOrgs = scopedCheckinStats.filter(s => s.total_krs > 0 && s.checkin_rate < 50);
@@ -332,13 +347,20 @@ export default function Dashboard() {
       result.push({ type: 'success', icon: Trophy, text: `${topOrgs[0].name}이(가) 탁월한 성과를 보이고 있습니다! 🎉` });
     }
 
+    // 수립 중 안내
     if (draftObjectiveCount > 0 && approvedObjectiveCount === 0) {
       result.push({ type: 'alert', icon: Target, text: `${draftObjectiveCount}개 목표가 수립 중입니다. 승인 완료 후 성과 추적이 시작됩니다.` });
     }
 
-    if (totalProgress >= 90 && allKRs.length > 0) {
+    // ★ 체크인 전 조직이 대부분이면 안내
+    const preCheckinOrgs = orgProgressList.filter((o: any) => o.status.label === '체크인 전');
+    if (preCheckinOrgs.length > 0 && preCheckinOrgs.length === orgProgressList.length) {
+      result.push({ type: 'alert', icon: CheckSquare, text: '아직 체크인이 시작되지 않았습니다. 실적 입력 후 성과 현황이 업데이트됩니다.' });
+    }
+
+    if (totalProgress >= 90 && allKRs.length > 0 && allKRs.some(kr => kr.currentValue > 0)) {
       result.push({ type: 'success', icon: TrendingUp, text: '평균 달성률이 90%를 넘었습니다.' });
-    } else if (totalProgress < 50 && allKRs.length > 3) {
+    } else if (totalProgress < 50 && allKRs.length > 3 && allKRs.some(kr => kr.currentValue > 0)) {
       result.push({ type: 'alert', icon: AlertTriangle, text: '평균 달성률이 50% 미만입니다. 추진력 점검이 필요합니다.' });
     }
 
