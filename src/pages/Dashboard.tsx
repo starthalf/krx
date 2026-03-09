@@ -59,8 +59,6 @@ export default function Dashboard() {
   // 실데이터 state
   const [checkinStats, setCheckinStats] = useState<CheckinStatRow[]>([]);
   const [recentActivities, setRecentActivities] = useState<ActivityRow[]>([]);
-  // ★ 승인 상태별 objectives 카운트 (approval_status 기반)
-  const [objApprovalCounts, setObjApprovalCounts] = useState<{ approved: number; draft: number }>({ approved: 0, draft: 0 });
 
   const orgIds = organizations.map(o => o.id).join(',');
   const permCheckVersionRef = useRef(0);
@@ -122,7 +120,6 @@ export default function Dashboard() {
         fetchDashboardStats(companyId);
         loadCheckinStats(companyId);
         loadRecentActivities(companyId);
-        loadApprovedOrgs(companyId); // ★ 승인된 조직 목록 로딩
       }
     }
   }, [orgIds, permissionsLoading]);
@@ -132,37 +129,8 @@ export default function Dashboard() {
     if (selectedOrgId) {
       fetchObjectives(selectedOrgId);
       fetchKRs(selectedOrgId);
-      loadObjApprovalCounts(selectedOrgId);
     }
   }, [selectedOrgId]);
-
-  // ★ approval_status 기반 목표 카운트 (DB 직접 조회)
-  const loadObjApprovalCounts = async (orgId: string) => {
-    try {
-      // 승인 완료: finalized, approved, ceo_approved, manager_approved
-      const { count: approvedCount } = await supabase
-        .from('objectives')
-        .select('*', { count: 'exact', head: true })
-        .eq('org_id', orgId)
-        .eq('is_latest', true)
-        .in('approval_status', ['finalized', 'approved', 'ceo_approved', 'manager_approved']);
-
-      // 수립 중: draft, ai_draft, submitted, under_review, revision_requested
-      const { count: draftCount } = await supabase
-        .from('objectives')
-        .select('*', { count: 'exact', head: true })
-        .eq('org_id', orgId)
-        .eq('is_latest', true)
-        .in('approval_status', ['draft', 'ai_draft', 'submitted', 'under_review', 'revision_requested']);
-
-      setObjApprovalCounts({
-        approved: approvedCount || 0,
-        draft: draftCount || 0,
-      });
-    } catch (e) {
-      console.warn('loadObjApprovalCounts failed:', e);
-    }
-  };
 
   // ── 실데이터 로딩 함수 ──
   const loadCheckinStats = async (companyId: string) => {
@@ -208,23 +176,19 @@ export default function Dashboard() {
   // ── 데이터 집계 ──
   const currentOrg = organizations.find(o => o.id === selectedOrgId);
   const allKRs = krs || [];
-  // ★ objectives는 selectedOrgId로 필터링 (store에 다른 org 데이터 누적 방지)
-  const currentObjectives = (objectives || []).filter(o => o.orgId === selectedOrgId);
+  const currentObjectives = objectives || [];
 
   const totalProgress = allKRs.length > 0
     ? Math.round(allKRs.reduce((sum, kr) => sum + (kr.progressPct || 0), 0) / allKRs.length)
     : 0;
 
-  // ★ FIX: approval_status 기반 (DB 직접 조회 결과 사용)
-  const approvedObjectiveCount = objApprovalCounts.approved;
-  const draftObjectiveCount = objApprovalCounts.draft;
-
-  // BII 통계는 store objectives 기반 (전체 목표의 BII 분포)
-  const biiStats = {
-    Build: currentObjectives.filter(o => o.biiType === 'Build').length,
-    Innovate: currentObjectives.filter(o => o.biiType === 'Innovate').length,
-    Improve: currentObjectives.filter(o => o.biiType === 'Improve').length,
-  };
+  // ★ FIX 1: draft/review 상태 제외
+  const activeObjectives = currentObjectives.filter(obj =>
+    obj.status === 'active' || obj.status === 'agreed' || obj.status === 'completed'
+  );
+  const draftObjectives = currentObjectives.filter(obj =>
+    obj.status === 'draft' || obj.status === 'review' || obj.status === 'reviewing'
+  );
 
   const gradeDistribution = {
     S: allKRs.filter(kr => calculateGrade(kr) === 'S').length,
@@ -246,6 +210,12 @@ export default function Dashboard() {
     const g = calculateGrade(kr);
     return g === 'C' || g === 'D';
   });
+
+  const biiStats = {
+    Build: activeObjectives.filter(o => o.biiType === 'Build').length,
+    Innovate: activeObjectives.filter(o => o.biiType === 'Innovate').length,
+    Improve: activeObjectives.filter(o => o.biiType === 'Improve').length,
+  };
 
   // ★ FIX 2: 체크인 현황 — scopeOrgIds로 범위 제한
   const scopedCheckinStats = useMemo(() => {
@@ -323,8 +293,8 @@ export default function Dashboard() {
       result.push({ type: 'success', icon: Trophy, text: `${topOrgs[0].name}이(가) 탁월한 성과를 보이고 있습니다! 🎉` });
     }
 
-    if (draftObjectiveCount > 0 && approvedObjectiveCount === 0) {
-      result.push({ type: 'alert', icon: Target, text: `${draftObjectiveCount}개 목표가 수립 중입니다. 승인 완료 후 성과 추적이 시작됩니다.` });
+    if (draftObjectives.length > 0 && activeObjectives.length === 0) {
+      result.push({ type: 'alert', icon: Target, text: `${draftObjectives.length}개 목표가 수립 중입니다. 승인 완료 후 성과 추적이 시작됩니다.` });
     }
 
     if (totalProgress >= 90 && allKRs.length > 0) {
@@ -337,7 +307,7 @@ export default function Dashboard() {
       result.push({ type: 'success', icon: Target, text: 'OKR 실적 데이터가 축적되면 AI 인사이트가 자동 생성됩니다.' });
     }
     return result;
-  }, [warningKRs, scopedCheckinStats, orgProgressList, totalProgress, allKRs.length, draftObjectiveCount, approvedObjectiveCount]);
+  }, [warningKRs, scopedCheckinStats, orgProgressList, totalProgress, allKRs.length, draftObjectives.length, activeObjectives.length]);
 
   // ── 활동 피드 ──
   const feed = useMemo(() => {
@@ -417,9 +387,9 @@ export default function Dashboard() {
             <span className="text-sm font-medium text-slate-600">활성 목표</span>
             <div className="p-2 bg-purple-50 rounded-lg"><Target className="w-5 h-5 text-purple-600" /></div>
           </div>
-          <div className="text-3xl font-bold text-slate-900">{approvedObjectiveCount}</div>
-          {draftObjectiveCount > 0 && (
-            <p className="text-xs text-orange-600 mt-1">+ 수립 중 {draftObjectiveCount}개</p>
+          <div className="text-3xl font-bold text-slate-900">{activeObjectives.length}</div>
+          {draftObjectives.length > 0 && (
+            <p className="text-xs text-orange-600 mt-1">+ 수립 중 {draftObjectives.length}개</p>
           )}
           <div className="flex gap-2 mt-3">
             {Object.entries(biiStats).filter(([_, c]) => c > 0).map(([key, count]) => (
@@ -599,4 +569,4 @@ function formatRelativeTime(dateStr: string): string {
   if (diffHour < 24) return `${diffHour}시간 전`;
   if (diffDay < 7) return `${diffDay}일 전`;
   return date.toLocaleDateString('ko-KR');
-}
+}  
