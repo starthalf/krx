@@ -83,9 +83,10 @@ function StatusBadge({ status }: { status: string }) {
 // ─────────────────────────────────────────────────────────────
 interface PeriodStatusWidgetProps {
   variant?: 'compact' | 'full';
+  showManageLink?: boolean; // ★ 관리자만 "기간 관리" 링크 표시
 }
 
-export default function PeriodStatusWidget({ variant = 'full' }: PeriodStatusWidgetProps) {
+export default function PeriodStatusWidget({ variant = 'full', showManageLink = false }: PeriodStatusWidgetProps) {
   const navigate = useNavigate();
   const { profile } = useAuth();
   const companyId = profile?.company_id;
@@ -109,18 +110,15 @@ export default function PeriodStatusWidget({ variant = 'full' }: PeriodStatusWid
     const loadData = async () => {
       setLoading(true);
       try {
-        // 활성 기간 조회
         const active = await fetchActivePeriod(companyId, 'half');
         setActivePeriod(active);
         
-        // 전체 기간 목록 (최근 것들)
         const periods = await fetchFiscalPeriods(companyId);
         const recentHalves = periods
           .filter(p => p.periodType === 'half')
           .slice(0, 4);
         setRecentPeriods(recentHalves);
         
-        // 직전 마감 기간의 요약 조회
         const lastClosed = periods.find(p => p.status === 'closed' || p.status === 'archived');
         if (lastClosed) {
           try {
@@ -142,7 +140,7 @@ export default function PeriodStatusWidget({ variant = 'full' }: PeriodStatusWid
 
   if (!companyId || loading) {
     return (
-      <div className="bg-white rounded-xl border border-slate-200 p-6">
+      <div className="bg-white rounded-xl border border-slate-200 p-6 h-full">
         <div className="flex items-center justify-center py-8">
           <Loader2 className="w-6 h-6 animate-spin text-slate-400" />
         </div>
@@ -150,33 +148,38 @@ export default function PeriodStatusWidget({ variant = 'full' }: PeriodStatusWid
     );
   }
 
-  // Compact 버전
+  // ★ Compact 버전 — 다른 카드와 높이 맞춤
   if (variant === 'compact') {
     return (
-      <div className="bg-white rounded-xl border border-slate-200 p-4">
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
-            <Calendar className="w-5 h-5 text-blue-600" />
-            <span className="font-medium text-slate-900">현재 기간</span>
+      <div className="bg-white rounded-xl border border-slate-200 p-6 h-full flex flex-col justify-between">
+        <div>
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <Calendar className="w-5 h-5 text-blue-600" />
+              <span className="text-sm font-medium text-slate-600">현재 기간</span>
+            </div>
+            {activePeriod && <StatusBadge status={activePeriod.status} />}
           </div>
-          {activePeriod && <StatusBadge status={activePeriod.status} />}
+          
+          {activePeriod ? (
+            <>
+              <h3 className="font-semibold text-slate-900 mb-3">{activePeriod.periodName}</h3>
+              <PeriodProgressBar period={activePeriod} />
+            </>
+          ) : (
+            <p className="text-slate-500 text-sm">활성 기간이 없습니다</p>
+          )}
         </div>
         
-        {activePeriod ? (
-          <>
-            <h3 className="font-semibold text-slate-900 mb-2">{activePeriod.periodName}</h3>
-            <PeriodProgressBar period={activePeriod} />
-          </>
-        ) : (
-          <p className="text-slate-500 text-sm">활성 기간이 없습니다</p>
+        {/* ★ 관리자만 "기간 관리" 링크 표시 */}
+        {showManageLink && (
+          <button
+            onClick={() => navigate('/admin?tab=periods')}
+            className="mt-3 w-full text-sm text-blue-600 hover:text-blue-700 flex items-center justify-center gap-1"
+          >
+            기간 관리 <ChevronRight className="w-4 h-4" />
+          </button>
         )}
-        
-        <button
-          onClick={() => navigate('/admin?tab=periods')}
-          className="mt-3 w-full text-sm text-blue-600 hover:text-blue-700 flex items-center justify-center gap-1"
-        >
-          기간 관리 <ChevronRight className="w-4 h-4" />
-        </button>
       </div>
     );
   }
@@ -189,12 +192,15 @@ export default function PeriodStatusWidget({ variant = 'full' }: PeriodStatusWid
           <Calendar className="w-5 h-5 text-blue-600" />
           <h2 className="font-semibold text-slate-900">기간 현황</h2>
         </div>
-        <button
-          onClick={() => navigate('/admin?tab=periods')}
-          className="text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1"
-        >
-          기간 관리 <ChevronRight className="w-4 h-4" />
-        </button>
+        {/* ★ 관리자만 "기간 관리" 링크 표시 */}
+        {showManageLink && (
+          <button
+            onClick={() => navigate('/admin?tab=periods')}
+            className="text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1"
+          >
+            기간 관리 <ChevronRight className="w-4 h-4" />
+          </button>
+        )}
       </div>
 
       {/* 활성 기간 */}
@@ -230,12 +236,14 @@ export default function PeriodStatusWidget({ variant = 'full' }: PeriodStatusWid
         <div className="mb-6 p-4 bg-slate-50 rounded-lg text-center">
           <AlertTriangle className="w-8 h-8 text-amber-400 mx-auto mb-2" />
           <p className="text-slate-600">활성 기간이 없습니다</p>
-          <button
-            onClick={() => navigate('/admin?tab=periods')}
-            className="mt-2 text-sm text-blue-600 hover:text-blue-700"
-          >
-            기간 설정하기
-          </button>
+          {showManageLink && (
+            <button
+              onClick={() => navigate('/admin?tab=periods')}
+              className="mt-2 text-sm text-blue-600 hover:text-blue-700"
+            >
+              기간 설정하기
+            </button>
+          )}
         </div>
       )}
 
