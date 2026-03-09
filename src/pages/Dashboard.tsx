@@ -216,8 +216,8 @@ export default function Dashboard() {
 
   // ── 데이터 집계 ──
   const currentOrg = organizations.find(o => o.id === selectedOrgId);
-  const allKRs = krs || [];
-  // ★ objectives는 selectedOrgId로 필터링 (store에 다른 org 데이터 누적 방지)
+  // ★ KR과 objectives 모두 selectedOrgId로 필터링 (store에 다른 org 데이터 누적 방지)
+  const allKRs = (krs || []).filter(kr => kr.orgId === selectedOrgId);
   const currentObjectives = (objectives || []).filter(o => o.orgId === selectedOrgId);
 
   const totalProgress = allKRs.length > 0
