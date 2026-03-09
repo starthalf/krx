@@ -405,7 +405,7 @@ export default function Dashboard() {
 
       {/* 상단 카드 */}
       <div className="grid grid-cols-5 gap-6">
-        <div className="col-span-1"><PeriodStatusWidget variant="compact" /></div>
+        <div className="col-span-1"><PeriodStatusWidget variant="compact" showManageLink={roleLevel >= ROLE_LEVELS.COMPANY_ADMIN} /></div>
 
         {/* 전체 달성률 */}
         <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
