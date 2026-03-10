@@ -650,4 +650,4 @@ function formatRelativeTime(dateStr: string): string {
   if (diffHour < 24) return `${diffHour}시간 전`;
   if (diffDay < 7) return `${diffDay}일 전`;
   return date.toLocaleDateString('ko-KR');
-}
+} 
