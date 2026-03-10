@@ -11,7 +11,6 @@ import { useAuth } from '../contexts/AuthContext';
 import { getMyRoleLevel } from '../lib/permissions';
 import { supabase } from '../lib/supabase';
 
-// 알림 타입별 아이콘/색상
 const NOTIF_CONFIG: Record<string, { icon: any; color: string; bg: string }> = {
   okr_draft_reminder:    { icon: Clock, color: 'text-amber-600', bg: 'bg-amber-50' },
   okr_deadline_reminder: { icon: AlertTriangle, color: 'text-red-600', bg: 'bg-red-50' },
@@ -46,7 +45,6 @@ interface NotifItem {
   sender_name: string | null;
 }
 
-// ★ 기간 데이터 타입
 interface PeriodOption {
   id: string;
   period_code: string;
@@ -57,7 +55,6 @@ interface PeriodOption {
   ends_at: string;
 }
 
-// 기간 상태 라벨
 function periodStatusBadge(status: string) {
   const map: Record<string, { label: string; cls: string }> = {
     upcoming: { label: '예정', cls: 'bg-slate-100 text-slate-500' },
@@ -73,11 +70,25 @@ export default function TopBar() {
   const navigate = useNavigate();
   const { profile, user, signOut } = useAuth();
   const company = useStore(state => state.company);
-  // ★ store에 currentPeriod/setCurrentPeriod가 없을 수 있으므로 안전하게 접근
+
+  // ★ 모든 useState를 먼저 선언
+  const [showDropdown, setShowDropdown] = useState(false);
+  const [roleLevel, setRoleLevel] = useState(0);
+  const [showNotif, setShowNotif] = useState(false);
+  const [notifs, setNotifs] = useState<NotifItem[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [periods, setPeriods] = useState<PeriodOption[]>([]);
+  const [periodsLoading, setPeriodsLoading] = useState(false);
+  const [localPeriod, setLocalPeriod] = useState<string>(''); // ★ 반드시 여기서 선언
+
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const notifRef = useRef<HTMLDivElement>(null);
+
+  // ★ store의 currentPeriod 안전 접근 (없을 수 있음)
   const storeCurrentPeriod = useStore(state => (state as any).currentPeriod) as string | undefined;
   const storeSetCurrentPeriod = useStore(state => (state as any).setCurrentPeriod) as ((v: string) => void) | undefined;
-  
-  // ★ 기간 선택 시 로컬 + store 동시 업데이트
+
+  // ★ 현재 기간값 (store 우선, 없으면 로컬)
   const currentPeriod = storeCurrentPeriod || localPeriod;
   const setCurrentPeriod = (code: string) => {
     setLocalPeriod(code);
@@ -85,21 +96,6 @@ export default function TopBar() {
       try { storeSetCurrentPeriod(code); } catch {}
     }
   };
-
-  // 기존 상태
-  const [showDropdown, setShowDropdown] = useState(false);
-  const [roleLevel, setRoleLevel] = useState(0);
-  const dropdownRef = useRef<HTMLDivElement>(null);
-
-  // 알림 상태
-  const [showNotif, setShowNotif] = useState(false);
-  const [notifs, setNotifs] = useState<NotifItem[]>([]);
-  const [unreadCount, setUnreadCount] = useState(0);
-  const notifRef = useRef<HTMLDivElement>(null);
-
-  // ★ 기간 목록 (실데이터)
-  const [periods, setPeriods] = useState<PeriodOption[]>([]);
-  const [periodsLoading, setPeriodsLoading] = useState(false);
 
   // 권한 체크
   useEffect(() => {
@@ -128,7 +124,6 @@ export default function TopBar() {
 
       setPeriodsLoading(true);
       try {
-        // 회사의 OKR 주기 단위 확인
         const { data: companyData } = await supabase
           .from('companies')
           .select('okr_cycle_unit')
@@ -137,7 +132,6 @@ export default function TopBar() {
 
         const cycleUnit = companyData?.okr_cycle_unit || 'half';
 
-        // 해당 주기 타입의 기간 목록 조회
         let { data, error } = await supabase
           .from('fiscal_periods')
           .select('id, period_code, period_name, period_type, status, starts_at, ends_at')
@@ -147,7 +141,6 @@ export default function TopBar() {
 
         if (error) throw error;
 
-        // 주기 타입에 맞는 기간이 없으면 전체 fallback
         if (!data || data.length === 0) {
           const { data: allPeriods } = await supabase
             .from('fiscal_periods')
@@ -160,7 +153,6 @@ export default function TopBar() {
 
         setPeriods(data || []);
 
-        // 자동 선택: 현재 활성 기간 > planning > 최신
         if (data && data.length > 0) {
           const now = new Date();
           const active = data.find(p => p.status === 'active');
@@ -168,7 +160,6 @@ export default function TopBar() {
           const current = data.find(p => new Date(p.starts_at) <= now && now <= new Date(p.ends_at));
           const best = active || planning || current || data[0];
 
-          // currentPeriod가 비어있거나 목록에 없으면 자동 설정
           const existsInList = data.some(p => p.period_code === currentPeriod);
           if (!currentPeriod || !existsInList) {
             setCurrentPeriod(best.period_code);
@@ -184,7 +175,7 @@ export default function TopBar() {
     loadPeriods();
   }, [company?.id, profile?.company_id]);
 
-  // ==================== 알림 로직 ====================
+  // ==================== 알림 ====================
 
   const fetchNotifs = async () => {
     if (!user?.id) return;
@@ -205,7 +196,6 @@ export default function TopBar() {
   useEffect(() => {
     if (!user?.id) return;
     fetchNotifs();
-
     const channel = supabase
       .channel(`notif-${user.id}`)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: `recipient_id=eq.${user.id}` },
@@ -215,7 +205,6 @@ export default function TopBar() {
         }
       )
       .subscribe();
-
     return () => { supabase.removeChannel(channel); };
   }, [user?.id]);
 
@@ -247,24 +236,11 @@ export default function TopBar() {
     return days < 7 ? `${days}일 전` : new Date(d).toLocaleDateString('ko-KR');
   };
 
-  // ==================== 핸들러 ====================
-
   const handleLogout = async () => {
-    try {
-      await signOut();
-      navigate('/login');
-    } catch (error) {
-      console.error('Logout failed:', error);
-    }
+    try { await signOut(); navigate('/login'); } catch (error) { console.error('Logout failed:', error); }
   };
-
   const handleMySettings = () => { setShowDropdown(false); navigate('/my-settings'); };
   const handleAdminSettings = () => { navigate('/admin'); };
-
-  // ★ 기간 선택 시 period_code를 store에 저장
-  const handlePeriodChange = (periodCode: string) => {
-    setCurrentPeriod(periodCode);
-  };
 
   return (
     <div className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6">
@@ -272,13 +248,12 @@ export default function TopBar() {
         <h1 className="text-lg font-semibold text-slate-900">{company?.name || 'OKR-Driven'}</h1>
         <div className="h-4 w-px bg-slate-300" />
 
-        {/* ★ 기간 선택 — fiscal_periods 실데이터 */}
         {periods.length > 0 ? (
           <div className="flex items-center gap-2">
             <Calendar className="w-4 h-4 text-slate-400" />
             <select
               value={currentPeriod}
-              onChange={(e) => handlePeriodChange(e.target.value)}
+              onChange={(e) => setCurrentPeriod(e.target.value)}
               className="text-sm border border-slate-300 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
             >
               {periods.map(p => {
@@ -299,22 +274,12 @@ export default function TopBar() {
       </div>
 
       <div className="flex items-center gap-3">
-        {/* 승인 대기함 바로가기 */}
-        <button
-          onClick={() => navigate('/approval-inbox')}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
-          title="승인 대기함"
-        >
-          <Inbox className="w-4 h-4" />
-          <span className="hidden lg:inline">승인함</span>
+        <button onClick={() => navigate('/approval-inbox')} className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100 rounded-lg transition-colors" title="승인 대기함">
+          <Inbox className="w-4 h-4" /><span className="hidden lg:inline">승인함</span>
         </button>
 
-        {/* 알림 벨 + 드롭다운 */}
         <div className="relative" ref={notifRef}>
-          <button
-            onClick={() => { setShowNotif(!showNotif); if (!showNotif) fetchNotifs(); }}
-            className="relative p-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
-          >
+          <button onClick={() => { setShowNotif(!showNotif); if (!showNotif) fetchNotifs(); }} className="relative p-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">
             <Bell className="w-5 h-5" />
             {unreadCount > 0 && (
               <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1">
@@ -337,19 +302,14 @@ export default function TopBar() {
               </div>
               <div className="max-h-[400px] overflow-y-auto">
                 {notifs.length === 0 ? (
-                  <div className="p-8 text-center">
-                    <Bell className="w-8 h-8 text-slate-300 mx-auto mb-2" />
-                    <p className="text-sm text-slate-500">새로운 알림이 없습니다</p>
-                  </div>
+                  <div className="p-8 text-center"><Bell className="w-8 h-8 text-slate-300 mx-auto mb-2" /><p className="text-sm text-slate-500">새로운 알림이 없습니다</p></div>
                 ) : notifs.slice(0, 10).map(n => {
                   const cfg = NOTIF_CONFIG[n.type] || NOTIF_CONFIG.system;
                   const Icon = cfg.icon;
                   return (
                     <div key={n.id} onClick={() => onNotifClick(n)} className={`px-4 py-3 border-b border-slate-50 cursor-pointer transition-colors hover:bg-slate-50 ${!n.is_read ? 'bg-blue-50/40' : ''}`}>
                       <div className="flex gap-3">
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${cfg.bg}`}>
-                          <Icon className={`w-4 h-4 ${cfg.color}`} />
-                        </div>
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${cfg.bg}`}><Icon className={`w-4 h-4 ${cfg.color}`} /></div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2">
                             <span className="text-sm font-medium text-slate-900 truncate">{n.title}</span>
@@ -377,44 +337,32 @@ export default function TopBar() {
           )}
         </div>
 
-        {/* 관리자 설정 */}
         {roleLevel >= 80 && (
           <>
             <div className="h-8 w-px bg-slate-300" />
             <button onClick={handleAdminSettings} className="px-3 py-2 text-slate-700 hover:bg-slate-100 rounded-lg transition-colors flex items-center gap-2" title="관리자 설정">
-              <Shield className="w-4 h-4" />
-              <span className="text-sm font-medium hidden lg:inline">관리자 설정</span>
+              <Shield className="w-4 h-4" /><span className="text-sm font-medium hidden lg:inline">관리자 설정</span>
             </button>
           </>
         )}
 
         <div className="h-8 w-px bg-slate-300" />
 
-        {/* 사용자 메뉴 */}
         <div className="relative" ref={dropdownRef}>
           <button onClick={() => setShowDropdown(!showDropdown)} className="flex items-center gap-2 px-3 py-1.5 text-slate-700 hover:bg-slate-100 rounded-lg transition-colors">
-            <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-violet-500 rounded-full flex items-center justify-center">
-              <User className="w-4 h-4 text-white" />
-            </div>
+            <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-violet-500 rounded-full flex items-center justify-center"><User className="w-4 h-4 text-white" /></div>
             <span className="text-sm font-medium hidden lg:inline">{profile?.full_name || '사용자'}</span>
             <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${showDropdown ? 'rotate-180' : ''}`} />
           </button>
-
           {showDropdown && (
             <div className="absolute right-0 mt-2 w-56 bg-white rounded-xl border border-slate-200 shadow-lg py-2 z-50">
               <div className="px-4 py-3 border-b border-slate-100">
                 <div className="text-sm font-semibold text-slate-900">{profile?.full_name || '사용자'}</div>
                 <div className="text-xs text-slate-500 truncate">{(profile as any)?.email || ''}</div>
               </div>
-              <button onClick={handleMySettings} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 transition-colors">
-                <Settings className="w-4 h-4 text-slate-500" />
-                <span>내 설정</span>
-              </button>
+              <button onClick={handleMySettings} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 transition-colors"><Settings className="w-4 h-4 text-slate-500" /><span>내 설정</span></button>
               <div className="border-t border-slate-100 my-1" />
-              <button onClick={handleLogout} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition-colors">
-                <LogOut className="w-4 h-4" />
-                <span>로그아웃</span>
-              </button>
+              <button onClick={handleLogout} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition-colors"><LogOut className="w-4 h-4" /><span>로그아웃</span></button>
             </div>
           )}
         </div>
