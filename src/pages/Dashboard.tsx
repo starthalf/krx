@@ -115,7 +115,14 @@ export default function Dashboard() {
     if (organizations.length > 0 && !permissionsLoading && !selectedOrgId) {
       let defaultOrg;
       if (managableOrgs.length > 0) {
-        defaultOrg = organizations.find(o => o.id === managableOrgs[0]);
+        // ★ CEO/관리자가 아니면 전사(level='전사') 건너뛰고 실제 담당 조직 선택
+        if (roleLevel >= ROLE_LEVELS.COMPANY_ADMIN) {
+          defaultOrg = organizations.find(o => o.id === managableOrgs[0]);
+        } else {
+          defaultOrg = organizations.find(o => 
+            managableOrgs.includes(o.id) && o.level !== '전사'
+          );
+        }
       }
       if (!defaultOrg) {
         defaultOrg = organizations.find(o => !o.parentOrgId) || organizations[0];
@@ -398,7 +405,7 @@ export default function Dashboard() {
 
   const selectableOrgs = roleLevel >= ROLE_LEVELS.COMPANY_ADMIN
     ? organizations
-    : organizations.filter(o => managableOrgs.includes(o.id) || managableOrgs.length === 0);
+    : organizations.filter(o => managableOrgs.includes(o.id) && o.level !== '전사');
 
   if (permissionsLoading) {
     return (
