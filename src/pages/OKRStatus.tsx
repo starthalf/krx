@@ -220,14 +220,11 @@ export default function OKRStatus() {
 
       // 2. 해당 objectives의 KRs
       const objIds = objs.map(o => o.id);
-      console.log('🔍 OKR현황: objective IDs =', objIds);
       const { data: krsData, error: krErr } = await supabase
         .from('key_results')
         .select('id, name, unit, target_value, current_value, weight, objective_id, grade_criteria')
         .in('objective_id', objIds);
 
-      console.log('🔍 OKR현황: KR 결과 =', krsData?.length, '건, 에러:', krErr);
-      if (krErr) console.warn('KR 조회 에러:', krErr);
 
       // 3. 매핑
       const mapped: ObjWithKRs[] = objs.map(obj => {
@@ -266,8 +263,8 @@ export default function OKRStatus() {
       });
 
       setOrgObjectives(mapped);
-      // 기본: 모든 objective 펼침
-      setExpandedObjs(new Set(mapped.map(o => o.id)));
+      // ★ 기본: 모두 접힘
+      setExpandedObjs(new Set());
     } catch (e) {
       console.error('OKR 데이터 로드 실패:', e);
       setOrgObjectives([]);
