@@ -110,26 +110,32 @@ export default function Dashboard() {
 
   const managableOrgsKey = managableOrgs.join(',');
 
-  // ── 2-a. 초기 조직 선택 ──
+  // ── 2-a. 초기 조직 선택 + 재검증 ──
   useEffect(() => {
-    if (organizations.length > 0 && !permissionsLoading && !selectedOrgId) {
-      let defaultOrg;
-      if (managableOrgs.length > 0) {
-        // ★ CEO/관리자가 아니면 전사(level='전사') 건너뛰고 실제 담당 조직 선택
-        if (roleLevel >= ROLE_LEVELS.COMPANY_ADMIN) {
-          defaultOrg = organizations.find(o => o.id === managableOrgs[0]);
-        } else {
-          defaultOrg = organizations.find(o => 
-            managableOrgs.includes(o.id) && o.level !== '전사'
-          );
-        }
-      }
-      if (!defaultOrg) {
-        defaultOrg = organizations.find(o => !o.parentOrgId) || organizations[0];
-      }
-      if (defaultOrg) setSelectedOrgId(defaultOrg.id);
+    if (organizations.length === 0 || permissionsLoading) return;
+
+    // ★ 조직장(80 미만)인데 현재 선택이 전사이면 재선택
+    const currentSelected = organizations.find(o => o.id === selectedOrgId);
+    const needsReselect = !selectedOrgId 
+      || (roleLevel > 0 && roleLevel < ROLE_LEVELS.COMPANY_ADMIN && currentSelected?.level === '전사');
+
+    if (!needsReselect) return;
+
+    let defaultOrg;
+    if (roleLevel >= ROLE_LEVELS.COMPANY_ADMIN) {
+      // CEO/관리자: 전사 선택 OK
+      defaultOrg = organizations.find(o => !o.parentOrgId) || organizations[0];
+    } else if (managableOrgs.length > 0) {
+      // 조직장: 전사 제외하고 관리 가능한 첫 번째 조직
+      defaultOrg = organizations.find(o => managableOrgs.includes(o.id) && o.level !== '전사');
     }
-  }, [orgIds, managableOrgsKey, permissionsLoading]);
+    if (!defaultOrg) {
+      defaultOrg = organizations.find(o => o.level !== '전사') || organizations[0];
+    }
+    if (defaultOrg && defaultOrg.id !== selectedOrgId) {
+      setSelectedOrgId(defaultOrg.id);
+    }
+  }, [orgIds, managableOrgsKey, permissionsLoading, roleLevel]);
 
   // ── 2-b. 대시보드 통계 + 체크인 통계 + 최근 활동 로딩 ──
   useEffect(() => {
