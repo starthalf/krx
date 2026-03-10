@@ -73,8 +73,18 @@ export default function TopBar() {
   const navigate = useNavigate();
   const { profile, user, signOut } = useAuth();
   const company = useStore(state => state.company);
-  const currentPeriod = useStore(state => state.currentPeriod);
-  const setCurrentPeriod = useStore(state => state.setCurrentPeriod);
+  // ★ store에 currentPeriod/setCurrentPeriod가 없을 수 있으므로 안전하게 접근
+  const storeCurrentPeriod = useStore(state => (state as any).currentPeriod) as string | undefined;
+  const storeSetCurrentPeriod = useStore(state => (state as any).setCurrentPeriod) as ((v: string) => void) | undefined;
+  
+  // ★ 기간 선택 시 로컬 + store 동시 업데이트
+  const currentPeriod = storeCurrentPeriod || localPeriod;
+  const setCurrentPeriod = (code: string) => {
+    setLocalPeriod(code);
+    if (storeSetCurrentPeriod) {
+      try { storeSetCurrentPeriod(code); } catch {}
+    }
+  };
 
   // 기존 상태
   const [showDropdown, setShowDropdown] = useState(false);
