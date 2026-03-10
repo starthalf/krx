@@ -60,7 +60,7 @@ export default function Dashboard() {
   const [checkinStats, setCheckinStats] = useState<CheckinStatRow[]>([]);
   const [recentActivities, setRecentActivities] = useState<ActivityRow[]>([]);
   // ★ 승인 상태별 objectives 카운트 (approval_status 기반)
-  const [objApprovalCounts, setObjApprovalCounts] = useState<{ approved: number; draft: number }>({ approved: 0, draft: 0 });
+  const [objApprovalCounts, setObjApprovalCounts] = useState<{ approved: number; draft: number; bii: { Build: number; Innovate: number; Improve: number } }>({ approved: 0, draft: 0, bii: { Build: 0, Innovate: 0, Improve: 0 } });
 
   const orgIds = organizations.map(o => o.id).join(',');
   const permCheckVersionRef = useRef(0);
@@ -148,7 +148,6 @@ export default function Dashboard() {
   // ★ approval_status 기반 목표 카운트 (DB 직접 조회)
   const loadObjApprovalCounts = async (orgId: string) => {
     try {
-      // 승인 완료: finalized, approved, ceo_approved, manager_approved
       const { count: approvedCount } = await supabase
         .from('objectives')
         .select('*', { count: 'exact', head: true })
@@ -156,7 +155,6 @@ export default function Dashboard() {
         .eq('is_latest', true)
         .in('approval_status', ['finalized', 'approved', 'ceo_approved', 'manager_approved']);
 
-      // 수립 중: draft, ai_draft, submitted, under_review, revision_requested
       const { count: draftCount } = await supabase
         .from('objectives')
         .select('*', { count: 'exact', head: true })
@@ -164,9 +162,25 @@ export default function Dashboard() {
         .eq('is_latest', true)
         .in('approval_status', ['draft', 'ai_draft', 'submitted', 'under_review', 'revision_requested']);
 
+      // ★ 승인된 목표의 BII 분포 조회
+      const { data: approvedObjs } = await supabase
+        .from('objectives')
+        .select('bii_type')
+        .eq('org_id', orgId)
+        .eq('is_latest', true)
+        .in('approval_status', ['finalized', 'approved', 'ceo_approved', 'manager_approved']);
+
+      const bii = { Build: 0, Innovate: 0, Improve: 0 };
+      (approvedObjs || []).forEach((o: any) => {
+        if (o.bii_type === 'Build') bii.Build++;
+        else if (o.bii_type === 'Innovate') bii.Innovate++;
+        else if (o.bii_type === 'Improve') bii.Improve++;
+      });
+
       setObjApprovalCounts({
         approved: approvedCount || 0,
         draft: draftCount || 0,
+        bii,
       });
     } catch (e) {
       console.warn('loadObjApprovalCounts failed:', e);
@@ -228,12 +242,8 @@ export default function Dashboard() {
   const approvedObjectiveCount = objApprovalCounts.approved;
   const draftObjectiveCount = objApprovalCounts.draft;
 
-  // BII 통계는 store objectives 기반 (전체 목표의 BII 분포)
-  const biiStats = {
-    Build: currentObjectives.filter(o => o.biiType === 'Build').length,
-    Innovate: currentObjectives.filter(o => o.biiType === 'Innovate').length,
-    Improve: currentObjectives.filter(o => o.biiType === 'Improve').length,
-  };
+  // ★ BII 통계 — 승인된 목표만 (DB 조회 결과)
+  const biiStats = objApprovalCounts.bii;
 
   const gradeDistribution = {
     S: allKRs.filter(kr => calculateGrade(kr) === 'S').length,
@@ -485,7 +495,15 @@ export default function Dashboard() {
                 <span className="w-2 h-2 rounded-full bg-red-500 flex-shrink-0" />
                 <span className="truncate flex-1">{kr.name}</span>
               </div>
-            )) : <p className="text-sm text-slate-500">모든 KR이 정상 궤도입니다.</p>}
+            )) : (
+              <p className="text-sm text-slate-500">
+                {approvedObjectiveCount === 0 && draftObjectiveCount > 0
+                  ? 'OKR 승인 후 성과를 추적합니다.'
+                  : allKRs.length === 0
+                    ? 'KR이 없습니다.'
+                    : '모든 KR이 정상 궤도입니다.'}
+              </p>
+            )}
           </div>
         </div>
       </div>
@@ -510,12 +528,14 @@ export default function Dashboard() {
                       <span className={`px-2 py-0.5 rounded text-xs font-medium ${org.status.bg} ${org.status.color}`}>{org.status.label}</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className="text-sm font-bold text-slate-900">{org.score}점</span>
+                      <span className="text-sm font-bold text-slate-900">
+                        {org.status.label === '체크인 전' || org.status.label === '수립 전' ? '—' : `${org.score}점`}
+                      </span>
                       <span className="text-xs text-slate-500">({org.total}개 KR)</span>
                     </div>
                   </div>
                   <div className="w-full h-3 bg-slate-100 rounded-full overflow-hidden flex">
-                    {org.total > 0 && (<>
+                    {org.total > 0 && org.status.label !== '체크인 전' && org.status.label !== '수립 전' && (<>
                       <div className="h-full bg-blue-500" style={{ width: `${(org.S / org.total) * 100}%` }} />
                       <div className="h-full bg-green-500" style={{ width: `${(org.A / org.total) * 100}%` }} />
                       <div className="h-full bg-lime-500" style={{ width: `${(org.B / org.total) * 100}%` }} />
@@ -630,4 +650,4 @@ function formatRelativeTime(dateStr: string): string {
   if (diffHour < 24) return `${diffHour}시간 전`;
   if (diffDay < 7) return `${diffDay}일 전`;
   return date.toLocaleDateString('ko-KR');
-} 
+}
