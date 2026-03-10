@@ -191,10 +191,7 @@ export default function OKRStatus() {
     };
     flatten(orgTree);
 
-    // 조직장이면 전사 제외
-    if (roleLevel > 0 && roleLevel < ROLE_LEVELS.COMPANY_ADMIN) {
-      return result.filter(o => o.level !== '전사');
-    }
+    // ★ OKR 현황은 조회 전용 → 모든 조직 볼 수 있음 (전사 포함)
     return result;
   }, [orgTree, roleLevel]);
 
