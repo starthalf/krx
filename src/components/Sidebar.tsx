@@ -1,21 +1,9 @@
 // src/components/Sidebar.tsx
-// 기간 관리 메뉴를 제거하고 관리자 설정에 통합
-
 import { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { 
-  Home, 
-  Target, 
-  TrendingUp, 
-  CheckSquare, 
-  Building2, 
-  BookOpen,
-  Inbox,
-  Bell,
-  GitBranch,
-  Megaphone,
-  ClipboardList,
-  Settings
+  Home, Target, TrendingUp, CheckSquare, Building2, BookOpen,
+  Inbox, Bell, GitBranch, ClipboardList, Settings
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -24,9 +12,9 @@ interface NavItem {
   name: string;
   href?: string;
   icon: any;
-  requiredLevel?: number; // 이 레벨 이상만 표시
+  requiredLevel?: number;
   children?: { name: string; href: string; requiredLevel?: number }[];
-  divider?: boolean; // 구분선 표시
+  divider?: boolean;
 }
 
 export default function Sidebar() {
@@ -34,61 +22,45 @@ export default function Sidebar() {
   const { user } = useAuth();
   const [maxRoleLevel, setMaxRoleLevel] = useState<number>(0);
 
-  // 사용자의 최고 역할 레벨 조회
   useEffect(() => {
     if (!user?.id) return;
-
     const loadRole = async () => {
       const { data } = await supabase
         .from('user_roles')
         .select('roles!inner(level)')
         .eq('profile_id', user.id);
-
       if (data && data.length > 0) {
         const max = Math.max(...data.map((r: any) => r.roles?.level || 0));
         setMaxRoleLevel(max);
       }
     };
-
     loadRole();
   }, [user?.id]);
 
   const navigation: NavItem[] = [
     { name: '대시보드', href: '/', icon: Home },
     
-    // CEO/관리자 전용 (level >= 90)
+    // CEO/관리자 전용
     { name: '전사 OKR 수립', href: '/ceo-okr-setup', icon: ClipboardList, requiredLevel: 90 },
     { name: '조직 OKR 수립', href: '/wizard', icon: Target },
-    { name: '수립 현황', href: '/okr-setup', icon: Megaphone, requiredLevel: 90 },
-    { name: 'OKR Map', href: '/okr-map', icon: GitBranch },
+    { name: '수립 현황', href: '/okr-setup', icon: ClipboardList, requiredLevel: 90 },
     
-    {
-      name: 'OKR 현황',
-      icon: TrendingUp,
-      children: [
-        { name: '전사 OKR', href: '/okr/company' },
-        { name: '본부별 OKR', href: '/okr/division' },
-        { name: '팀별 OKR', href: '/okr/team' }
-      ]
-    },
+    // ★ OKR 현황 — 단일 메뉴로 통합 (기존 전사/본부/팀 3개 → 1개)
+    { name: 'OKR 현황', href: '/okr', icon: TrendingUp },
+    { name: 'OKR Map', href: '/okr-map', icon: GitBranch },
     
     { name: '체크인', href: '/checkin', icon: CheckSquare },
     { name: '승인 대기함', href: '/approval-inbox', icon: Inbox },
     { name: '알림', href: '/notifications', icon: Bell },
     
-    // 구분선
     { name: 'divider1', icon: null, divider: true },
-    
-    // 기간 관리 섹션 제거됨 - 관리자 설정(/admin?tab=periods)으로 통합
     
     { name: '조직 관리', href: '/organization', icon: Building2 },
     { name: 'KR지표 DB', href: '/kpi-pool', icon: BookOpen },
     
-    // 관리자 설정 (기간 관리, 수립 사이클 등 모두 포함)
     { name: '관리자 설정', href: '/admin', icon: Settings, requiredLevel: 90 },
   ];
 
-  // 역할 레벨에 따른 메뉴 필터링
   const filteredNavigation = navigation.filter(item => {
     if (item.divider) return true;
     if (!item.requiredLevel) return true;
@@ -97,16 +69,12 @@ export default function Sidebar() {
 
   const isActive = (href: string) => {
     if (href === '/') return location.pathname === '/';
-    // 쿼리 파라미터 포함 체크
-    if (href.includes('?')) {
-      return location.pathname + location.search === href;
-    }
+    if (href.includes('?')) return location.pathname + location.search === href;
     return location.pathname.startsWith(href);
   };
 
   return (
     <div className="w-60 bg-white border-r border-slate-200 h-screen flex flex-col">
-      {/* 로고 */}
       <div className="p-6 border-b border-slate-200">
         <div className="flex items-center gap-2">
           <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-violet-600 rounded-lg flex items-center justify-center">
@@ -116,22 +84,17 @@ export default function Sidebar() {
         </div>
       </div>
 
-      {/* 네비게이션 */}
       <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
         {filteredNavigation.map((item, idx) => {
-          // 구분선
           if (item.divider) {
             return <div key={`divider-${idx}`} className="my-3 border-t border-slate-200" />;
           }
           
-          // 자식 메뉴가 있는 경우
           if (item.children) {
-            // 자식 중 접근 가능한 것만 필터링
             const visibleChildren = item.children.filter(child => {
               if (!child.requiredLevel) return true;
               return maxRoleLevel >= child.requiredLevel;
             });
-            
             if (visibleChildren.length === 0) return null;
             
             return (
@@ -159,7 +122,6 @@ export default function Sidebar() {
             );
           }
 
-          // 일반 메뉴
           return (
             <Link
               key={item.name}
@@ -177,11 +139,8 @@ export default function Sidebar() {
         })}
       </nav>
 
-      {/* 하단 정보 */}
       <div className="p-4 border-t border-slate-200">
-        <div className="text-xs text-slate-400 text-center">
-          OKRio v1.2.0
-        </div>
+        <div className="text-xs text-slate-400 text-center">OKRio v1.3.0</div>
       </div>
     </div>
   );
