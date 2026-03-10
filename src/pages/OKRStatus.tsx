@@ -208,7 +208,7 @@ export default function OKRStatus() {
         .select('id, name, bii_type, status, approval_status, org_id')
         .eq('org_id', orgId)
         .eq('is_latest', true)
-        .order('sort_order');
+        .order('created_at');
 
       if (!objs || objs.length === 0) {
         setOrgObjectives([]);
@@ -220,11 +220,14 @@ export default function OKRStatus() {
 
       // 2. 해당 objectives의 KRs
       const objIds = objs.map(o => o.id);
-      const { data: krsData } = await supabase
+      console.log('🔍 OKR현황: objective IDs =', objIds);
+      const { data: krsData, error: krErr } = await supabase
         .from('key_results')
         .select('id, name, unit, target_value, current_value, weight, objective_id, grade_criteria')
-        .in('objective_id', objIds)
-        .order('sort_order');
+        .in('objective_id', objIds);
+
+      console.log('🔍 OKR현황: KR 결과 =', krsData?.length, '건, 에러:', krErr);
+      if (krErr) console.warn('KR 조회 에러:', krErr);
 
       // 3. 매핑
       const mapped: ObjWithKRs[] = objs.map(obj => {
