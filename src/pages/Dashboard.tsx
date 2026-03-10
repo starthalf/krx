@@ -286,14 +286,15 @@ export default function Dashboard() {
   // ★ FIX 3: NaN 방어 + 범위 제한 + 실적 0일 때 "체크인 전" 표시
   const orgProgressList = useMemo(() => {
     return (dashboardStats || [])
-      .filter((org: any) => scopeOrgIds.has(org.org_id || org.id))
+      .filter((org: any) => scopeOrgIds.has(org.org_id))
       .map((org: any) => {
         const totalCount = Number(org.kr_count) || 0;
-        const s = Number(org.grade_s) || 0;
-        const a = Number(org.grade_a) || 0;
-        const b = Number(org.grade_b) || 0;
-        const c = Number(org.grade_c) || 0;
-        const d = Number(org.grade_d) || 0;
+        // ★ RPC 컬럼명: grade_s_count, grade_a_count, ... (grade_s가 아님)
+        const s = Number(org.grade_s_count ?? org.grade_s) || 0;
+        const a = Number(org.grade_a_count ?? org.grade_a) || 0;
+        const b = Number(org.grade_b_count ?? org.grade_b) || 0;
+        const c = Number(org.grade_c_count ?? org.grade_c) || 0;
+        const d = Number(org.grade_d_count ?? org.grade_d) || 0;
 
         const weightedScore = totalCount === 0 ? 0 : Math.round(
           ((s * 120) + (a * 110) + (b * 100) + (c * 80) + (d * 50)) / totalCount
@@ -306,7 +307,6 @@ export default function Dashboard() {
         if (totalCount === 0) {
           status = { label: '수립 전', color: 'text-slate-400', bg: 'bg-slate-100' };
         } else if (allGradeD) {
-          // 실적이 하나도 입력 안 된 상태
           status = { label: '체크인 전', color: 'text-slate-500', bg: 'bg-slate-100' };
         } else if (weightedScore >= 110) {
           status = { label: '탁월', color: 'text-blue-600', bg: 'bg-blue-100' };
@@ -319,7 +319,7 @@ export default function Dashboard() {
         }
 
         return {
-          name: org.name || org.org_name || '(이름 없음)',
+          name: org.org_name || org.name || '(이름 없음)',
           score: weightedScore, status,
           S: s, A: a, B: b, C: c, D: d, total: totalCount
         };
