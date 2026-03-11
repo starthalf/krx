@@ -106,7 +106,7 @@ export function useOKRExport() {
         .from('objectives')
         .select('id, org_id, name, bii_type, approval_status, sort_order')
         .eq('period', periodCode)
-        .in('approval_status', ['finalized', 'approved', 'ceo_approved', 'manager_approved', 'submitted', 'draft', 'ai_draft'])
+        // approval_status 없는 초안(null)도 포함
         .order('sort_order');
 
       if (orgIds.length > 0) {
