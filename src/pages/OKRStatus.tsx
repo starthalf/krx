@@ -6,11 +6,13 @@ import { useStore } from '../store/useStore';
 import { getBIIColor, calculateGrade } from '../utils/helpers';
 import {
   Target, TrendingUp, ChevronDown, ChevronRight, ChevronUp,
-  Lock, Building2, Layers, BarChart3, AlertCircle, CheckCircle2
+  Lock, Building2, Layers, BarChart3, AlertCircle, CheckCircle2,
+  Download
 } from 'lucide-react';
 import { getMyRoleLevel, checkCanManageOrg, ROLE_LEVELS } from '../lib/permissions';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
+import OKRExportModal from '../components/OKRExportModal';
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // 타입
@@ -96,6 +98,9 @@ export default function OKRStatus() {
   // UI 상태
   const [expandedObjs, setExpandedObjs] = useState<Set<string>>(new Set());
   const [showChildren, setShowChildren] = useState(true);
+
+  // ★ 다운로드 모달
+  const [exportOpen, setExportOpen] = useState(false);
 
   // ── 권한 체크 ──
   useEffect(() => {
@@ -404,18 +409,28 @@ export default function OKRStatus() {
           )}
         </div>
 
-        {/* 조직 드롭다운 */}
-        <select
-          value={selectedOrgId}
-          onChange={(e) => setSelectedOrgId(e.target.value)}
-          className="bg-white border border-slate-300 px-4 py-2 rounded-lg text-sm font-medium text-slate-700 shadow-sm min-w-[200px]"
-        >
-          {flatOrgList.map(o => (
-            <option key={o.id} value={o.id}>
-              {'　'.repeat(o.depth)}{o.name} ({o.level})
-            </option>
-          ))}
-        </select>
+        {/* 우측: 다운로드 버튼 + 조직 드롭다운 */}
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setExportOpen(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-lg transition-colors shadow-sm"
+          >
+            <Download className="w-4 h-4" />
+            Excel 내보내기
+          </button>
+
+          <select
+            value={selectedOrgId}
+            onChange={(e) => setSelectedOrgId(e.target.value)}
+            className="bg-white border border-slate-300 px-4 py-2 rounded-lg text-sm font-medium text-slate-700 shadow-sm min-w-[200px]"
+          >
+            {flatOrgList.map(o => (
+              <option key={o.id} value={o.id}>
+                {'　'.repeat(o.depth)}{o.name} ({o.level})
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
       {/* 요약 카드 */}
@@ -623,6 +638,12 @@ export default function OKRStatus() {
           </div>
         </div>
       )}
+
+      {/* ★ Excel 다운로드 모달 */}
+      <OKRExportModal
+        isOpen={exportOpen}
+        onClose={() => setExportOpen(false)}
+      />
     </div>
   );
 }
