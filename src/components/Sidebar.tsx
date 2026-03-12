@@ -51,7 +51,9 @@ export default function Sidebar() {
     // ★ OKR 현황 — 단일 메뉴로 통합 (기존 전사/본부/팀 3개 → 1개)
     { name: 'OKR 현황', href: '/okr', icon: TrendingUp },
     { name: 'OKR Map', href: '/okr-map', icon: GitBranch },
-    
+
+    { name: 'divider2', icon: null, divider: true },
+
     { name: '체크인', href: '/checkin', icon: CheckSquare },
     
     { name: 'divider1', icon: null, divider: true },
