@@ -637,7 +637,7 @@ export default function Dashboard() {
               })}
             </div>
           </div>
-        ) : (
+        ) : ( 
           <div className="bg-slate-50 rounded-xl border border-slate-200 p-6">
             <div className="text-center py-8">
               <Activity className="w-12 h-12 text-slate-400 mx-auto mb-3" />
