@@ -434,7 +434,7 @@ export default function Checkin() {
                         {/* 실적 */}
                         <div className="flex items-center gap-2">
                           <input type="number" value={editValue} onChange={e => setEditValue(e.target.value)}
-                            placeholder={`${selectedQuarter} 실적 (목표: ${formatNumber(qT)})`}
+                            placeholder={`${selectedQuarter} 실적 입력 (분기 목표: ${formatNumber(qT)}, 연간: ${formatNumber(kr.targetValue)})`}
                             className="flex-1 border border-slate-300 rounded-xl px-3 py-2.5 text-sm font-bold focus:ring-2 focus:ring-blue-500 outline-none"
                             autoFocus />
                           <span className="text-xs text-slate-400 shrink-0">{kr.unit}</span>
