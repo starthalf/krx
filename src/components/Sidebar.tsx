@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { 
   Home, Target, TrendingUp, CheckSquare, Building2, BookOpen,
-  Inbox, GitBranch, ClipboardList, Settings
+  Inbox, Bell, GitBranch, ClipboardList, Settings
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -44,17 +44,14 @@ export default function Sidebar() {
     { name: '전사 OKR 수립', href: '/ceo-okr-setup', icon: ClipboardList, requiredLevel: 90 },
     { name: '조직 OKR 수립', href: '/wizard', icon: Target },
     { name: '수립 현황', href: '/okr-setup', icon: ClipboardList, requiredLevel: 90 },
-    { name: '승인 대기함', href: '/approval-inbox', icon: Inbox },
-    
-    { name: 'divider0', icon: null, divider: true },
     
     // ★ OKR 현황 — 단일 메뉴로 통합 (기존 전사/본부/팀 3개 → 1개)
     { name: 'OKR 현황', href: '/okr', icon: TrendingUp },
     { name: 'OKR Map', href: '/okr-map', icon: GitBranch },
-
-    { name: 'divider2', icon: null, divider: true },
-
+    
     { name: '체크인', href: '/checkin', icon: CheckSquare },
+    { name: '승인 대기함', href: '/approval-inbox', icon: Inbox },
+    { name: '알림', href: '/notifications', icon: Bell },
     
     { name: 'divider1', icon: null, divider: true },
     
@@ -78,14 +75,14 @@ export default function Sidebar() {
 
   return (
     <div className="w-60 bg-white border-r border-slate-200 h-screen flex flex-col">
-      <div className="p-6 border-b border-slate-200">
+      <Link to="/" className="block p-6 border-b border-slate-200 hover:bg-slate-50 transition-colors">
         <div className="flex items-center gap-2">
           <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-violet-600 rounded-lg flex items-center justify-center">
             <Target className="w-5 h-5 text-white" />
           </div>
           <span className="text-xl font-bold text-slate-900">OKRio</span>
         </div>
-      </div>
+      </Link>
 
       <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
         {filteredNavigation.map((item, idx) => {
