@@ -86,10 +86,16 @@ export default function Checkin() {
         const level = await getMyRoleLevel();
         setRoleLevel(level);
 
-        const managable: string[] = [];
-        for (const org of organizations) {
-          const can = await checkCanManageOrg(org.id);
-          if (can) managable.push(org.id);
+        // ★ CEO/관리자(80+)는 전체 조직 관리 가능 → RPC 생략
+        let managable: string[];
+        if (level >= ROLE_LEVELS.COMPANY_ADMIN) {
+          managable = organizations.map(o => o.id);
+        } else {
+          // ★ Promise.all 병렬 처리
+          const results = await Promise.all(
+            organizations.map(async (org) => ({ id: org.id, can: await checkCanManageOrg(org.id) }))
+          );
+          managable = results.filter(r => r.can).map(r => r.id);
         }
         setManagableOrgs(managable);
       } catch (e) {
@@ -104,12 +110,26 @@ export default function Checkin() {
 
   // ── 2. 초기 조직 선택 ──
   useEffect(() => {
-    if (permLoading || organizations.length === 0 || selectedOrgId) return;
-    // 관리 가능한 첫 번째 조직, 없으면 첫 조직
-    const firstManagable = organizations.find(o => managableOrgs.includes(o.id));
-    const fallback = organizations.find(o => o.level === '팀') || organizations[0];
-    setSelectedOrgId(firstManagable?.id || fallback?.id || '');
-  }, [permLoading, managableOrgs.join(',')]);
+    if (permLoading || organizations.length === 0 || roleLevel === 0) return;
+
+    // ★ 조직장인데 현재 전사가 선택되어 있으면 재선택
+    const current = organizations.find(o => o.id === selectedOrgId);
+    const needsReselect = !selectedOrgId
+      || (roleLevel < ROLE_LEVELS.COMPANY_ADMIN && current?.level === '전사');
+
+    if (!needsReselect) return;
+
+    let defaultOrg;
+    if (roleLevel >= ROLE_LEVELS.COMPANY_ADMIN) {
+      defaultOrg = organizations.find(o => managableOrgs.includes(o.id)) || organizations[0];
+    } else if (managableOrgs.length > 0) {
+      defaultOrg = organizations.find(o => managableOrgs.includes(o.id) && o.level !== '전사');
+    }
+    if (!defaultOrg) {
+      defaultOrg = organizations.find(o => o.level !== '전사') || organizations[0];
+    }
+    if (defaultOrg) setSelectedOrgId(defaultOrg.id);
+  }, [permLoading, managableOrgs.join(','), roleLevel]);
 
   // ── 3. 선택 조직 변경 시 권한 + 데이터 로딩 ──
   useEffect(() => {
@@ -277,7 +297,7 @@ export default function Checkin() {
   // 선택 가능 조직
   const selectableOrgs = roleLevel >= ROLE_LEVELS.COMPANY_ADMIN
     ? organizations
-    : organizations.filter(o => managableOrgs.includes(o.id) || managableOrgs.length === 0);
+    : organizations.filter(o => managableOrgs.includes(o.id) && o.level !== '전사');
 
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   // 렌더링
