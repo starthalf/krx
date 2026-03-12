@@ -45,6 +45,8 @@ export default function Sidebar() {
     { name: '조직 OKR 수립', href: '/wizard', icon: Target },
     { name: '수립 현황', href: '/okr-setup', icon: ClipboardList, requiredLevel: 90 },
     
+    { name: 'divider0', icon: null, divider: true },
+    
     // ★ OKR 현황 — 단일 메뉴로 통합 (기존 전사/본부/팀 3개 → 1개)
     { name: 'OKR 현황', href: '/okr', icon: TrendingUp },
     { name: 'OKR Map', href: '/okr-map', icon: GitBranch },
