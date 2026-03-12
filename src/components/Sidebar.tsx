@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { 
   Home, Target, TrendingUp, CheckSquare, Building2, BookOpen,
-  Inbox, Bell, GitBranch, ClipboardList, Settings
+  Inbox, GitBranch, ClipboardList, Settings
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -44,6 +44,7 @@ export default function Sidebar() {
     { name: '전사 OKR 수립', href: '/ceo-okr-setup', icon: ClipboardList, requiredLevel: 90 },
     { name: '조직 OKR 수립', href: '/wizard', icon: Target },
     { name: '수립 현황', href: '/okr-setup', icon: ClipboardList, requiredLevel: 90 },
+    { name: '승인 대기함', href: '/approval-inbox', icon: Inbox },
     
     { name: 'divider0', icon: null, divider: true },
     
@@ -52,8 +53,6 @@ export default function Sidebar() {
     { name: 'OKR Map', href: '/okr-map', icon: GitBranch },
     
     { name: '체크인', href: '/checkin', icon: CheckSquare },
-    { name: '승인 대기함', href: '/approval-inbox', icon: Inbox },
-    { name: '알림', href: '/notifications', icon: Bell },
     
     { name: 'divider1', icon: null, divider: true },
     
