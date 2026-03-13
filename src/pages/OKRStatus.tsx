@@ -122,11 +122,11 @@ export default function OKRStatus() {
   }, [organizations.length]);
 
   // ── 초기 조직 선택 ──
+  const orgParam = searchParams.get('org');
   useEffect(() => {
     if (organizations.length === 0 || permissionsLoading || roleLevel === 0) return;
 
-    // ★ URL 쿼리 파라미터 ?org=orgId 우선
-    const orgParam = searchParams.get('org');
+    // ★ URL 쿼리 파라미터 ?org=orgId → 무조건 해당 조직 선택
     if (orgParam && organizations.find(o => o.id === orgParam)) {
       if (selectedOrgId !== orgParam) setSelectedOrgId(orgParam);
       return;
@@ -145,7 +145,7 @@ export default function OKRStatus() {
     }
     if (!defaultOrg) defaultOrg = organizations.find(o => o.level !== '전사') || organizations[0];
     if (defaultOrg) setSelectedOrgId(defaultOrg.id);
-  }, [organizations.length, permissionsLoading, roleLevel, managableOrgs.join(',')]);
+  }, [organizations.length, permissionsLoading, roleLevel, managableOrgs.join(','), orgParam]);
 
   // ── 조직 트리 구성 (parentOrgId 기반, 하드코딩 없음) ──
   const orgTree = useMemo(() => {
@@ -634,4 +634,4 @@ export default function OKRStatus() {
       )}
     </div>
   );
-} 
+}
