@@ -123,12 +123,15 @@ export default function OKRStatus() {
 
   // ── 초기 조직 선택 ──
   const orgParam = searchParams.get('org');
+  console.log('🔍 OKRStatus 렌더: orgParam=', orgParam, 'selectedOrgId=', selectedOrgId, 'orgs=', organizations.length, 'permLoading=', permissionsLoading, 'roleLevel=', roleLevel);
 
   // ★ URL ?org= 파라미터가 있으면 무조건 해당 조직으로 (별도 effect)
   useEffect(() => {
+    console.log('🔍 orgParam effect: orgParam=', orgParam, 'orgs=', organizations.length, 'selectedOrgId=', selectedOrgId);
     if (!orgParam || organizations.length === 0) return;
     const target = organizations.find(o => o.id === orgParam);
-    if (target && selectedOrgId !== orgParam) {
+    console.log('🔍 orgParam target found?', !!target, 'will set?', selectedOrgId !== orgParam);
+    if (target) {
       setSelectedOrgId(orgParam);
     }
   }, [orgParam, organizations.length]);
