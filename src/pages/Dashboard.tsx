@@ -104,39 +104,32 @@ export default function Dashboard() {
       const cid = organizations[0]?.companyId;
       if (!cid) return;
 
-      // ★ 자사 조직 ID 목록으로 필터링
-      const myOrgIds = organizations.map(o => o.id);
-      const { data } = await supabase
+      const orgMap = new Map(organizations.map(o => [o.id, o.name]));
+      const orgSet = new Set(organizations.map(o => o.id));
+
+      // 전체 KR 가져온 뒤 클라이언트에서 자사 필터 (URL 길이 제한 방지)
+      const { data, error } = await supabase
         .from('key_results')
-        .select('id, name, org_id, progress_pct, target_value, current_value, unit, grade_criteria, objective_id')
+        .select('id, name, org_id, progress_pct, target_value, current_value, unit')
         .eq('is_latest', true)
-        .in('org_id', myOrgIds)
+        .gt('current_value', 0)
         .limit(500);
 
+      if (error) { console.warn('loadAllCompanyKRs:', error.message); return; }
       if (!data) return;
 
-      const orgMap = new Map(organizations.map(o => [o.id, o.name]));
       const ranked: RankedKR[] = data
-        .filter(kr => kr.current_value > 0 && orgMap.has(kr.org_id)) // 실적 있고 자사 조직만
+        .filter(kr => orgSet.has(kr.org_id))
         .map(kr => ({
-          id: kr.id,
-          name: kr.name,
-          orgId: kr.org_id,
+          id: kr.id, name: kr.name, orgId: kr.org_id,
           orgName: orgMap.get(kr.org_id) || '',
-          progressPct: kr.progress_pct || 0,
-          grade: '',
-          targetValue: kr.target_value,
-          currentValue: kr.current_value,
-          unit: kr.unit || '%',
+          progressPct: kr.progress_pct || 0, grade: '',
+          targetValue: kr.target_value, currentValue: kr.current_value, unit: kr.unit || '%',
         }));
 
       ranked.forEach(kr => {
         const pct = kr.targetValue > 0 ? (kr.currentValue / kr.targetValue) * 100 : 0;
-        if (pct >= 120) kr.grade = 'S';
-        else if (pct >= 110) kr.grade = 'A';
-        else if (pct >= 100) kr.grade = 'B';
-        else if (pct >= 90) kr.grade = 'C';
-        else kr.grade = 'D';
+        kr.grade = pct >= 120 ? 'S' : pct >= 110 ? 'A' : pct >= 100 ? 'B' : pct >= 90 ? 'C' : 'D';
       });
 
       setAllCompanyKRs(ranked);
@@ -229,7 +222,11 @@ export default function Dashboard() {
 
   // Top/Bottom KR
   const topKRs = useMemo(() => [...allCompanyKRs].sort((a,b) => b.progressPct - a.progressPct).slice(0, 5), [allCompanyKRs]);
-  const bottomKRs = useMemo(() => [...allCompanyKRs].sort((a,b) => a.progressPct - b.progressPct).slice(0, 5), [allCompanyKRs]);
+  const bottomKRs = useMemo(() => {
+    const withValue = allCompanyKRs.filter(kr => kr.currentValue > 0);
+    const source = withValue.length >= 5 ? withValue : allCompanyKRs;
+    return [...source].sort((a,b) => a.progressPct - b.progressPct).slice(0, 5);
+  }, [allCompanyKRs]);
 
   // 조직 상태 분포 (CEO)
   const statusDist = useMemo(() => {
