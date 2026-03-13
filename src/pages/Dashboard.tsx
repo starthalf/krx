@@ -433,7 +433,7 @@ export default function Dashboard() {
           {topKRs.length > 0 ? (
             <div className="space-y-2.5">
               {topKRs.map((kr, i) => (
-                <div key={kr.id} onClick={() => { console.log('🔍 Dashboard → OKR 이동: orgId=', kr.orgId, 'orgName=', kr.orgName); navigate(`/okr?org=${kr.orgId}`); }} className="flex items-center gap-3 cursor-pointer hover:bg-slate-50 rounded-lg px-2 py-1.5 -mx-2 transition-colors">
+                <div key={kr.id} onClick={() => navigate('/okr', { state: { orgId: kr.orgId } })} className="flex items-center gap-3 cursor-pointer hover:bg-slate-50 rounded-lg px-2 py-1.5 -mx-2 transition-colors">
                   <span className="text-[11px] font-bold text-slate-400 w-4 shrink-0">{i+1}</span>
                   <div className="flex-1 min-w-0">
                     <div className="text-[13px] font-medium text-slate-900 truncate">{kr.name}</div>
@@ -455,7 +455,7 @@ export default function Dashboard() {
           {bottomKRs.length > 0 ? (
             <div className="space-y-2.5">
               {bottomKRs.map((kr, i) => (
-                <div key={kr.id} onClick={() => { console.log('🔍 Dashboard → OKR 이동(bottom): orgId=', kr.orgId, 'orgName=', kr.orgName); navigate(`/okr?org=${kr.orgId}`); }} className="flex items-center gap-3 cursor-pointer hover:bg-slate-50 rounded-lg px-2 py-1.5 -mx-2 transition-colors">
+                <div key={kr.id} onClick={() => navigate('/okr', { state: { orgId: kr.orgId } })} className="flex items-center gap-3 cursor-pointer hover:bg-slate-50 rounded-lg px-2 py-1.5 -mx-2 transition-colors">
                   <span className="text-[11px] font-bold text-slate-400 w-4 shrink-0">{i+1}</span>
                   <div className="flex-1 min-w-0">
                     <div className="text-[13px] font-medium text-slate-900 truncate">{kr.name}</div>
