@@ -103,19 +103,21 @@ export default function Dashboard() {
     try {
       const cid = organizations[0]?.companyId;
       if (!cid) return;
-      // 승인된 objectives의 KR만 가져옴
+
+      // ★ 자사 조직 ID 목록으로 필터링
+      const myOrgIds = organizations.map(o => o.id);
       const { data } = await supabase
         .from('key_results')
         .select('id, name, org_id, progress_pct, target_value, current_value, unit, grade_criteria, objective_id')
         .eq('is_latest', true)
-        .in('status', ['active', 'agreed', 'draft'])
+        .in('org_id', myOrgIds)
         .limit(500);
 
       if (!data) return;
 
       const orgMap = new Map(organizations.map(o => [o.id, o.name]));
       const ranked: RankedKR[] = data
-        .filter(kr => kr.current_value > 0) // 실적 입력된 것만
+        .filter(kr => kr.current_value > 0 && orgMap.has(kr.org_id)) // 실적 있고 자사 조직만
         .map(kr => ({
           id: kr.id,
           name: kr.name,
@@ -128,7 +130,6 @@ export default function Dashboard() {
           unit: kr.unit || '%',
         }));
 
-      // grade 계산
       ranked.forEach(kr => {
         const pct = kr.targetValue > 0 ? (kr.currentValue / kr.targetValue) * 100 : 0;
         if (pct >= 120) kr.grade = 'S';
