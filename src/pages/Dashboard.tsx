@@ -1,5 +1,6 @@
 // src/pages/Dashboard.tsx — CEO 대시보드 고도화 + 조직장 뷰 유지
 import { useEffect, useState, useRef, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useStore } from '../store/useStore';
 import { getBIIColor, calculateGrade, getGradeColor, formatNumber } from '../utils/helpers';
 import { supabase } from '../lib/supabase';
@@ -21,9 +22,10 @@ interface ActivityRow { activity_type: string; actor_name: string; description: 
 interface Insight { type: 'warning' | 'alert' | 'success'; icon: typeof AlertCircle; text: string; }
 
 // Top/Bottom KR용
-interface RankedKR { id: string; name: string; orgName: string; progressPct: number; grade: string; targetValue: number; currentValue: number; unit: string; }
+interface RankedKR { id: string; name: string; orgId: string; orgName: string; progressPct: number; grade: string; targetValue: number; currentValue: number; unit: string; }
 
 export default function Dashboard() {
+  const navigate = useNavigate();
   const { organizations, objectives, krs, dashboardStats, fetchObjectives, fetchKRs, fetchDashboardStats, loading } = useStore();
   const [selectedOrgId, setSelectedOrgId] = useState<string>('');
   const [roleLevel, setRoleLevel] = useState<number>(0);
@@ -117,9 +119,10 @@ export default function Dashboard() {
         .map(kr => ({
           id: kr.id,
           name: kr.name,
+          orgId: kr.org_id,
           orgName: orgMap.get(kr.org_id) || '',
           progressPct: kr.progress_pct || 0,
-          grade: '', // 아래서 계산
+          grade: '',
           targetValue: kr.target_value,
           currentValue: kr.current_value,
           unit: kr.unit || '%',
@@ -430,11 +433,11 @@ export default function Dashboard() {
           {topKRs.length > 0 ? (
             <div className="space-y-2.5">
               {topKRs.map((kr, i) => (
-                <div key={kr.id} className="flex items-center gap-3">
+                <div key={kr.id} onClick={() => navigate(`/okr?org=${kr.orgId}`)} className="flex items-center gap-3 cursor-pointer hover:bg-slate-50 rounded-lg px-2 py-1.5 -mx-2 transition-colors">
                   <span className="text-[11px] font-bold text-slate-400 w-4 shrink-0">{i+1}</span>
                   <div className="flex-1 min-w-0">
                     <div className="text-[13px] font-medium text-slate-900 truncate">{kr.name}</div>
-                    <div className="text-[10px] text-slate-400">{kr.orgName}</div>
+                    <div className="text-[10px] text-blue-500">{kr.orgName}</div>
                   </div>
                   <div className="text-right shrink-0">
                     <span className={`text-sm font-bold ${kr.progressPct >= 100 ? 'text-emerald-600' : 'text-blue-600'}`}>{kr.progressPct}%</span>
@@ -452,11 +455,11 @@ export default function Dashboard() {
           {bottomKRs.length > 0 ? (
             <div className="space-y-2.5">
               {bottomKRs.map((kr, i) => (
-                <div key={kr.id} className="flex items-center gap-3">
+                <div key={kr.id} onClick={() => navigate(`/okr?org=${kr.orgId}`)} className="flex items-center gap-3 cursor-pointer hover:bg-slate-50 rounded-lg px-2 py-1.5 -mx-2 transition-colors">
                   <span className="text-[11px] font-bold text-slate-400 w-4 shrink-0">{i+1}</span>
                   <div className="flex-1 min-w-0">
                     <div className="text-[13px] font-medium text-slate-900 truncate">{kr.name}</div>
-                    <div className="text-[10px] text-slate-400">{kr.orgName}</div>
+                    <div className="text-[10px] text-blue-500">{kr.orgName}</div>
                   </div>
                   <div className="text-right shrink-0">
                     <span className={`text-sm font-bold ${kr.progressPct < 50 ? 'text-red-600' : 'text-amber-600'}`}>{kr.progressPct}%</span>
