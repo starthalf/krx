@@ -123,14 +123,20 @@ export default function OKRStatus() {
 
   // ── 초기 조직 선택 ──
   const orgParam = searchParams.get('org');
+
+  // ★ URL ?org= 파라미터가 있으면 무조건 해당 조직으로 (별도 effect)
+  useEffect(() => {
+    if (!orgParam || organizations.length === 0) return;
+    const target = organizations.find(o => o.id === orgParam);
+    if (target && selectedOrgId !== orgParam) {
+      setSelectedOrgId(orgParam);
+    }
+  }, [orgParam, organizations.length]);
+
+  // 기본 조직 선택 (URL 파라미터 없을 때만)
   useEffect(() => {
     if (organizations.length === 0 || permissionsLoading || roleLevel === 0) return;
-
-    // ★ URL 쿼리 파라미터 ?org=orgId → 무조건 해당 조직 선택
-    if (orgParam && organizations.find(o => o.id === orgParam)) {
-      if (selectedOrgId !== orgParam) setSelectedOrgId(orgParam);
-      return;
-    }
+    if (orgParam) return; // URL 파라미터가 있으면 위 effect가 처리
 
     if (selectedOrgId) {
       const current = organizations.find(o => o.id === selectedOrgId);
