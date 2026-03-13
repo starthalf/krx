@@ -1,7 +1,7 @@
 // src/pages/OKRStatus.tsx
 // OKR 현황 — 단일 페이지, 드롭다운 조직 선택, 동적 조직 계층 반영
 import { useEffect, useState, useMemo, useCallback } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { useStore } from '../store/useStore';
 import { getBIIColor, calculateGrade } from '../utils/helpers';
 import {
@@ -81,6 +81,7 @@ function progressTextColor(pct: number) {
 export default function OKRStatus() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const location = useLocation();
   const { profile } = useAuth();
   const { organizations } = useStore();
 
@@ -122,15 +123,15 @@ export default function OKRStatus() {
   }, [organizations.length]);
 
   // ── 초기 조직 선택 ──
-  const orgParam = searchParams.get('org');
-  console.log('🔍 OKRStatus 렌더: orgParam=', orgParam, 'selectedOrgId=', selectedOrgId, 'orgs=', organizations.length, 'permLoading=', permissionsLoading, 'roleLevel=', roleLevel);
+  // URL ?org= 또는 navigate state에서 orgId 가져오기
+  const orgParamFromQuery = searchParams.get('org');
+  const orgParamFromState = (location.state as any)?.orgId as string | undefined;
+  const orgParam = orgParamFromQuery || orgParamFromState || null;
 
-  // ★ URL ?org= 파라미터가 있으면 무조건 해당 조직으로 (별도 effect)
+  // ★ orgParam이 있으면 무조건 해당 조직으로 (별도 effect)
   useEffect(() => {
-    console.log('🔍 orgParam effect: orgParam=', orgParam, 'orgs=', organizations.length, 'selectedOrgId=', selectedOrgId);
     if (!orgParam || organizations.length === 0) return;
     const target = organizations.find(o => o.id === orgParam);
-    console.log('🔍 orgParam target found?', !!target, 'will set?', selectedOrgId !== orgParam);
     if (target) {
       setSelectedOrgId(orgParam);
     }
